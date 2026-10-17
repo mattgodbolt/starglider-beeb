@@ -42,6 +42,21 @@ make venv       # .venv (uv sync): SkoolKit, Capstone, Pillow, NumPy
 `tools/adf.py IMAGE [OUTDIR]` an Amiga one.
 Run Python that reads the originals with `-I`, from outside `original/`.
 
+The originals run headless, each with its own driver (the research file
+says how):
+
+- **The ST**: `tools/st_hatari.py SCRIPT --disk "original/st/Starglider
+  (1987)(Rainbird).stx"` on Hatari built in `../hatari` with EmuTOS
+  (`../hatari/emutos`). Use the `.stx`: the clean `.st` halts at the
+  protection. `tools/st_disasm.py` with `tools/st_star.ctl` is the
+  disassembly; `st_shapes.py`, `st_tra.py` and `st_samples.py` pull out
+  the shapes, pictures and samples.
+- **The Spectrum 128K**: `tools/zx.py`, nm's harness on SkoolKit.
+- **The CPC**: `tools/cpc_emu.py` on the Caprice32 in `../caprice32`.
+- **The C64**: `tools/c64_unfreeze.py` and `tools/c64_run.py` on py65.
+- **The Master's budgets**: `tools/beeb_linebench.sh` and
+  `tools/beeb_soundbench.mjs` in jsbeeb.
+
 ## House rules
 
 - Commit messages end at `Co-Authored-By:`. Never include a claude.ai
