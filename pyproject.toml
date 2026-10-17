@@ -1,0 +1,12 @@
+[project]
+name = "starglider-beeb"
+version = "0.1.0"
+description = "Starglider for the BBC Master 128: research and port tools"
+requires-python = ">=3.12"
+dependencies = [
+    "capstone>=5.0",
+    "numpy>=2.0",
+    "pillow>=11.0",
+    "py65>=1.2.0",
+    "skoolkit>=10.1",
+]
