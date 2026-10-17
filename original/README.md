@@ -10,9 +10,9 @@ images, scans and text are not ours to redistribute.
 
 | File | What it is |
 |---|---|
-| `st/Starglider (1987)(Rainbird).st` | Atari ST, Argonaut Software (Jez San), "Completed, Sept 1986". TOSEC's clean image: `AUTO/STAR.PRG` holds the code, the shapes, the samples and the speech in one file; `TITLE.TRA` and `RESULT.TRA` are the title and score screens |
-| `st/Starglider (1987)(Rainbird).stx` | The same disc as a Pasti image of the protected master |
-| `st/Starglider (1987)(Rainbird)[m EMT].st` | A crack by GMC and TUC. Its `STAR.PRG` differs from the clean one in 47 bytes, its credits; it adds pictures (`FIL1`-`FIL8`, `PRES`, `EDIT1.PIC`) and its own `STRIP.PRG` |
+| `st/Starglider (1987)(Rainbird).st` | Atari ST, Argonaut Software (Jez San), "Completed, Sept 1986". TOSEC's clean image: `AUTO/STAR.PRG` holds the code, the shapes, the samples and the speech in one file; `TITLE.TRA` is the title picture and `RESULT.TRA` the cockpit. It keeps the copy protection, so it halts in an emulator |
+| `st/Starglider (1987)(Rainbird).stx` | The same disc as a Pasti image of the protected master. This is the one that boots in Hatari (docs/research/st.md) |
+| `st/Starglider (1987)(Rainbird)[m EMT].st` | A crack by GMC and TUC. Its `STAR.PRG` differs from the clean one in 47 bytes, its credits. The other files (`STRIP.PRG` and its pictures) are an unrelated program that shared the disc, nothing of Starglider's |
 | `amiga/Starglider (1987)(Rainbird).adf` | Amiga, Argonaut's own port of the ST |
 | `zx/Starglider128.tap`, `zx/Starglider48.tap` | ZX Spectrum, Realtime Games (Ian Oliver, Graeme Baird; music David Lowe). The 128K adds Clare Edgeley's speech and the special missions |
 | `zx/Starglider - Release n - Side s.tzx` | Three releases of the Spectrum tape |

@@ -24,10 +24,12 @@ their tools and docs are the model.
    next starts.
 4. **Measure, don't recall.** Run it, read the bytes, read memory back.
 
-The ethos is the original's: fast, smooth wireframe vectors. The manual
-makes the see-through wireframe part of the fiction (the AGAV's "Enhanced
-Vision System" shows "a stunning translucent display of anything within
-its visual range, even if objects are behind solid buildings").
+The ethos is the original's: fast, smooth wireframe vectors, one colour
+an object. The ST culls each object's back faces but never lets one
+object hide another, and the manual makes that part of the fiction (the
+AGAV's "Enhanced Vision System" shows "a stunning translucent display of
+anything within its visual range, even if objects are behind solid
+buildings").
 
 ## Commands
 
