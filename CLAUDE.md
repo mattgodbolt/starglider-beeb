@@ -36,7 +36,8 @@ make fetch      # download every version into original/ (not committed)
 make venv       # .venv (uv sync): SkoolKit, Capstone, Pillow, NumPy
 ```
 
-`tools/fat12.py IMAGE [OUTDIR]` lists or extracts an ST (or PC) floppy.
+`tools/fat12.py IMAGE [OUTDIR]` lists or extracts an ST (or PC) floppy,
+`tools/adf.py IMAGE [OUTDIR]` an Amiga one.
 Run Python that reads the originals with `-I`, from outside `original/`.
 
 ## House rules
