@@ -26,6 +26,7 @@ The tools (all in `tools/`, all run with `.venv/bin/python -I`):
 | `st_tra.py` | `.TRA` pictures (and raw 32000-byte screens) to PNG |
 | `st_samples.py` | the embedded samples: table, and WAV export |
 | `st_hatari.py` | drives a headless Hatari through its command FIFO (keys, mouse, screenshots, debugger) |
+| `st_workload.py` | counts lines, pixels, vertices, objects and dots per rendered frame in Hatari, and reports their distributions |
 
 ## Summary for the port
 
@@ -43,6 +44,7 @@ The tools (all in `tools/`, all run with `.venv/bin/python -I`):
 | Hidden lines | back faces of each object are culled; objects never hide one another | [measured] &04BE8, screenshots |
 | Clear | the view window only: 119 lines x 144 bytes = 17,136 bytes a frame, `movem.l` | [measured] &099D0 |
 | Frame rate | no fixed rate: a frame takes 2-6 VBLs (25-8.3 fps). A 704-frame flight sample averaged 3.69 VBLs (13.5 fps); near the energy towers 5-6 (9 fps); docked 2 (25 fps) | [measured] Hatari, breakpoint on &08EC2 |
+| Work per frame | flight: median 29 lines of 3-4 pixels (109 pixels), 28 vertices drawn plus 105 transformed for the back-face test, 4 objects; the energy towers close up: 90 lines, 525 pixels, 51 + 228 vertices, 7 objects, 6 VBLs; the silo tunnel: 49 lines, 1,943 pixels, 4 VBLs | [measured] `st_workload.py` |
 | Projection | x' = 128x/z + 143, y' = 128y/z + 68 (colour); near plane z = 2; 2D clip to the window | [measured] &04D66, &0A374, &0A170 |
 | Memory | uses fixed RAM: variables at &5BF00, screens &60000-&7FFFF, game variables in low RAM (&A0, &1E4, &29C, &2CF, &94C, &1218...) | [measured] disassembly |
 
@@ -194,6 +196,68 @@ Measured in Hatari (cycle-exact 68000, its default), with a breakpoint at
 | The game's own counters over 504 VBLs at the start | 93 | 5.4 (9.2 fps) |
 
 The floor is 2 VBLs even with nothing to draw [measured]: docked.
+
+### Work per frame
+
+Counted per rendered frame in Hatari with `st_workload.py` [measured].
+Breakpoints on the routines below add to Hatari's virtual registers, and
+one on `frame_end` (&08EC2) prints and zeroes them with the VBL count.
+Breakpoints don't change the emulated timing: the tower cases took 5.5 and
+6.0 VBLs a frame, as they did unwatched.
+
+- **Lines drawn**: calls reaching the line drawer's dispatch (&09172 for
+  y-major, &091B8 for x-major), after both clips. The lasers go through
+  the same drawer (&05606), so they're included.
+- **Pixels**: max(|dx|, |dy|) + 1 for each line, read from d3 or d2 at
+  the dispatch: the drawer's loop count.
+- **Vertices transformed**: calls of `transform_vertex` (&03FFE), the
+  vertices of visible faces. **Normal vertices**: calls of &04320, three
+  for each face given the back-face test (faces marked always-visible
+  skip it).
+- **Objects drawn**: calls of `draw_shape` (&04B1C) and
+  `draw_shape_exploding` (&04DAC); always equal to the draw-list length
+  `$23E(a6)`, which was read too.
+- **Dots**: calls of `dot_colour` (&0976E), the ground dots. The
+  scanner's dots are plotted by &05E0C directly and aren't counted.
+
+Each cell is mean / median / 90th percentile / max:
+
+| Situation | Frames | VBLs a frame | Lines drawn | Pixels | Pixels a line | Vertices transformed | Normal vertices | Objects drawn | Dots |
+|---|---|---|---|---|---|---|---|---|---|
+| Flight from the start (forward, a turn) | 711 | 4 / 4 / 5 / 7 | 35.1 / 29 / 70 / 134 | 135.2 / 109 / 291 / 1068 | 4.2 / 3.3 / 6.8 / 112 | 30.5 / 28 / 55 / 71 | 109.3 / 105 / 195 / 285 | 4.2 / 4 / 7 / 10 | 33.3 / 33 / 37 / 42 |
+| Energy-tower group in view, 3,000 units off | 54 | 5.5 / 6 / 6 / 6 | 93.4 / 96 / 96 / 96 | 332 / 338 / 349 / 356 | 3.6 / 3.6 / 3.7 / 3.7 | 53 / 53 / 53 / 53 | 213 / 213 / 213 / 213 | 6 / 6 / 6 / 6 | 41.3 / 42 / 43 / 43 |
+| Energy tower close up, a tank and a fighter | 25 | 6 / 6 / 6 / 6 | 92.6 / 90 / 98 / 98 | 517.8 / 525 / 556 / 562 | 5.6 / 6.1 / 6.2 / 6.3 | 50 / 51 / 51 / 51 | 228 / 228 / 228 / 228 | 7 / 7 / 7 / 7 | 42.6 / 43 / 43 / 43 |
+| Silo tunnel, flying in | 89 | 3.7 / 4 / 4 / 4 | 40.1 / 49 / 52 / 55 | 1776 / 1943 / 2450 / 2581 | 45.6 / 45.6 / 61.1 / 75 | 35.1 / 39 / 39 / 39 | 10.5 / 18 / 18 / 18 | 1.6 / 2 / 2 / 2 | 4 / 4 / 4 / 4 |
+| Silo, waiting at the end | 77 | 2.2 / 2 / 3 / 3 | 0 | 0 | - | 30 / 30 / 30 / 30 | 0 | 1 / 1 / 1 / 1 | 4 / 4 / 4 / 4 |
+
+"Pixels a line" is each frame's pixels over its lines. The runs:
+
+- **Flight**: boot, start, hold space for 3 s, fly 30 s, cursor left
+  1.5 s, fly 22 s. It's a new run of the same kind as the 704-frame one
+  above, not a replay: the random numbers mix in the player's steering,
+  so no two runs are alike. This one averaged 4.0 VBLs against 3.69.
+- **Towers** and **close up**: fresh boots, then the player teleported as
+  for the earlier screenshots (x &1EC0, z &1308 and &1C70, heading 0).
+- **Silo**: a fresh boot, then teleported into a silo's box (x &1C30,
+  z &DC60, heading &C10). The frames split by whether any line was drawn:
+  flying down the tunnel, then stopped at its end, where the tunnel's
+  vertices are still transformed but none of its edges survive the clip.
+
+What the figures show [measured] from the table:
+
+- In flight the lines are short: a median of 3-4 pixels, and a few
+  hundred pixels a frame. Per-line, per-vertex and per-object work
+  outweighs plotting except in the tunnel.
+- The back-face test costs more transforms than drawing: three vertices a
+  face for every face of every drawn object (213 for the six objects of
+  the tower group, 71 faces), against 53 vertices transformed for drawing.
+- The long lines are the tunnel's (45 pixels a line, about 2,000 a frame)
+  and the lasers (the 112-pixel line in flight).
+- With nothing drawn the frame still takes 2 VBLs, so the fixed work (the
+  17,136-byte clear, the panel, 140 object handlers, collisions, the
+  scanner) is over one VBL [inferred: the raster wait means a frame
+  finished in under a VBL would take 1; a sampling profile in Hatari,
+  `profile on`, would split it].
 
 ### Coordinates and fixed point
 

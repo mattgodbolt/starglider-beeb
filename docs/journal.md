@@ -38,7 +38,7 @@ Five agents worked at once, one a machine, each writing
   TOSEC image halts at the copy protection. A recursive 68000
   disassembly (`tools/st_disasm.py`, labels in `tools/st_star.ctl`)
   found the frame, the renderer, the shapes, the handlers, the world and
-  the samples. The ST averages 13.5 fps in flight.
+  the samples. The ST averages 12.5-13.5 fps in flight (two runs).
 - **The Spectrum 128K** (`zx.md`): nm's `zx.py`, adapted, loads the
   Bleepload tape and flies headless. 6.1 fps.
 - **The CPC** (`cpc.md`): a scriptable Caprice32 in `../caprice32`. Also
@@ -54,6 +54,12 @@ Every version culls each object's back faces and none lets one object
 hide another, so that is the original's look, which the manual's
 "Enhanced Vision System" explains. The 8-bit versions are remakes with
 their own models, and all ran at about 6 fps.
+
+A second pass in Hatari counted the ST's work per frame
+(`tools/st_workload.py`): in flight about 35 lines of a median 3.3
+pixels, 30 vertices drawn and 4 objects. So on the Master the cost will
+be set-up per line, vertex and object, not plotting, and a flight scene
+costs out at 3-4 fields a frame against the ST's 4 (brief, section 4).
 
 The ST's shapes pack into about 16K losslessly: every coordinate is a
 multiple of 32, and with a scale per shape all but the energy beam fit

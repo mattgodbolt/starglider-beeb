@@ -27,17 +27,21 @@ text segment), in `&` hex.
   be the port's oracle as the Spectrum was for the earlier ports.
 - **Every 8-bit version was a remake, and slow.** Realtime's Spectrum and
   CPC versions and Solid Image's C64 one each run at about **6 fps**
-  [measured], with simpler models of their own. The ST averages **13.5
-  fps** in flight [measured]. No 8-bit machine has had the ST's game.
+  [measured], with simpler models of their own. The ST averages
+  **12.5-13.5 fps** in flight [measured: two runs]. No 8-bit machine
+  has had the ST's game.
 - **The ethos is the ST's look:** colour wireframe, one colour an object,
   each object's back faces culled but objects see-through to one another
   (the manual's "Enhanced Vision System"). Filled polygons would break
   the fiction as well as the frame rate.
-- **The BBC side is tight but plausible.** A Master draws a short edge in
-  MODE 1 in about 800 cycles [measured, jsbeeb]. Estimates put a typical
-  ST flight scene at around 10 fps on the Master [inferred], well above
-  every 8-bit version and near the ST. The first job is to measure that
-  on real ST scenes before the design is fixed.
+- **The BBC side is tight but plausible.** In flight the ST draws only
+  35 lines a frame, a median of 3.3 pixels each [measured, Hatari], so
+  the cost is set-up per line, vertex and object, not plotting. Costed
+  with the Master's measured line routine, a flight scene comes to 3-4
+  fields a frame (12.5-16.7 fps) and the busy tower scene to 5 (10 fps)
+  [inferred], against the ST's 4 and 5.5. That's twice every 8-bit
+  version. The first job is to measure it on real ST scenes before the
+  design is fixed.
 - **It fits, but for the title song.** Code, the ST's shapes (about 16K
   packed losslessly), the world, the tables and the speech fit a Master
   128 beside a double-buffered screen. The 18-second sampled title song
@@ -77,7 +81,7 @@ one disc (D7).
 | View colours | one colour an object, 12 in use | | one ink a cell, the last line's | 3 + black, a colour an edge | |
 | Shapes | 28 (524 vertices, 802 edges), 7 animated | | 33, 21 of them the ST's rebuilt | 33, the Spectrum's recoloured | 27, simpler re-models |
 | Hidden lines | each object's back faces culled; objects see-through | | the same | the same | the same (by screen winding) |
-| Frame rate | **13.5 fps** in flight (2-6 VBLs); 9 near the towers; 25 docked | not measured | **6.1 fps** (7.3-11.8 frames a pass) | **6.1 fps** quiet, 3.1 fighting | **6.4 fps** (C64), 10 empty |
+| Frame rate | **12.5-13.5 fps** in flight (2-7 VBLs a frame); 9 near the towers; 25 docked | not measured | **6.1 fps** (7.3-11.8 frames a pass) | **6.1 fps** quiet, 3.1 fighting | **6.4 fps** (C64), 10 empty |
 | Sound | sampled title song (18.2 s), 4 speech clips, 24 YM effects | `Sglider.snd`, 178,274 bytes: the size of the ST's song | AY tune (attract only), 4 speech clips that stop the game, AY effects | AY effects only | |
 | Research | `research/st.md` | `tools/adf.py` lists it | `research/zx.md` | `research/cpc.md` | `research/6502.md` |
 
@@ -148,8 +152,8 @@ coordinates up to 32,000), which stays 16-bit [measured: `tools/st_shapes.py --j
 The game runs flat out: draw, read keys, fly, run every object's handler,
 step the animations, test collisions, then wait for the raster past line
 192 and swap screens. **Everything moves per frame**, so the ST's game
-speed follows its frame rate: 25 fps docked, 13.5 in flight, 9 near the
-towers [measured].
+speed follows its frame rate: 25 fps docked, 12.5-13.5 in flight, 9 near
+the towers [measured].
 
 Drawing a frame: clear the 288 x 119 window (17,136 bytes); rotate the
 nearby objects into camera space; for each object in view, build its
@@ -203,7 +207,7 @@ play, 24 effects on the YM. No tune plays in the game [measured].
 |---|---|---|---|
 | Whose | Argonaut's | Realtime's | Realtime's |
 | Models | 28, 7 animated | 33, rebuilt on a coarser grid | the Spectrum's |
-| Speed it reached | 13.5 fps | 6.1 fps | 6.1 fps |
+| Speed it reached | 12.5-13.5 fps | 6.1 fps | 6.1 fps |
 | Transcription | 68000 to 6502: the logic and data transcribed, the maths re-done for 8 bits | Z80 to 6502, instruction by instruction, as CE2 and nm were | the same |
 | Oracle | Hatari, headless (`tools/st_hatari.py`) | SkoolKit (`tools/zx.py`) | Caprice32 (`tools/cpc_emu.py`) |
 
@@ -284,14 +288,14 @@ ST [inferred], so that rule would slow the whole game down.
 
 | | (a) As the ST: a step per frame | (b) A fixed step at the ST's mean |
 |---|---|---|
-| Speed | slower than the ST wherever the Master is slower | the ST's average speed everywhere (3.69 VBLs a step in flight [measured]) |
+| Speed | slower than the ST wherever the Master is slower | the ST's average speed everywhere (3.69 and 4.0 VBLs a frame in two flights [measured]) |
 | Look | every step drawn | frames dropped when the scene is heavy |
 | Checks | step by step against Hatari | the same, step by step |
 
 **Recommendation: (b)**, as nm's decision 12 did: port the decision (the
 game was tuned at its usual pace), not the accident (busy scenes slowed
 everything). The step could be 4 VBLs (12.5 a second), or a VIA timer at
-3.69. Docked, the ST ran at 25 fps; whether the tunnel keeps a faster
+the ST's measured mean. Docked, the ST ran at 25 fps; whether the tunnel keeps a faster
 step is a detail for later.
 
 ### D5. Sound
@@ -373,15 +377,62 @@ From `research/beeb.md`; cycles are 2MHz, 39,936 to a 50Hz field.
 | A sample from a timer interrupt | 86 cycles (105 packed) | [measured] |
 | Memory beside two 16,000-byte screens | ~95K | [inferred] |
 
-**Work per frame on the ST** (to come from Hatari: lines, pixels,
-vertices and objects per frame in each situation; see section 6).
+**Work per frame on the ST** [measured: st.md, "Work per frame",
+`tools/st_workload.py`], mean (median, 90th percentile) per rendered
+frame:
 
-**A frame on the Master** [inferred, to be measured]: say a flight
-scene draws 6 objects, 60 vertices and 50 edges. At about 4,000 cycles
-an object (matrix, position), 900 a vertex (transform, cull, project)
-and 1,650 an edge (draw and erase), plus about 30,000 for the handlers,
-dots, scanner and gauges, that's about 190,000 cycles: 4.8 fields, so
-**10 fps** once a frame is rounded up to whole fields. The ST averaged 13.5 fps; the 8-bit versions 6.
+| Situation | VBLs | Lines | Pixels | Pixels a line | Vertices drawn | Objects | Dots |
+|---|---|---|---|---|---|---|---|
+| Flight from the start | 4.0 (4, 5) | 35 (29, 70) | 135 (109, 291) | 4.2 (3.3) | 30.5 | 4.2 | 33 |
+| The energy-tower group, 3,000 units off | 5.5 | 93 | 332 | 3.6 | 53 | 6 | 41 |
+| A tower close up, a tank and a fighter | 6 | 93 | 518 | 5.6 | 50 | 7 | 43 |
+| The silo tunnel, flying in | 3.7 | 40 | 1,776 | 45.6 | 35 | 1.6 | 4 |
+
+- **In flight the lines are tiny**: a median of 3.3 pixels, about 135
+  pixels a frame. Everywhere but the tunnel, the cost is per line (its
+  set-up), per vertex and per object, not per pixel.
+- The ST transforms three vertices a face for its back-face test (109 a
+  frame in flight, 213 for the towers), three or four times the vertices
+  it then draws.
+
+**A frame on the Master** [inferred, to be measured by the spike]:
+
+| Work | Cost each | Flight (mean) | The towers |
+|---|---|---|---|
+| Lines, drawn and erased | 2 x (178 + 32 a pixel) | 35 lines, 135 px: 21,000 | 93 lines, 332 px: 54,000 |
+| Vertices: every vertex of each drawn object transformed once and projected; faces culled by their winding on screen | 400-650 | ~63: 25,000-41,000 | ~96: 38,000-62,000 |
+| Objects: matrix and position | ~4,000 | 4.2: 17,000 | 6: 24,000 |
+| Nearby objects rotated into camera space | ~1,400 | ~15 (a guess): 21,000 | ~15: 21,000 |
+| Handlers, collisions | | ~15,000 | ~15,000 |
+| Ground dots | ~300 | 33: 10,000 | 41: 12,000 |
+| The panel (scanner, gauges, changed digits) | | ~5,000 | ~5,000 |
+| **Total** | | **114,000-130,000: 2.9-3.3 fields** | **169,000-193,000: 4.2-4.8 fields** |
+| **A frame in whole fields** | | **3-4: 16.7-12.5 fps** | **5: 10 fps** |
+| The ST [measured] | | 4.0 VBLs: 12.5 fps | 5.5: 9.1 fps |
+
+The assumptions:
+
+- **A vertex at 400-650 cycles.** The ST's shapes have few distinct
+  coordinates: 519 distinct values on their three axes across 399
+  vertices [measured: `tools/st_shapes.py --json`, every animation
+  frame, GAME OVER aside]. So each object can multiply each distinct
+  value by its rotated axis once (about four multiplies a vertex) and
+  build its vertices by adding, as the CPC's vertex programs do. That
+  costs about 400 cycles with projection; nine table multiplies a vertex
+  cost about 650.
+- **Lines** use beeb.md's MODE 1 routine: 178 cycles for one pixel,
+  about 32 for each one after. Erasing by redrawing in black costs the
+  same. The tunnel's long lines (1,776 pixels: about 64,000 cycles to
+  redraw) are cheaper to clear (8,568 bytes: about 44,000), so erasing
+  should choose by the buffer's last pixel count.
+- **The nearby objects' count** wasn't measured; the handlers' cost is a
+  guess.
+
+So **the Master may come close to the ST's own speed** [inferred]: three
+or four fields a frame in flight where the ST took four, and five near
+the towers where it took five or six. That's twice the speed of every
+8-bit version. Plotting isn't the problem; set-up per line, per vertex
+and per object is, and that's where the spike should look first.
 
 ---
 
