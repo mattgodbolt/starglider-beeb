@@ -1,0 +1,108 @@
+; beeb_soundbench.6502: what a sample player and a screen clear cost on a
+; Master, timed by tools/beeb_soundbench.mjs in jsbeeb.
+;
+; The sample player is a User VIA T1 interrupt, free-running at the sample
+; rate, that writes the next sample to an SN76489 volume register through the
+; System VIA's slow bus. The foreground counts in a loop; the share of the CPU
+; the player takes is the count it loses. The MOS's own IRQ entry (&E59E: STA
+; &FC, PLA, PHA, AND #&10, BNE, JMP (IRQ1V)) is part of the cost, as it is for
+; any game: the hardware vector is in ROM.
+;
+; Variants (HANDLER, from the command line): 0 = acknowledge only, 1 = a
+; ready-made latch byte a sample, 2 = two 4-bit samples a byte. T1 = the
+; timer latch: the period is T1 + 2 microseconds.
+
+cnt = &70           ; 3 bytes: the foreground's count
+ptr = &74           ; 2 bytes: next sample byte
+phase = &76
+
+SAMPLES = &1800
+SAMPLES_END = &3000
+
+SECTION SoundBench, org = &1000, filename = "SNDBENCH", cmos = TRUE
+.start
+
+; init: everything off but the one timer, then count.
+.init
+    SEI
+    LDA #&7F : STA &FE4E : STA &FE6E     ; no System or User VIA interrupts
+    LDA #&FF : STA &FE43                 ; System VIA port A all outputs
+    LDA #&0B : STA &FE40                 ; keyboard auto-scan, so port A is ours
+    LDA #&08 : STA &FE40                 ; sound /WE high
+    LDA #LO(SAMPLES) : STA ptr : LDA #HI(SAMPLES) : STA ptr+1
+    STZ phase
+    LDA #LO(irq) : STA &0204 : LDA #HI(irq) : STA &0205
+    IF HANDLER >= 0
+        LDA &FE6B : AND #&3F : ORA #&40 : STA &FE6B   ; T1 free-running, no PB7
+        LDA #LO(T1) : STA &FE64 : LDA #HI(T1) : STA &FE65
+        LDA #&C0 : STA &FE6E                          ; User VIA T1 interrupts on
+    ENDIF
+    CLI
+.fg
+    INC cnt : BNE fg
+    INC cnt+1 : BNE fg
+    INC cnt+2 : BRA fg
+
+.irq
+    BIT &FE6D : BVC not_t1               ; a game's handler tests its source first
+    LDA &FE64                            ; acknowledge T1
+    IF HANDLER = 1
+        LDA (ptr)                        ; a latch byte, %1cc1vvvv
+        STA &FE4F
+        STZ &FE40                        ; /WE low
+        INC ptr : BNE no_page            ; the bump is the /WE hold
+        INC ptr+1
+        LDA ptr+1 : CMP #HI(SAMPLES_END) : BNE no_page
+        LDA #HI(SAMPLES) : STA ptr+1
+    .no_page
+        NOP : NOP
+        LDA #&08 : STA &FE40             ; /WE high
+    ELIF HANDLER = 2
+        LDA phase : EOR #&FF : STA phase
+        BMI low_nibble
+        LDA (ptr) : LSR A : LSR A : LSR A : LSR A
+        ORA #&90                         ; channel 0 volume
+        STA &FE4F
+        STZ &FE40
+        NOP : NOP : NOP : NOP : NOP : NOP
+        BRA we_high
+    .low_nibble
+        LDA (ptr) : AND #&0F : ORA #&90
+        STA &FE4F
+        STZ &FE40
+        INC ptr : BNE no_page2
+        INC ptr+1
+        LDA ptr+1 : CMP #HI(SAMPLES_END) : BNE no_page2
+        LDA #HI(SAMPLES) : STA ptr+1
+    .no_page2
+        NOP : NOP
+    .we_high
+        LDA #&08 : STA &FE40
+    ENDIF
+.not_t1
+    LDA &FC
+    RTI
+
+; Clears: STZ abs,X down 256-byte columns, one STZ per page, as
+; virus and doom do (both with STA). PAGES pages from &3000.
+.clear
+    LDX #0
+.clear_loop
+    FOR page = 0..(PAGES - 1)
+        STZ &3000 + page * 256, X
+    NEXT
+    INX
+    IF PAGES <= 40
+        BNE clear_loop
+    ELSE
+        BEQ clear_end                   ; too far for BNE
+        JMP clear_loop
+    .clear_end
+    ENDIF
+    RTS
+.clear_done
+    JMP clear_done
+
+.end
+PRINT "start ", ~start, " init ", ~init, " fg ", ~fg, " clear ", ~clear, " clear_done ", ~clear_done, " end ", ~end
+ENDSECTION
