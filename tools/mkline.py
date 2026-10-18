@@ -118,8 +118,14 @@ ZA_AUTO1 erase_i
     LDA #ACCCON_X : TSB acccon
     LDX erase_i
     LDA line_y0 : SEC : SBC line_y1 : BCC up
+    BEQ flat
+.down
 {start(0)}
     BRA across
+.flat                                       ; a row: drawn from its left end
+    LDA line_x0 : CMP line_x1 : LDA line_x0+1 : SBC line_x1+1
+    LDA #0 : BCC down
+    CLC                                     ; so dy stays 0
 .up
     EOR #&FF : ADC #1                      ; C = 0 from the borrow
 {start(1)}
@@ -189,13 +195,16 @@ ZA_AUTO1 erase_i
 # A steep line steps a row each pixel and x on the minor axis; a shallow
 # one the other way. The minor axis's length is patched into every block's
 # SBC and counted; the major's is the ADC's (zero page: it's read only on
-# a minor step).
+# a minor step). A minor axis of length 0 is a column or a row, which
+# line_plot makes rightwards (a row from its left end): it can't be a
+# leftward kind's.
 for v, kind in KINDS:
     steep = v[0] == "t"
     major, minor = ("line_dy", "line_dx") if steep else ("line_dx", "line_dy")
     emit(f".{kind}")
     emit(f"    LDA {minor}")
-    emit(f"    BEQ {v}_single")
+    if v[1] == "r":
+        emit(f"    BEQ {v}_single")
     for p in range(4):
         emit(f"    STA {v}_sbc{p}+1")
     emit("    STA line_cnt")
@@ -203,15 +212,51 @@ for v, kind in KINDS:
     emit(f"    LDA {major} : LSR A : STA line_errs")
     emit("    SEC : JMP (line_entries,X)")
     emit(f"    ZA_CANJUMP {v}_s0, {v}_s1, {v}_s2, {v}_s3")
-    what = "vertical: one virtual step after dy rows" if steep else "horizontal: one virtual step after dx pixels"
-    emit(f".{v}_single                       ; {what}")
-    emit("    LDA #1")
-    for p in range(4):
-        emit(f"    STA {v}_sbc{p}+1")
-    emit("    STA line_cnt : STA line_ls")
-    emit(f"    LDA {major} : SEC : JMP (line_entries,X)")
-    emit(f"    ZA_CANJUMP {v}_s0, {v}_s1, {v}_s2, {v}_s3")
     emit()
+
+emit("""\\ A column (and a dot): dy + 1 rows of the pixel at block X / 2.
+.tr_single
+    LDA line_pix,X : AND set_colour+1 : STA tv_m+1
+    LDX line_dy : INX
+.tv_m
+    LDA #0                          ; colour & pixel, patched""")
+write("tv_w")
+emit("""    DEX : BEQ tv_done
+    DEY : BPL tv_m""")
+row_up()
+emit("""    LDY #7 : BRA tv_m
+.tv_done
+    RTS
+.line_pix                           ; each block's pixel, by block * 2
+    EQUB &88, 0, &44, 0, &22, 0, &11
+
+\\ A row: dx + 1 pixels rightwards from block (X - 16) / 2, drawn by the
+\\ blocks (sr_row) or, erasing, its bytes zeroed (sr_row_erase): line_draw
+\\ and line_erase patch the JMP.
+.sr_single
+    JMP sr_row
+    ZA_CANJUMP sr_row, sr_row_erase
+.sr_row                             ; one virtual y-step after dx pixels
+    LDA #1
+    CMP sr_sbc0+1 : BEQ sr_row_set      ; the blocks' SBCs as the last row left them""")
+for p in range(4):
+    emit(f"    STA sr_sbc{p}+1")
+emit(""".sr_row_set
+    STA line_cnt : STA line_ls
+    LDA line_dx : SEC : JMP (line_entries,X)
+    ZA_CANJUMP sr_s0, sr_s1, sr_s2, sr_s3
+.sr_row_erase
+    TXA : LSR A : AND #3 : ADC line_dx      ; the last pixel: C = 0 from the LSR, and after it bit 8
+    ROR A : LSR A : TAX : INX               ; the bytes
+.sr_zero
+    LDA #0 : STA (line_scr),Y
+    LDA line_scr : CLC : ADC #8 : STA line_scr
+    BCC sr_zeroed
+    INC line_scr+1
+.sr_zeroed
+    DEX : BNE sr_zero
+    RTS
+""")
 
 # ---- steep blocks ------------------------------------------------------------
 # A block's exits (a row step, the last step) are on whichever side of the
@@ -375,9 +420,11 @@ emit()
 emit("\\ line_draw and line_erase: ORA (line_scr),Y in every write of the line")
 emit("\\ drawer (line.6502), or AND #0, which stores a zero over the byte.")
 emit(".line_draw")
+emit("    LDA #LO(sr_row) : STA sr_single+1 : LDA #HI(sr_row) : STA sr_single+2")
 emit("    LDA #&11 : LDX #line_scr                ; ORA (zp),Y")
 emit("    BRA line_mode")
 emit(".line_erase")
+emit("    LDA #LO(sr_row_erase) : STA sr_single+1 : LDA #HI(sr_row_erase) : STA sr_single+2")
 emit("    LDA #&29 : LDX #0                       ; AND #0")
 emit(".line_mode")
 for w in writes:
