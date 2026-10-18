@@ -88,6 +88,7 @@ def shape_source(s, alias=None):
             g = math.gcd(g, c)
         g = g or 32
     assert g % 32 == 0, (k, g)
+    assert g // 32 < 16, (k, g)                    # draw_shape scales by 16 x scale, a byte
     nv, ne, nf = s["nverts"], s["nedges"], s["nfaces"]
     # The frames the animation list names, each kept once (the list may
     # name one more than once); frame_index maps the list's entries.

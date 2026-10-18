@@ -241,7 +241,7 @@ NEXT
 \ space, its angles in ang_p, ang_h, ang_r.
 .draw_shape
 {
-    ZA_AUTO1 shape, nmove, nturn, row_i, sc0, sc1, sc2, sc3
+    ZA_AUTO1 shape, nmove, nturn, row_i, u_lo, h0, l0
     ZA_AUTO2 hdr, fr, fr_k, t16
     LDX otype
     LDA type_shape,X : CMP #SHAPES : BCC known
@@ -292,39 +292,32 @@ NEXT
     AND #15 : STA ocolour : TAX
     LDA colour_map,X : JSR set_colour
     \ The matrix scaled to the shape, for the vertices: A = m g / 256, so
-    \ A k / 1024 is in world units (g = 32 x scale): (|m| scale + 4) / 8.
-    LDA sh_scale : MUL_SET
+    \ A k / 1024 is in world units (g = 32 x scale): (|m| scale + 4) / 8,
+    \ which is (2 |m| x 16 scale + 128) / 256, the bytes falling where
+    \ they're wanted. (16 scale is a byte: mkshapes.py.) The sign is m's
+    \ high byte, whose bit 7 is all that's read.
+    LDA sh_scale : ASL A : ASL A : ASL A : ASL A : MUL_SET
     LDX #0
     ZA_DISCARD xf_amag, xf_asign
 .scale_term
-    STX row_i
-    LDA mat+1,X : ZA_INDEXEDBY 0..16
-    STA t16+1 : LDA mat,X : ZA_INDEXEDBY 0..16
-    STA t16
-    LDA t16+1 : BPL scale_pos
-    LDA #0 : SEC : SBC t16 : STA t16 : LDA #0 : SBC t16+1 : STA t16+1
-.scale_pos
-    LDY t16 : MUL8 sc0 : STA sc1                ; low byte by scale
-    LDY t16+1 : MUL8 sc3 : STA sc2              ; high byte by scale
-    LDA sc1 : CLC : ADC sc3 : STA sc1
-    LDA sc2 : ADC #0 : STA sc2
-    LDA sc0 : CLC : ADC #4 : STA sc0
-    BCC rounded
-    INC sc1 : BNE rounded
-    INC sc2
-.rounded
-    LSR sc2 : ROR sc1 : ROR sc0
-    LSR sc2 : ROR sc1 : ROR sc0
-    LSR sc2 : ROR sc1 : ROR sc0
-    LDX row_i
-    LDA sc0 : STA xf_amag,X : ZA_INDEXEDBY 0..16
-    LDA sc1 : STA xf_amag+1,X : ZA_INDEXEDBY 0..16
     TXA : LSR A : TAY
+    LDA mat,X : ZA_INDEXEDBY 0..16
+    STA u_lo
     LDA mat+1,X : ZA_INDEXEDBY 0..16
-    AND #&80 : STA xf_asign,Y : ZA_INDEXEDBY 0..8
-    INX : INX : CPX #18 : BEQ scaled
-    JMP scale_term
-.scaled
+    STA xf_asign,Y : ZA_INDEXEDBY 0..8
+    BPL scale_pos
+    LDA #0 : SEC : SBC u_lo : STA u_lo
+    LDA #0 : SBC mat+1,X : ZA_INDEXEDBY 0..16
+.scale_pos
+    ASL u_lo : ROL A : TAY                      ; u = 2 |m|
+    MUL8 h0 : STA xf_amag+1,X : ZA_INDEXEDBY 0..16
+    LDY u_lo : MUL8 l0                          ; A: its high byte
+    ASL l0                                      ; the rounding
+    ADC h0 : STA xf_amag,X : ZA_INDEXEDBY 0..16
+    BCC scale_next
+    INC xf_amag+1,X : ZA_INDEXEDBY 0..16
+.scale_next
+    INX : INX : CPX #18 : BNE scale_term
     \ The camera in object space, in world units: c = -(mat transposed) t.
     ZA_DISCARD objc
     LDX #0
@@ -405,91 +398,137 @@ ZA_AUTO1 far_inside             ; bit 7: no edge needs the window clip
 ZA_AUTO 12, sc_bmag             ; B: |B| words, two rows of x, y, z ...
 ZA_AUTO 6, sc_bsign             ; ... and signs
 \ quarters: pq = 512 px / pz, in quarters of a pixel, as precisely as
-\ px allows (proj_z's depth).
+\ px allows (proj_z's depth): 128 (4 px) / pz, or 2 px when 4 px won't
+\ fit a word, or px. C = 1 if 4 px fitted.
 .quarters
 {
-    ZA_AUTO1 shifts
-    LDA #2 : STA shifts
-.try
-    \ px << shifts fits a word if its top shifts + 1 bits agree
-    LDA px : STA pq : LDA px+1 : STA pq+1
-    LDX shifts : BEQ fits
-.up
-    ASL pq : ROL pq+1                       ; it fits while the bit out is the sign
-    BCS was_neg
-    BMI too_big
-    BRA shifted
-.was_neg
-    BPL too_big
-.shifted
-    DEX : BNE up
-.fits
-    MOVW px, pq
+    \ px << 2 fits a word if px's top three bits agree, << 1 if two do
+    LDA px+1 : ASL A : EOR px+1 : BMI unshifted
+    ASL A : BMI once
+    ASL px : ROL px+1 : ASL px : ROL px+1
     JSR proj_x
-    LDA #2 : SEC : SBC shifts : TAX : BEQ done
-.back
+    SEC : RTS
+.once
+    ASL px : ROL px+1
+    JSR proj_x
     ASL pq : ROL pq+1
-    DEX : BNE back
-.done
+    CLC : RTS
+.unshifted
+    JSR proj_x
+    ASL pq : ROL pq+1 : ASL pq : ROL pq+1
+    CLC : RTS
+}
+
+\ centre: pq = 128 px / pz as proj_x has it, and cq the same in quarters
+\ of a pixel (quarters). When 4 px fitted, pq is cq / 4 truncated, as
+\ proj_x truncates: but not below a depth of 256, where proj_x's overflow
+\ can come into cq and not pq.
+ZA_AUTO2 cq
+.centre
+{
+    ZA_AUTO2 t
+    MOVW t, px
+    JSR quarters : MOVW cq, pq
+    BCC by_proj
+    LDA pz+1 : BEQ by_proj
+    LDA pq+1 : BPL q_pos
+    LDA pq : CLC : ADC #3 : STA pq
+    LDA pq+1 : ADC #0
+    CMP #&80 : ROR A : ROR pq
+    CMP #&80 : ROR A : ROR pq
+    STA pq+1
     RTS
-.too_big
-    DEC shifts
-    BRA try
+.q_pos
+    LSR A : ROR pq : LSR A : ROR pq
+    STA pq+1
+    RTS
+.by_proj
+    MOVW px, t
+    JMP proj_x
 }
 
 .far_setup
 {
-    ZA_AUTO1 j, row, term, halved
-    ZA_AUTO2 az, d
+    ZA_AUTO1 term, halved, xneg, pneg, plo
+    ZA_AUTO2 xs, d
     ZA_AUTO 3, d24
     MOVW pz, tz : JSR proj_z
-    MOVW px, tx : JSR proj_x : MOVW sc_x0, pq
-    MOVW px, ty : JSR proj_x : MOVW sc_y0, pq
-    \ and in quarters of a pixel, for the vertices: 128 (4 t) / tz, or 2 t
-    \ when 4 t won't fit a word, or t
-    MOVW px, tx : JSR quarters : MOVW sc_x0q, pq
-    MOVW px, ty : JSR quarters : MOVW sc_y0q, pq
+    MOVW px, tx : JSR centre : MOVW sc_x0, pq : MOVW sc_x0q, cq
+    MOVW px, ty : JSR centre : MOVW sc_y0, pq : MOVW sc_y0q, cq
+    \ B by term (3 row + j): d = A_row - X0 A_z / 128 (X0 or Y0), the
+    \ product rounded down as the 68000's shifts would, then 128 d / tz
     ZA_DISCARD sc_bmag, sc_bsign
-    LDX #0
-.column
-    STX j
-    \ A_z, signed
-    TXA : CLC : ADC #6 : TAY
+    STZ term
+.each_term
+    LDA term : BEQ row_x
+    CMP #3 : BNE same_row
+    MOVW xs, sc_y0
+    BRA new_row
+.row_x
+    MOVW xs, sc_x0
+.new_row
+    \ |X0| and its sign, and its low byte set up if that's all of it
+    LDA xs+1 : STA xneg : BPL x_pos
+    LDA #0 : SEC : SBC xs : STA xs : LDA #0 : SBC xs+1 : STA xs+1
+.x_pos
+    LDA xs+1 : BNE same_row
+    LDA xs : MUL_SET
+.same_row
+    \ A_z is term 6 + j
+    LDA term : CMP #3 : BCC j_ok
+    SBC #3 : CLC
+.j_ok
+    ADC #6 : TAY
     LDA xf_asign,Y : ZA_INDEXEDBY 6..8
-    STA mul_sign
-    TYA : ASL A : TAY
-    LDA xf_amag,Y : ZA_INDEXEDBY {12, 14, 16}
-    STA az : LDA xf_amag+1,Y : ZA_INDEXEDBY {12, 14, 16}
-    STA az+1
-    BIT mul_sign : BPL az_pos
-    LDA #0 : SEC : SBC az : STA az : LDA #0 : SBC az+1 : STA az+1
-.az_pos
-    STZ row
-.each_row
-    \ d = A_row - X0 A_z / 128 (X0 or Y0)
-    LDA row : BNE use_y
-    MOVW mul_x, sc_x0
-    BRA got_centre
-.use_y
-    MOVW mul_x, sc_y0
-.got_centre
-    MOVW mul_y, az
-    JSR smul16
-    ASL mul_p : ROL mul_p+1 : ROL mul_p+2 : ROL mul_p+3     ; / 128: bytes 1-3 of the product << 1
-    LDA row : ASL A : ADC row : ADC j : STA term   ; 3 row + j
-    TAX
+    EOR xneg : STA pneg
+    TYA : ASL A : TAX
+    LDA xs+1 : BNE wide
+    LDY xf_amag,X : ZA_INDEXEDBY {12, 14, 16}
+    MUL8 mul_p : STA mul_p+1
+    LDY xf_amag+1,X : ZA_INDEXEDBY {12, 14, 16}
+    MUL8 plo : STA mul_p+2
+    LDA plo : CLC : ADC mul_p+1 : STA mul_p+1
+    BCC narrow
+    INC mul_p+2
+.narrow
+    STZ mul_p+3
+    BRA got_product
+.wide
+    MOVW mul_x, xs
+    LDA xf_amag,X : ZA_INDEXEDBY {12, 14, 16}
+    STA mul_y : LDA xf_amag+1,X : ZA_INDEXEDBY {12, 14, 16}
+    STA mul_y+1
+    JSR umul16
+.got_product
+    \ |X0 A_z| / 128, rounded up if the product is negative
+    BIT pneg : BPL rounded
+    LDA mul_p : CLC : ADC #127 : STA mul_p
+    BCC rounded
+    INC mul_p+1 : BNE rounded
+    INC mul_p+2 : BNE rounded
+    INC mul_p+3
+.rounded
+    ASL mul_p : ROL mul_p+1 : ROL mul_p+2 : ROL mul_p+3     ; bytes 1-3
+    LDX term
     LDA xf_asign,X : ZA_INDEXEDBY 0..5
-    STA mul_sign
+    STA d
     TXA : ASL A : TAX
     LDA xf_amag,X : ZA_INDEXEDBY 0..10
     STA d24 : LDA xf_amag+1,X : ZA_INDEXEDBY 0..10
     STA d24+1 : STZ d24+2
-    BIT mul_sign : BPL a_pos
+    BIT d : BPL a_pos
     LDA #0 : SEC : SBC d24 : STA d24 : LDA #0 : SBC d24+1 : STA d24+1 : LDA #0 : SBC #0 : STA d24+2
 .a_pos
+    BIT pneg : BMI add
     LDA d24 : SEC : SBC mul_p+1 : STA d24
     LDA d24+1 : SBC mul_p+2 : STA d24+1
     LDA d24+2 : SBC mul_p+3 : STA d24+2
+    BRA got_d
+.add
+    LDA d24 : CLC : ADC mul_p+1 : STA d24
+    LDA d24+1 : ADC mul_p+2 : STA d24+1
+    LDA d24+2 : ADC mul_p+3 : STA d24+2
+.got_d
     \ B = 128 d / tz, d halved (and B doubled) until it fits proj_x's word
     STZ halved
 .fit
@@ -513,12 +552,9 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 .b_pos
     LDA pq : STA sc_bmag,X : ZA_INDEXEDBY 0..10
     LDA pq+1 : STA sc_bmag+1,X : ZA_INDEXEDBY 0..10
-    INC row : LDA row : CMP #2 : BEQ rows_done
-    JMP each_row
-.rows_done
-    LDX j : INX : CPX #3 : BEQ columns_done
-    JMP column
-.columns_done
+    INC term : LDA term : CMP #6 : BEQ terms_done
+    JMP each_term
+.terms_done
     JSR screen_setup
     \ Inside the window? The centre, a radius (on the screen, plus one)
     \ from each edge.

@@ -34,47 +34,46 @@ MACRO MUL8 lo
     LDA (m_sqhi),Y : SBC (m_nghi),Y
 ENDMACRO
 
-\ umul16: mul_p (4 bytes) = mul_x * mul_y, both unsigned 16-bit.
+\ umul16: mul_p (4 bytes) = mul_x * mul_y, both unsigned 16-bit. The
+\ middle byte's carries go into x1 y0's high byte, which they can't
+\ overflow: it's at most &FE, and &FE only when its low byte is 1.
 .umul16
 {
+    ZA_AUTO1 c0
     LDA mul_x : MUL_SET
-    LDY mul_y : MUL8 mul_p : STA mul_p+1
-    LDY mul_y+1 : MUL8 mul_t : STA mul_p+2
-    LDA mul_t : CLC : ADC mul_p+1 : STA mul_p+1
-    BCC no1
-    INC mul_p+2
-.no1
+    LDY mul_y : MUL8 mul_p : STA mul_p+1        ; x0 y0
+    LDY mul_y+1 : MUL8 mul_t : STA mul_p+2      ; x0 y1
     LDA mul_x+1 : MUL_SET
-    LDY mul_y : MUL8 mul_t : STA mul_t+1
-    LDY mul_y+1 : MUL8 mul_p+3 : TAX
-    LDA mul_t : CLC : ADC mul_p+1 : STA mul_p+1
-    LDA mul_t+1 : ADC mul_p+2 : STA mul_p+2
-    BCC no2
+    MUL8 mul_t+1 : STA mul_p+3                  ; x1 y1
+    LDY mul_y : MUL8 c0 : TAX                   ; x1 y0
+    LDA mul_p+1 : CLC : ADC mul_t : BCC n1
+    INX : CLC
+.n1
+    ADC c0 : STA mul_p+1 : BCC n2
     INX
-.no2
-    LDA mul_p+3 : CLC : ADC mul_p+2 : STA mul_p+2
-    TXA : ADC #0 : STA mul_p+3
+.n2
+    TXA : CLC : ADC mul_p+2 : BCC n3
+    INC mul_p+3 : CLC
+.n3
+    ADC mul_t+1 : STA mul_p+2 : BCC done
+    INC mul_p+3
+.done
     RTS
 }
 
-\ smul16: mul_p = mul_x * mul_y, signed 16-bit to 32 (the 68000's muls).
+\ smul16: mul_p = mul_x * mul_y, signed 16-bit to 32 (the 68000's muls):
+\ the unsigned product of the two's complement words, less 2^16 y if x is
+\ negative and 2^16 x if y is.
 .smul16
 {
-    LDA mul_x+1 : EOR mul_y+1 : STA mul_sign
-    LDA mul_x+1 : BPL xpos
-    LDA #0 : SEC : SBC mul_x : STA mul_x
-    LDA #0 : SBC mul_x+1 : STA mul_x+1
-.xpos
-    LDA mul_y+1 : BPL ypos
-    LDA #0 : SEC : SBC mul_y : STA mul_y
-    LDA #0 : SBC mul_y+1 : STA mul_y+1
-.ypos
     JSR umul16
-    BIT mul_sign : BPL done
-    LDA #0 : SEC : SBC mul_p : STA mul_p
-    LDA #0 : SBC mul_p+1 : STA mul_p+1
-    LDA #0 : SBC mul_p+2 : STA mul_p+2
-    LDA #0 : SBC mul_p+3 : STA mul_p+3
+    BIT mul_x+1 : BPL x_pos
+    LDA mul_p+2 : SEC : SBC mul_y : STA mul_p+2
+    LDA mul_p+3 : SBC mul_y+1 : STA mul_p+3
+.x_pos
+    BIT mul_y+1 : BPL done
+    LDA mul_p+2 : SEC : SBC mul_x : STA mul_p+2
+    LDA mul_p+3 : SBC mul_x+1 : STA mul_p+3
 .done
     RTS
 }
@@ -84,10 +83,11 @@ ENDMACRO
 \ down, so the floor comes free.
 .fmul16
     JSR smul16
-    ASL mul_p+1 : ROL mul_p+2 : ROL mul_p+3
-    ASL mul_p+1 : ROL mul_p+2 : ROL mul_p+3
     LDA mul_p+2 : STA mul_r
     LDA mul_p+3 : STA mul_r+1
+    LDA mul_p+1
+    ASL A : ROL mul_r : ROL mul_r+1
+    ASL A : ROL mul_r : ROL mul_r+1
     RTS
 
 \ sdiv32: the 68000's divs. mul_p (32-bit signed) / div_d (16-bit signed):
