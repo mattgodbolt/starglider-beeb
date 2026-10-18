@@ -1,125 +1,179 @@
 \ ***************************************************************************
 \ STARGLIDER for the BBC Master - the speech player (decision 5): its tick
 \
-\ In the loading area's bank, past its window, run with it paged and ANDY
-\ out: speech.6502's speech_irq pages it, X pushed, and speech_exit puts
-\ the bank back. The clips run through three areas: bank 7's first 4K
-\ (SPEECH_A), the logic bank's past the effects' tables (speech_b), which
-\ speech.6502's speech_read reads, and this section's tail (speech_c). The
-\ player counts the ST's bytes left (sample_left) down as the ST's Timer A
-\ does, three for each two samples, and the clip ends at 0; past its last
-\ sample it holds the level.
+\ In main RAM below &3000, run by the interrupt whichever bank is paged and
+\ ANDY in or out. The clips run through three areas: bank 7's first 4K
+\ (SPEECH_A), the logic bank's past the effects' tables (speech_b), and
+\ bank 7's window section's tail (speech_c), so a byte is read with its
+\ area's bank paged, ANDY out, and the bank put back (bank_now first, as
+\ the disc's NMI routine expects). The player counts the ST's bytes left
+\ (sample_left) down as the ST's Timer A does, three for each two
+\ samples, and the clip ends at 0; past its last sample it holds the
+\ level. Which sample is next is sp_next's branch, which each sets.
+\
+\ A tick can go on past an RTI: the part to follow pushes its address and
+\ the flags, as an interrupt would, for the RTI to return to. So the
+\ engine (irq_handler) takes the split, or whatever else waits, in the
+\ middle of a tick, and a late tick follows its sample with those it owes.
 \ ***************************************************************************
 
-\ The player's state: sp_byte the byte whose second sample is next,
-\ SPEECH_END once past the last; sp_far's bit 7 set while the clip is in
-\ the logic bank's area (its address speech_read_at's, else speech_byte's);
-\ sp_owed's while the count is shortened (its immediates, below) for time
-\ owed.
-.sp_byte        SKIP 1
-.sp_far         SKIP 1
-.sp_owed        SKIP 1
+\ (The seldom paths first, within the branches' reach.)
 
-\ speech_tick: like sound_tick, a tick due within 256 microseconds of the
-\ palette split lets the split go first: it waits for the split's flag
-\ and leaves its own, coming late (speech_exit hands the split on). The
-\ tick starts the next count, the period less what T2 has run on past 0
-\ since this tick was due; a tick a period late or more starts the next at
-\ once, and the time it owes comes off the one after. Then its sample.
-.speech_tick
-    LDA usrvia_t1ch : BNE sp_clear              ; (its low byte read would acknowledge it)
-.sp_split
-    BIT usrvia_ifr : BVC sp_split
-    JMP speech_exit
-.sp_clear
-    LDA usrvia_t2cl                             ; acknowledged
-    \ The high byte, read a few counts on, must be of the same count: a low
-    \ byte about to wrap under it is read again until it has.
-    CMP #16 : BCC sp_clear
-    CLC
-.speech_period_lo
-    ADC #LO(SPEECH_T2) : TAX
+\ sp_late: a late tick's (sp_behind's), after each sample it writes and
+\ each turn of the engine's: T2's count, which has run on from the late
+\ tick's due moment, against the next sample's (sp_due's), for the next
+\ count, unless that moment is past too, or the clip has ended.
+.sp_late
+    LDA sample_left : ORA sample_left+1 : BEQ sp_late_out
+.sp_again
+    LDA usrvia_t2cl
+    CMP #16 : BCC sp_again                      ; (a low byte about to wrap: until it has)
+.sp_due_lo
+    ADC #0                                      ; (sp_behind and sp_more set them)
+    STA usrvia_t2cl                             ; the next count's low byte
     LDA usrvia_t2ch
-.speech_period_hi
-    ADC #HI(SPEECH_T2) : BMI sp_behind
-    STX usrvia_t2cl : STA usrvia_t2ch           ; (its high byte starts it)
-    BIT sp_owed : BPL sp_sample
-    \ on time again: what was owed is paid
-    STZ sp_owed
-    LDA #LO(SPEECH_T2) : STA speech_period_lo + 1
-    LDA #HI(SPEECH_T2) : STA speech_period_hi + 1
-.sp_sample
-    BIT sp_phase : BPL sp_first
-    \ a byte's second sample, written while the phase turns
-    LDA sp_byte : CMP #SPEECH_END : BEQ sp_second_turn
-    AND #15 : ORA #SN_TONE1 OR SN_VOL
-    STA sysvia_ora_nh
-    STZ sysvia_orb                              ; write enable low
-.sp_second_turn
-    LDA sp_phase : EOR #&80 : STA sp_phase
-    NOP : NOP
-    LDA #8 : STA sysvia_orb                     ; and high
-    JMP speech_exit
+.sp_due_hi
+    ADC #0
+    BMI sp_more
+    STA usrvia_t2ch                             ; the next on time
+.sp_late_out
+    LDA &FC                                     ; the interrupted A, which the OS kept
+    RTI
+.sp_more
+    \ that one's late too: the engine first, if the split is near or it has
+    \ an interrupt waiting, then the sample, the next's moment a period on
+    LDA usrvia_t1ch : BEQ sp_near
+    BIT usrvia_ifr : BVS sp_yield
+    BIT sysvia_ifr : BMI sp_yield
+    LDA sp_due_lo + 1 : CLC : ADC #LO(SPEECH_PERIOD) : STA sp_due_lo + 1
+    LDA sp_due_hi + 1 : ADC #HI(SPEECH_PERIOD) : STA sp_due_hi + 1
+    BRA sp_owe
+.sp_near
+    \ (until its flag, or T1 past 0 without one, as no split was due)
+    BIT usrvia_ifr : BVS sp_yield
+    LDA usrvia_t1ch : BEQ sp_near
+    BRA sp_more
+.sp_yield
+    LDA #HI(sp_late) : PHA : LDA #LO(sp_late) : PHA : PHP
+    JMP irq_handler
+
+\ sp_behind: a tick a period late or more: its sample now, then those it
+\ owes after it, at once (sp_late).
 .sp_behind
-    \ a period late or more: the next at once, and what's owed off the one after
-    PHA
-    LDA #1 : STA usrvia_t2cl : STZ usrvia_t2ch  ; (first, as late as the count's start above)
-    TXA : CLC : ADC #LO(SPEECH_T2) : STA speech_period_lo + 1
-    PLA : ADC #HI(SPEECH_T2) : STA speech_period_hi + 1
-    LDA #&80 : STA sp_owed
-    BRA sp_sample
-.sp_start
-    \ sample_start's clip, from its first byte
-    LDX sample_clip
-    LDA speech_lo - SAMPLE_LAUNCH,X : STA speech_byte + 1 : STA speech_read_at + 1
-    LDA speech_hi - SAMPLE_LAUNCH,X : STA speech_byte + 2 : STA speech_read_at + 2
-    LDA speech_far - SAMPLE_LAUNCH,X : STA sp_far
-    STZ sp_phase
-    BRA sp_next
-.sp_first
-    \ a byte's first: the byte read, written while the phase turns and the
-    \ ST's three bytes for the two are counted
-    BVS sp_start                                ; (sample_start's mark)
+    LDA #LO(SPEECH_PERIOD - SPEECH_LATE - 1) : STA sp_due_lo + 1
+    LDA #HI(SPEECH_PERIOD - SPEECH_LATE - 1) : STA sp_due_hi + 1
+.sp_owe
+    LDA #HI(sp_late) : PHA : LDA #LO(sp_late) : PHA : PHP
+    JMP sp_next
+
+.sp_none
+    \ past the clip's last sample: none, the level held
+    LDA #LO(sp_first - sp_after) : STA sp_next + 1
+    LDA &FC
+    RTI
+.sp_split
+    \ the split near: its flag, then the engine, back to the count; or T1
+    \ past 0 without one, as no split was due
+    BIT usrvia_ifr : BVS sp_split_first
+    LDA usrvia_t1ch : BEQ sp_split
+    BIT usrvia_ifr : BVS sp_split_first         ; (should it have come between)
+    BRA sp_count
+.sp_split_first
+    LDA #HI(sp_count) : PHA : LDA #LO(sp_count) : PHA : PHP
+.sp_engine
+    JMP irq_handler
+
+\ speech_irq: IRQ1V while a clip plays (sample_start sets it, the clip's
+\ end puts irq_handler back), so that a tick needn't pass the engine's
+\ tests: User VIA T2's interrupt alone is the speech's tick, and anything
+\ else, the palette split's with it or not, the engine's (engine.6502).
+\
+\ Like sound_tick, a tick due within 256 microseconds of the palette split
+\ lets the split go first, which it would hold up past its window. The
+\ window is longer than a sample takes, and a late tick looks again before
+\ each it owes, so no split comes during one. The tick starts the next
+\ count, the period less what T2 has run on past 0 since this tick was
+\ due, and writes its sample; a tick a period late or more writes its own
+\ and those it owes, and starts the count to the next one due.
+.speech_irq
+    ZA_INTERRUPT
+    LDA usrvia_ifr : AND #&60 : CMP #&20 : BNE sp_engine    ; (T2 is bit 5, T1 6)
+    LDA usrvia_t1ch : BEQ sp_split              ; (its low byte read would acknowledge it)
+.sp_count
+    \ On time, the count's low byte is at least 256 less SPEECH_T2, too far
+    \ from wrapping to change under the high byte's read; a late tick's
+    \ count is read again (sp_late).
+    LDA usrvia_t2cl                             ; acknowledged
+    ADC #LO(SPEECH_T2 - 1)                      ; (C set by the test above)
+    STA usrvia_t2cl                             ; the next count's low byte
+    LDA usrvia_t2ch
+    ADC #HI(SPEECH_T2 - 1)
+    BMI sp_behind
+    STA usrvia_t2ch                             ; (its high byte starts it)
 .sp_next
-    BIT sp_far : BMI sp_far_read
-.speech_byte
-    LDA &8000                                   ; (the clip's next byte, in this bank)
+    BRA sp_first                                ; (the next sample's: each sample sets it)
+.sp_after
+.sp_first
+    \ a byte's first sample: the byte read, the sample written while the
+    \ bank goes back, its second next; then the ST's three bytes for the
+    \ two are counted
+    LDA bank_now : PHA
+.sp_bank
+    LDA #BANK_PIC : STA bank_now : STA romsel   ; (its area's bank: speech_begin and sp_page set it)
+.sp_at
+    LDA SPEECH_A                                ; (the clip's next byte: likewise)
+    CMP #SPEECH_END : BEQ sp_held
     STA sp_byte
-    CMP #SPEECH_END : BEQ sp_count
-    INC speech_byte + 1 : BEQ sp_page
-.sp_high
     LSR A : LSR A : LSR A : LSR A : ORA #SN_TONE1 OR SN_VOL
     STA sysvia_ora_nh
     STZ sysvia_orb                              ; write enable low
-.sp_count
-    LDA sp_phase : EOR #&80 : STA sp_phase
-    LDA sample_left : SEC : SBC #3 : STA sample_left
+    PLA : STA bank_now : STA romsel             ; (holding it low for the chip, as sn_write's wait)
     LDA #8 : STA sysvia_orb                     ; and high
-    BCS sp_done
+    LDA #LO(sp_second - sp_after)
+.sp_counted
+    STA sp_next + 1
+    LDA sample_left : SEC : SBC #3 : STA sample_left
+    BCC sp_borrow
+    LDA &FC
+    RTI
+.sp_held
+    \ past the clip's last: none, and none next
+    PLA : STA bank_now : STA romsel
+    LDA #LO(sp_none - sp_after)
+    BRA sp_counted
+.sp_borrow
     LDA sample_left+1 : BEQ sp_ended
     DEC sample_left+1
-.sp_done
-    JMP speech_exit
-.sp_far_read
-    JSR speech_read
-    STA sp_byte
-    CMP #SPEECH_END : BEQ sp_count
-    INC speech_read_at + 1 : BNE sp_high
-    \ the next page, or at the area's end this section's tail
-    INC speech_read_at + 2 : LDA speech_read_at + 2 : CMP #HI(ANDY_TOP) : BNE sp_paged
-    STZ sp_far
-    LDA #LO(speech_c) : STA speech_byte + 1
-    LDA #HI(speech_c) : STA speech_byte + 2
-    BRA sp_paged
-.sp_page
-    \ the next page, or at the first area's end the logic bank's
-    INC speech_byte + 2 : LDA speech_byte + 2 : CMP #HI(ANDY_TOP) : BNE sp_paged
-    LDA #&80 : STA sp_far
-    LDA #LO(speech_b) : STA speech_read_at + 1
-    LDA #HI(speech_b) : STA speech_read_at + 2
+    LDA &FC
+    RTI
+
+.sp_second
+    \ a byte's second, written while the clip moves on, the next byte's
+    \ first next
+    LDA sp_byte : AND #15 : ORA #SN_TONE1 OR SN_VOL
+    STA sysvia_ora_nh
+    STZ sysvia_orb                              ; write enable low
+    LDA #LO(sp_first - sp_after) : STA sp_next + 1
+    INC sp_at + 1 : BEQ sp_page                 ; (likewise)
 .sp_paged
-    LDA sp_byte
-    BRA sp_high
+    LDA #8 : STA sysvia_orb                     ; and high
+    LDA &FC
+    RTI
+.sp_page
+    \ the next page, or at the first two areas' end the next area's start:
+    \ A's, in bank 7, goes on in B, in the logic bank, and B's in C, in bank 7
+    INC sp_at + 2 : LDA sp_at + 2 : CMP #HI(ANDY_TOP) : BNE sp_paged
+    LDA sp_bank + 1 : CMP #BANK_PIC : BNE sp_to_c
+    LDA #BANK_LOGIC : STA sp_bank + 1
+    LDA #LO(speech_b) : STA sp_at + 1
+    LDA #HI(speech_b) : STA sp_at + 2
+    BRA sp_paged
+.sp_to_c
+    LDA #BANK_PIC : STA sp_bank + 1
+    LDA #LO(speech_c) : STA sp_at + 1
+    LDA #HI(speech_c) : STA sp_at + 2
+    BRA sp_paged
+
 .sp_ended
     \ the clip's end: tone 1 silent, T2's interrupt off (its last count runs
     \ out unheeded), and the engine's interrupt back
@@ -128,7 +182,7 @@
     LDA #LO(irq_handler) : STA irq1v
     LDA #HI(irq_handler) : STA irq1v+1
     LDA #SN_TONE1 OR SN_VOL OR SN_OFF : JSR sn_write
-    JMP speech_exit
-
-\ the clips' starts, and their third area (tools/mkspeech.py)
-INCLUDE "../build/gen/speech_clips.6502"
+    LDA &FC
+    RTI
+\ (sp_next's branch reaches each sample it's set to)
+ASSERT sp_second - sp_after < 128 AND sp_after - sp_none <= 128

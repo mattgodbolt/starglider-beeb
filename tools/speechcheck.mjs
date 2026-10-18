@@ -6,9 +6,10 @@
 // over the clip, each sample within JITTER of its moment; the clip's end
 // (tone 1 off, sample_left 0) at the ST's length at 6144 a second. With a
 // key held, whose scan is the vertical sync's longest work, a clip keeps
-// its time, its samples within a scan of theirs. sample_stop ends a clip
-// at the player's next count. The palette split stays in its window while
-// a clip plays. And a WAV of each clip as the chip played it, into
+// its time, its samples within a scan of theirs and their line at the
+// rate they keep without (the late ticks' debts paid). sample_stop ends a
+// clip at the player's next count. The palette split stays in its window
+// while a clip plays. And a WAV of each clip as the chip played it, into
 // build/speech, for listening (tools/st_samples.py --wav writes the ST's).
 //
 //   node tools/speechcheck.mjs
@@ -20,10 +21,14 @@ const { HZ, sym, machine, snEvents } = await import(pathToFileURL(path.join(root
 const gen = JSON.parse(fs.readFileSync(path.join(root, "build/gen/speech.json"), "utf8"));
 const ST_HZ = 6144;
 // a tick waiting on the split: the guard's 256us window, the split's
-// interrupt, and the tick's own way to its sample, from bank 7
+// interrupt, and the tick's own way to its sample
 const JITTER = 350e-6;
 const SCAN = 900e-6;                    // ... with a key held
 const RATE_SLACK = 0.002;
+// a key held: the samples' line at the rate they keep with none, which a
+// late tick's count a microsecond out (SPEECH_LATE's), once a field, would
+// tilt by twice this
+const HELD_SLACK = 2.5e-5;
 const STEP = 60e-6;                     // the line's move from field to field
 
 let bad = 0;
@@ -77,6 +82,10 @@ function check(name, clip, { t0, writes }, jitter) {
     // the rate, and each sample against it
     const t = levels.slice(0, -1).map((e) => e[0]);
     const period = (t[t.length - 1] - t[0]) / (t.length - 1);
+    // ... and the samples' least-squares line, which a scan's lateness at
+    // either end doesn't tilt
+    const mid = (t.length - 1) / 2, tmean = t.reduce((a, b) => a + b, 0) / t.length;
+    const fit = t.reduce((a, x, i) => a + (i - mid) * (x - tmean), 0) / t.reduce((a, _, i) => a + (i - mid) ** 2, 0);
     if (Math.abs(period * gen.rate - 1) > RATE_SLACK) fail(`${name}: ${(1 / period).toFixed(1)} samples a second`);
     // each sample against the rate's line through the samples a field
     // either side of it (their median), which drifts by a few microseconds
@@ -101,7 +110,7 @@ function check(name, clip, { t0, writes }, jitter) {
     // the end, at the ST's length
     const end = clip.played / ST_HZ;
     if (Math.abs(off[0] - end) > 2 / gen.rate + jitter) fail(`${name}: ends at ${off[0].toFixed(4)}s, not ${end.toFixed(4)}s`);
-    return { worst, period, step };
+    return { worst, period, step, fit };
 }
 
 function wav(file, writes, t0) {
@@ -128,10 +137,12 @@ function wav(file, writes, t0) {
 }
 
 const report = [];
+let free = null;
 for (const [i, clip] of gen.clips.entries()) {
     splits = [];
     const run = await play(i + 1, clip.played);
     const r = check(clip.name, clip, run, JITTER);
+    if (i === 0) free = r;
     wav(path.join(root, "build/speech", `${clip.name}.wav`), run.writes, run.t0);
     const least = Math.min(...splits);
     const late = splits.filter((d) => d - least > 40).length;
@@ -144,6 +155,8 @@ await m.runTo(m.now() + 0.05 * HZ);
 {
     const r = check("clare1, a key held", gen.clips[0], await play(1, gen.clips[0].played), SCAN);
     if (r) report.push(`a key held ${(1 / r.period).toFixed(1)}Hz, worst ${(r.worst * 1e6).toFixed(0)}us, steps ${(r.step * 1e6).toFixed(0)}us`);
+    if (r && free && Math.abs(r.fit / free.fit - 1) > HELD_SLACK)
+        fail(`a key held: ${(1 / r.fit).toFixed(2)} samples a second on their line, not ${(1 / free.fit).toFixed(2)}`);
 }
 m.tm.keyUp("ArrowLeft");
 // Q's sample_stop: the clip ends at the player's next count

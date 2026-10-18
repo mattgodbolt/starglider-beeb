@@ -128,9 +128,9 @@ SAMPLE_ENERGY  = 4                  ; the energy low
 \ the speech warnings wait and no effect starts; the player
 \ (speech_tick.6502) counts them down. Timer A is the sample's on the ST, its mixer all off,
 \ so an effect playing stops (SFX_QUIET), its record read with ANDY,
-\ which the logic has paged, out. Tone 1 a carrier, T2's first count a
-\ period and its interrupt first (speech_irq), the player in bank 7 starts
-\ the clip at its first tick (speech_tick.6502), as sp_phase marks.
+\ which the logic has paged, out. The player at the clip's start
+\ (speech_begin), tone 1 a carrier, T2's first count a period and its
+\ interrupt first (speech_irq).
 .sample_start
 {
     LDA sound_on : BEQ off
@@ -144,7 +144,7 @@ SAMPLE_ENERGY  = 4                  ; the energy low
     BANK BANK_LOGIC
     LDY #SFX_QUIET : JSR sfx_record
     PLA : STA bank_now : STA romsel
-    LDA #&40 : STA sp_phase
+    JSR speech_begin
     LDA #SN_TONE1 OR 1 : JSR sn_write
     LDA #0 : JSR sn_write                       ; tone 1's period 1
     LDA #LO(speech_irq) : STA irq1v
