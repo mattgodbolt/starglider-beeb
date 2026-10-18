@@ -1,8 +1,40 @@
 \ ***************************************************************************
-\ STARGLIDER for the BBC Master - the screen's addresses
+\ STARGLIDER for the BBC Master - the cockpit's screens
+\
+\ The cockpit (tools/mkcockpit.py, decision 3) is on both screens, around
+\ the view's window, which is all that's ever cleared. Each of these sets
+\ ACCCON's X to reach the shadow screen, which moves &3000-&7FFF and
+\ nothing else, so they're in the loading area's bank with the window's
+\ other code (view_under.6502), where X changes nothing: the start pages
+\ it for them, screen_erase (code.6502) for hazel.6502's erase_screen,
+\ and under_draw runs there. (The CRTC is set up once, by setup.6502's
+\ screen_mode.)
 \ ***************************************************************************
 
-\ (The CRTC is set up once, by setup.6502's screen_mode.)
+\ screen_copy: main RAM's screen into shadow RAM's, a page at a time
+\ through edge_mark (free outside the draw phase). cockpit.6502's
+\ panel_reset should follow it. (The disc's alone: the spike has no
+\ cockpit.)
+IF NOT(DEFINED(SPIKE))
+.screen_copy
+{
+    ZA_AUTO2 p
+    STZ p : LDA #HI(SCREEN) : STA p+1
+.page
+    LDY #0
+.read
+    LDA (p),Y : STA edge_mark,Y
+    INY : BNE read
+    LDA #ACCCON_X : TSB acccon
+.write
+    LDA edge_mark,Y : STA (p),Y
+    INY : BNE write
+    LDA #ACCCON_X : TRB acccon
+    INC p+1 : BPL page                          ; up to &7FFF
+    RTS
+}
+ASSERT screen_copy >= &8000                     ; (it sets X)
+ENDIF
 
 \ The window's bytes: x 16-303 is MODE 1's bytes 4-75 of a scan line.
 WINDOW_COL0 = VIEW_XMIN DIV 4
@@ -10,8 +42,7 @@ WINDOW_COLS = VIEW_XMAX DIV 4 + 1 - WINDOW_COL0
 ASSERT VIEW_XMIN MOD 4 = 0 AND VIEW_XMAX MOD 4 = 3
 
 \ window_clear: the view's window cleared, on the screen draw_bank names:
-\ the cockpit around it stays. It sets ACCCON's X, so it must lie below
-\ &3000, where X changes nothing.
+\ the cockpit around it stays.
 .window_clear
 {
     ZA_AUTO2 p
@@ -39,4 +70,4 @@ ASSERT VIEW_XMIN MOD 4 = 0 AND VIEW_XMAX MOD 4 = 3
     LDA draw_bank : TRB acccon
     RTS
 }
-ASSERT P% <= &3000
+ASSERT window_clear >= &8000                    ; (it sets X)

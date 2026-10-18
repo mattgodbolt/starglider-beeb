@@ -35,7 +35,9 @@
     JSR mul_init
     JSR line_draw
     JSR screen_mode
-    \ the cockpit on both screens, their windows empty, their panels to draw
+    \ the cockpit on both screens, their windows empty (screen.6502, in the
+    \ loading area's bank), their panels to draw
+    BANK BANK_PIC
     JSR screen_copy
     STZ draw_bank : JSR window_clear
     LDA #ACCCON_X : STA draw_bank : JSR window_clear
