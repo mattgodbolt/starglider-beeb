@@ -1,0 +1,27 @@
+# The laser's kill, the score and the level up: standing still 400 behind
+# a cannon with one hit left (slot 72, x &ABB0, z &9210), a little to its
+# left and as low as the ground allows, so that its box holds the sight; on
+# level 34 with the score at 9,980 and laser energy for three shots (keypad
+# Enter, then Insert). The kill's 50 crosses 10,000: the next frame the
+# level goes up, and 35 becomes 34.
+wait 38
+key 57
+wait 4
+debug w w $5c196 $22
+debug w w $12206 0
+debug w w $11eca $0000 $9980
+debug w w $5c18a $0280
+debug w w $5c02e $ab7b $ffeb $9080
+debug w w $5c03c 0
+wait 0.3
+debug parse {arm}
+debug echo \nSEG kill\n
+down 0x72
+wait 20
+up 0x72
+down 0x52
+wait 10
+up 0x52
+wait 4
+debug echo \nSEG end\n
+quit

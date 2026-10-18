@@ -8,3 +8,10 @@
 \ state the game's logic reads (docs/research/st-logic.md).
 .sfx_start
     RTS
+
+\ sample_start (the ST's &01A50): speech clip A (1-4: clare1-4), as the
+\ ST's callers start it; with C set, only if no clip is playing (the
+\ callers that test D_01E56 first). It changes no state the game's logic
+\ reads.
+.sample_start
+    RTS

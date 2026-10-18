@@ -1,0 +1,21 @@
+# A missile launched (L) and flown from its nose, turning, its life cut
+# short: the window opening (no lists), the lists and the ground dots from
+# the missile, the window closing over its last 15 frames, and the view's
+# end.
+wait 38
+key 57
+wait 4
+key l 0.3
+debug w w $5c176 60
+debug parse {arm}
+debug echo \nSEG missile\n
+wait 12
+down 0x4b
+wait 6
+up 0x4b
+down 0x4d
+wait 6
+up 0x4d
+wait 24
+debug echo \nSEG end\n
+quit

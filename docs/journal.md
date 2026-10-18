@@ -305,3 +305,38 @@ again into bank 6, which nothing uses yet, as the models turn.
 checks every byte. The tools that run the disc without booting now put
 it in the drive too (`tools/disc.mjs`). Real hardware is the test that
 counts here, as CE2 found: jsbeeb's 1770 is kinder than the chip.
+
+### world_render's logic
+
+world_render (&04FE8) decides as well as draws, and its logic is now the
+port's, in two halves round the frame's drawing (decision 14):
+`world_lists` (the level-up test, the score add from the $D4 mailbox, the
+camera, the ground dots, the launch's count and the docked tunnel, the
+lists) and `world_after` (the draw loop's matrix cache, the laser). Both
+match the ST in everything the map holds on the flight capture and seven
+captures of their own (`tests/st/steps_world_*.txt`): the tower group's
+beam switched by the laser, a kill crossing 10,000 on level 34, the
+tunnel's pick-up, refill and launch, the cheat's refill, the missile
+view, the sight on a word's edge, and a target the laser can't hurt.
+
+- **The dots' d0.** random8 adds whatever d0 holds, and at the dots
+  that's the drawing's: the gunsight's blit leaves its last word, which
+  depends only on the sight's x mod 16 (the table is the bitmap's, checked
+  for every shift), a projected dot leaves the projection's shift, a
+  respawn its own random word, and the missile view the window's step.
+- **The cone's decision is exact.** The dots are rotated approximately
+  first, as decision 11 rotates objects, and exactly only within the
+  approximation's bound of the cone's edges, the bound taken from each
+  frame's matrix.
+- **The drawing's leftovers.** The draw loop's object matrices leave the
+  last one built's sines in the logic's trig_sin and trig_cos, and a
+  matrix is built only when an object's angles differ from the last's
+  ($180-$184), so the port keeps that cache too.
+- **The harness.** The lists are in the map now (a `list` kind: the ST's
+  pointer and count), so world_after starts from the ST's draw list and
+  world_lists' lists are checked; the camera-space positions of objects
+  rotated approximately are checked as `tools/scenecheck.py` checks them;
+  the key states are inputs, put but not compared, since the ST's
+  keyboard interrupt writes them mid-frame; `world_whole` runs both halves
+  for the missile view, which has no lists point; `--cycles` times a
+  routine.

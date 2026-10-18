@@ -9,7 +9,12 @@
 \ its low byte), long, raw N (N bytes as they are), slot (the ST's pointer
 \ to an object record, kept as the slot: &FF for none), or for an array
 \ wlo N S / whi N S / barr N S (N words' low or high bytes, or N bytes, S
-\ bytes apart on the ST) or slots N (N record pointers, kept as slots). tools/stmap.py reads them, and the harness
+\ bytes apart on the ST) or slots N (N record pointers, kept as slots), or
+\ for a list, list COUNT N (the address is the ST's pointer to the list's
+\ first entry, record pointers pushed downward; COUNT its count's ST address,
+\ N the port's count; the port keeps the slots in the order pushed). A
+\ last word "in" marks an input the ST's interrupts write when they will (a
+\ key's state): the harness puts it but doesn't compare it. tools/stmap.py reads them, and the harness
 \ translates the ST's state into the port's and back by them
 \ (tools/logicrun.mjs). Variables declared elsewhere carry the same braces
 \ (the player, in zp.6502).
@@ -30,8 +35,33 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .mouse_y      SKIP 2        ; {ST P&01844 word} the climb
 .speed_acc    SKIP 2        ; {ST P&01848 word} the speed, negated
 .world_vec    SKIP 2        ; world_call's routine (logic/arith.6502)
+    \ world_render's logic (logic/worldlogic.6502): what the panel and the
+    \ drawing show
+.score        SKIP 4        ; {ST P&0150C long} BCD, eight digits
+.last_kill    SKIP 2        ; {ST $286(a6) word} BCD, the last kill's score
+.level        SKIP 1        ; {ST $296(a6) word8} 1-34
+.laser_energy SKIP 2        ; {ST $28A(a6) word} &100 a shot; &FFFF full
+.missiles     SKIP 1        ; {ST $278(a6) word8} carried, 0-2
+.colour0_flash SKIP 2       ; {ST $242(a6) word} colour 0 at the frame's end, which clears it
+.frame_count  SKIP 2        ; {ST $1E2(a6) word} frame_end's (logic/frame.6502): every frame_end call, wrapping
+.m_iris       SKIP 1        ; {ST $27C(a6) word8} the missile view's window, closed by this much (steps of 8)
+.bolt_timer   SKIP 1        ; {ST $284(a6) word8} the laser bolt's steps to go, 4-0
+.bolt_target_x SKIP 2       ; {ST $24C(a6) word} the sight as it was when the bolt was fired
+.bolt_target_y SKIP 2       ; {ST $24E(a6) word}
+    \ the laser's keys, as the ST's key states hold them (the left button,
+    \ Return, Insert, keypad Enter): non-zero while held
+.key_fire_mouse  SKIP 1     ; {ST P&01836 byte in}
+.key_fire_return SKIP 1     ; {ST P&017DE byte in}
+.key_fire_insert SKIP 1     ; {ST P&01814 byte in}
+.key_fire_enter  SKIP 1     ; {ST P&01834 byte in}
 .logic_work_end
 ENDSECTION
+
+\ The lists (world.6502's, in memory.6502), as the ST's pointers and counts
+\ hold them.
+st_coarse_list = coarse_slots       ; {ST $090(a6) list $23C(a6) coarse_n}
+st_near_list   = near_slots         ; {ST $098(a6) list $240(a6) near_n}
+st_draw_list   = draw_slots         ; {ST $094(a6) list $23E(a6) draw_n}
 
 \ Animation frames (zp.6502's anim_frame, by shape), as the ST's frame
 \ lists number them: list &0D6CE drives shapes 1 and 10.
@@ -84,6 +114,25 @@ SECTION LogicAndy, org = ANDY_OBJECTS_END, guard = ANDY_TOP, virtual = TRUE
 .dots_z_hi    SKIP 40       ; {ST $8AE(a6) whi 40 4}
 
     \ world_render's logic (logic/worldlogic.6502)
+.kill_score   SKIP 2        ; {ST $0D4(a6) word} BCD: a kill's score, which the next normal view adds (a mailbox, not a sum)
+.score_addend SKIP 4        ; {ST P&01A4C long} the score add's operand, kill_score as it was
+.last_score_byte SKIP 1     ; {ST $2D5(a6) byte} the score's second byte at the last level change
+.level_changed SKIP 1       ; {ST $2D7(a6) byte} &FF when the score has just changed its ten-thousands
+.level_msg    SKIP 1        ; {ST $298(a6) word8} frames of LEVEL n left
+.cheat        SKIP 1        ; {ST $2CD(a6) byte}
+.docked_silo  SKIP 1        ; {ST $0A8(a6) slot} the silo docked in
+.shots_fired  SKIP 4        ; {ST $0B0(a6) long}
+.hits_scored  SKIP 4        ; {ST $0B8(a6) long} laser hits that took a hit point
+.laser_px     SKIP 2        ; {ST $254(a6) word} the laser's last box tested, projected: written, never read
+.laser_py     SKIP 2        ; {ST $256(a6) word}
+.laser_half_w SKIP 2        ; {ST $258(a6) word}
+.laser_half_h SKIP 2        ; {ST $25A(a6) word}
+    \ the drawing's matrix cache (&04114): the angles of the last object
+    \ matrix built, which decide whether the draw loop leaves the camera's
+    \ sines in trig_sin and trig_cos or an object's
+.obm_pitch    SKIP 2        ; {ST $180(a6) word}
+.obm_heading  SKIP 2        ; {ST $182(a6) word}
+.obm_roll     SKIP 2        ; {ST $184(a6) word}
 
     \ the keys and commands (logic/keys.6502)
 

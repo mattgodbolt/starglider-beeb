@@ -8,17 +8,697 @@
 \ player's laser (docs/research/st-logic.md, "The frame's end, the score,
 \ the interrupts and world_render's logic"). world_lists is its logic up to
 \ the lists (the capture's top to lists), world_after the rest (lists to
-\ render). For now world_lists is the list phase alone.
+\ render), which the frame draws between (decision 14). The drawing (the
+\ view's clear, the messages and the score printed, the gunsight's blit,
+\ the dots plotted, the bolts) is the renderer's; what it leaves in the
+\ variables the logic reads, and in the d0 the dots' random8 adds, is
+\ here.
+\
+\ The list phase (world.6502, rotate.6502) lies below ANDY_TOP, so ANDY
+\ comes out round each call of it.
 \ ***************************************************************************
 
+\ The projection's shift ($212, colour), which the laser's boxes use and
+\ which a projected dot leaves in d0.
+PROJ_SHIFT = 7
+
+\ The gunsight's blit (&0983C, D_0732A): the d0 its last word leaves, by
+\ the sight's x less the hotspot's (14), mod 16. At 0 the blit only copies,
+\ and d0 is what it was.
+.sight_d0_lo
+    EQUB &00, &00, &80, &C0, &E0, &F0, &F8, &7C, &3E, &1F, &0F, &07, &83, &C1, &E0, &F0
+.sight_d0_hi
+    EQUB &00, &1F, &0F, &07, &83, &C1, &E0, &F0, &F8, &7C, &3E, &1F, &0F, &07, &03, &01
+
+\ The laser's box half-height by type (&0ACF2), as the ST indexes it:
+\ types 30 and 31 read the table after it. (The half-width is &0ACB6,
+\ size_z.)
+.size_y_lo
+    EQUB 0, 134, 240, 34, 14, 80, 180, 128, 72, 132, 134, 120, 50, 120, 180, 164
+    EQUB 84, 0, 180, 120, 90, 72, 0, 60, 60, 60, 120, 210, 0, 0, &E8, &E8
+.size_y_hi
+    EQUB 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1
+    EQUB 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3
+
+\ A laser kill's score by type (&0AE9A, BCD): types 30 and 31 read the
+\ table after it (&0AED6).
+.kill_bcd_lo
+    EQUB &00, &00, &50, &50, &50, &50, &50, &00, &00, &00, &00, &00, &00, &20, &00, &50
+    EQUB &50, &50, &00, &00, &00, &90, &00, &00, &05, &10, &75, &00, &00, &00, &00, &00
+.kill_bcd_hi
+    EQUB &00, &00, &00, &00, &00, &00, &00, &05, &01, &02, &01, &01, &01, &01, &05, &01
+    EQUB &02, &01, &03, &02, &04, &02, &02, &02, &00, &00, &02, &00, &00, &00, &00, &15
+
+\ ---------------------------------------------------------------------------
+\ world_lists (&04FE8 to &05108): up to the lists, in the normal view or
+\ the missile view's (L_05248).
 .world_lists
-    \ the list phase is below ANDY_TOP, so ANDY comes out round it
+{
+    LDA mv_render : BEQ normal
+    JMP missile_lists
+.normal
+    \ docked, colour 0 flashes &036 (with the DOCKING message)
+    LDA docked : BEQ level_test
+    LDA #&36 : STA colour0_flash : STZ colour0_flash+1
+.level_test
+    \ the level up (&0502C): any change in the score's second byte (its
+    \ ten-thousands), tested before this frame's add, so a frame late
+    STZ level_changed
+    LDA score+2 : CMP last_score_byte : BEQ add
+    INC level
+    LDA #&32 : STA level_msg
+    LDA score+2 : STA last_score_byte
+    LDA #&FF : STA level_changed
+    LDA level : CMP #&23 : BNE add
+    LDA #&22 : STA level
+.add
+    \ the kill's score (&05086): shown as the last kill when non-zero,
+    \ then added, with the X flag clear and the last carry lost; d0 holds
+    \ it, which the gunsight's blit may change
+    LDA kill_score : STA rng_d0 : STA score_addend
+    LDA kill_score+1 : STA rng_d0+1 : STA score_addend+1
+    STZ score_addend+2 : STZ score_addend+3
+    ORA kill_score : BEQ adding
+    MOVW last_kill, kill_score
+.adding
+    SED
+    CLC
+    LDA score : ADC kill_score : STA score
+    LDA score+1 : ADC kill_score+1 : STA score+1
+    LDA score+2 : ADC #0 : STA score+2
+    LDA score+3 : ADC #0 : STA score+3
+    CLD
+    STZ kill_score : STZ kill_score+1
+    \ the camera's sines (&050A2): the heading's are the logic's trig_sin
+    \ and trig_cos
+    LDA pl_heading : STA m_idx : LDA pl_heading+1 : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+    JSR sight_blit
     LDA #BANK_WORLD : STA bank_now : STA romsel
     JSR camera
+    LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
+    LDA docked : BNE no_dots
+    JSR ground_dots
+.no_dots
+    JMP lists
+}
+
+\ sight_blit (&05598): the d0 the gunsight's blit leaves, when the sight
+\ is inside the window (each edge by the N flag of a word difference).
+.sight_blit
+{
+    LDA sight_x : SEC : SBC #LO(VIEW_XMIN) : LDA sight_x+1 : SBC #HI(VIEW_XMIN) : BMI outside
+    LDA sight_x : SEC : SBC #LO(VIEW_XMAX) : LDA sight_x+1 : SBC #HI(VIEW_XMAX) : BPL outside
+    LDA sight_y : SEC : SBC #LO(VIEW_YMIN) : LDA sight_y+1 : SBC #HI(VIEW_YMIN) : BMI outside
+    LDA sight_y : SEC : SBC #LO(VIEW_YMAX) : LDA sight_y+1 : SBC #HI(VIEW_YMAX) : BPL outside
+    LDA sight_x : SEC : SBC #14 : AND #15 : BEQ outside
+    TAX
+    LDA sight_d0_lo,X : STA rng_d0
+    LDA sight_d0_hi,X : STA rng_d0+1
+.outside
+    RTS
+}
+
+\ missile_lists (L_05248): the window opens 8 lines a step after the
+\ launch and closes over the view's last 15 steps; while it moves the
+\ lists stay as they were. Otherwise they are made from the missile: its
+\ place and angles stand in for the player's while they are made.
+.missile_lists
+{
+    ZA_AUTO 12, keep                    ; the player's place and angles
+    \ closing while the life is under 15 (the N flag of life - 15)
+    LDA m_life : SEC : SBC #&0F : LDA m_life+1 : SBC #0 : BPL steady
+    LDA m_iris : CLC : ADC #8 : STA m_iris
+    RTS
+.steady
+    LDA m_iris : BEQ open
+    SEC : SBC #8 : STA m_iris
+    BEQ open
+    RTS
+.open
+    LDA m_heading : STA m_idx : LDA m_heading+1 : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+    LDX #11
+    ZA_DISCARD keep
+.copy
+    LDA pl_x,X : STA keep,X : ZA_INDEXEDBY 0..11
+    LDA m_x,X : STA pl_x,X
+    DEX : BPL copy
+    LDA #BANK_WORLD : STA bank_now : STA romsel
+    JSR camera
+    LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
+    \ d0 is the window's step, 0 here (&053BC)
+    STZ rng_d0 : STZ rng_d0+1
+    JSR ground_dots
+    JSR lists
+    LDX #11
+.back
+    LDA keep,X : ZA_INDEXEDBY 0..11
+    STA pl_x,X
+    DEX : BPL back
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ ground_dots (&047AA): each of the 40 dots rotated into camera space by
+\ the camera's matrix; one outside the view's cone (z <= 2, or x or y
+\ beyond +-2z) is put back at random ahead of the camera. The cone decides
+\ the random numbers, so it is the ST's decision exactly: decision 11's
+\ approximate rotation first, and the exact one only for a dot within the
+\ approximation's bound of the cone's edges.
+ZA_AUTO2 dot_ez                         ; the approximation's bound on z' ...
+ZA_AUTO 4, dot_k                        ; ... on x' - 2z' and y' - 2z'
+.ground_dots
+{
+    ZA_AUTO1 dot, sines
+    JSR dot_bounds
+    STZ sines
+    \ the ground's height from the camera, the same for every dot
+    LDA #0 : SEC : SBC pl_y : STA rot_d+2
+    LDA #0 : SBC pl_y+1 : STA rot_d+3
+    LDX #0
+.each
+    STX dot
+    LDA dot_x_lo,X : SEC : SBC pl_x : STA rot_d
+    LDA dot_x_hi,X : SBC pl_x+1 : STA rot_d+1
+    LDA dot_z_lo,X : SEC : SBC pl_z : STA rot_d+4
+    LDA dot_z_hi,X : SBC pl_z+1 : STA rot_d+5
+    LDA #BANK_WORLD : STA bank_now : STA romsel
+    JSR rotate_abs
+    JSR rotate_approx
+    LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
+    JSR cone_approx : BEQ in_view
+    CMP #1 : BEQ outside
+    LDA #BANK_WORLD : STA bank_now : STA romsel
+    JSR rotate_exact
+    LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
+    JSR cone_exact : BCS outside
+.in_view
+    \ projected: d0 takes the projection's shift (&0480A)
+    LDA #PROJ_SHIFT : STA rng_d0 : STZ rng_d0+1
+    BRA next
+.outside
+    LDA sines : BNE placed
+    INC sines
+    JSR respawn_sines
+.placed
+    LDX dot
+    JSR respawn
+.next
+    LDX dot : INX : CPX #40 : BNE each
+    RTS
+}
+
+\ dot_bounds: for the camera's matrix, the most rotate_approx can be out
+\ on each row (under |m| / 64 + 2 a term; nothing for an entry of 0 or
+\ +-16384, which it multiplies exactly): dot_ez on z', and dot_k on x' -
+\ 2z' and y' - 2z' (the row's own and twice z's).
+.dot_bounds
+{
+    ZA_AUTO2 ex
+    STZ ez_sum : STZ ez_sum+1
+    LDA cam+12 : LDY cam+13 : JSR ebound
+    LDA cam+14 : LDY cam+15 : JSR ebound
+    LDA cam+16 : LDY cam+17 : JSR ebound
+    MOVW dot_ez, ez_sum
+    ASL ez_sum : ROL ez_sum+1
+    MOVW ex, ez_sum
+    LDA cam : LDY cam+1 : JSR ebound
+    LDA cam+2 : LDY cam+3 : JSR ebound
+    LDA cam+4 : LDY cam+5 : JSR ebound
+    MOVW dot_k, ez_sum
+    MOVW ez_sum, ex
+    LDA cam+6 : LDY cam+7 : JSR ebound
+    LDA cam+8 : LDY cam+9 : JSR ebound
+    LDA cam+10 : LDY cam+11 : JSR ebound
+    LDA ez_sum : STA dot_k+2 : LDA ez_sum+1 : STA dot_k+3
+    RTS
+}
+\ ebound: ez_sum += the bound for the entry A (low), Y (high).
+ZA_AUTO2 ez_sum
+.ebound
+{
+    ZA_AUTO2 m
+    ZA_AUTO1 top
+    STA m : STY m+1
+    TYA : BPL pos
+    LDA #0 : SEC : SBC m : STA m : LDA #0 : SBC m+1 : STA m+1
+.pos
+    LDA m : BNE general
+    LDA m+1 : BEQ none                  ; 0: no term
+    CMP #&40 : BEQ none                 ; 16384: d itself
+.general
+    STZ top
+    ASL m : ROL m+1 : ROL top
+    ASL m : ROL m+1 : ROL top           ; |m| / 64 in m+1, top
+    LDA m+1 : SEC : ADC ez_sum : STA ez_sum      ; + 1 (the carry) ...
+    LDA top : ADC ez_sum+1 : STA ez_sum+1
+    INC ez_sum : BNE none                         ; ... + 1
+    INC ez_sum+1
+.none
+    RTS
+}
+
+\ cone_approx: the cone's decision from rotate_approx's rot_acc and the
+\ bounds: A = 0 (and Z) surely in view, 1 surely outside, 2 too near an
+\ edge (or a wrap) to say.
+.cone_approx
+{
+    ZA_AUTO2 lo, hi
+    ZA_AUTO1 xs
+    \ z~ by its top two bits: from -16384 to 16383 it can't wrap
+    LDA rot_acc+5 : ASL A : EOR rot_acc+5 : BPL z_mid
+    LDA rot_acc+5 : BPL unsure                    ; 16384 up
+    CMP #&90 : BCS outside                        ; far behind
+    BRA unsure                                    ; (near -32768)
+.z_mid
+    LDA rot_acc+4 : CLC : ADC dot_ez : STA hi
+    LDA rot_acc+5 : ADC dot_ez+1 : STA hi+1
+    CMPS16 hi, #3 : BMI outside                   ; z' surely 2 or less
+    LDA rot_acc+4 : SEC : SBC dot_ez : STA lo
+    LDA rot_acc+5 : SBC dot_ez+1 : STA lo+1
+    CMPS16 lo, #3 : BMI unsure
+    LDA hi+1 : CMP #&40 : BCS unsure              ; 2z' might wrap
+    \ 2 < z' < 16384: x' and y' against 2z~ with the bounds
+    LDA rot_acc+4 : ASL A : STA cone_t : LDA rot_acc+5 : ROL A : STA cone_t+1
+    LDX #0 : JSR cone_axis
+    CMP #1 : BEQ outside
+    STA xs
+    LDX #2 : JSR cone_axis
+    CMP #1 : BEQ outside
+    ORA xs
+    RTS
+.outside
+    LDA #1 : RTS
+.unsure
+    LDA #2 : RTS
+}
+\ cone_axis: for x' (X = 0) or y' (X = 2), A = 0 surely within +-2z',
+\ 1 surely beyond, 2 unsure: |v~| + k <= 2z~, or |v~| > 2z~ + k.
+ZA_AUTO2 cone_t
+.cone_axis
+{
+    ZA_AUTO2 mag, s
+    LDA rot_acc+1,X : ZA_INDEXEDBY {0, 2}
+    BPL pos
+    LDA #0 : SEC : SBC rot_acc,X : ZA_INDEXEDBY {0, 2}
+    STA mag : LDA #0 : SBC rot_acc+1,X : ZA_INDEXEDBY {0, 2}
+    STA mag+1
+    BRA got
+.pos
+    STA mag+1 : LDA rot_acc,X : ZA_INDEXEDBY {0, 2}
+    STA mag
+.got
+    LDA mag+1 : CMP #&75 : BCS unsure               ; near a wrap
+    LDA mag : CLC : ADC dot_k,X : ZA_INDEXEDBY {0, 2}
+    STA s : LDA mag+1 : ADC dot_k+1,X : ZA_INDEXEDBY {0, 2}
+    STA s+1
+    LDA cone_t : CMP s : LDA cone_t+1 : SBC s+1 : BCS inside
+    LDA cone_t : CLC : ADC dot_k,X : ZA_INDEXEDBY {0, 2}
+    STA s : LDA cone_t+1 : ADC dot_k+1,X : ZA_INDEXEDBY {0, 2}
+    STA s+1
+    LDA s : CMP mag : LDA s+1 : SBC mag+1 : BCC outside
+.unsure
+    LDA #2 : RTS
+.outside
+    LDA #1 : RTS
+.inside
+    LDA #0 : RTS
+}
+
+\ cone_exact (&047DC): the ST's test on the exact rot_acc, its words
+\ wrapping: C set if the dot is outside.
+.cone_exact
+{
+    ZA_AUTO2 t2, n2
+    CMPS16 rot_acc+4, #3 : BMI outside            ; z <= 2
+    LDA rot_acc+4 : ASL A : STA t2 : LDA rot_acc+5 : ROL A : STA t2+1
+    LDA #0 : SEC : SBC t2 : STA n2 : LDA #0 : SBC t2+1 : STA n2+1
+    CMPS16 rot_acc, n2 : BMI outside
+    CMPS16 t2, rot_acc : BMI outside
+    CMPS16 rot_acc+2, n2 : BMI outside
+    CMPS16 t2, rot_acc+2 : BMI outside
+    CLC : RTS
+.outside
+    SEC : RTS
+}
+
+\ respawn_sines: the sines a respawn turns by, the heading's (the
+\ missile's while it flies, as &048C4 has it), into trig_sin and trig_cos.
+\ The view's camera took the same unless the missile flies without its
+\ view, which the ST never does.
+.respawn_sines
+{
+    LDA missile_view : CMP mv_render : BEQ same
+    LDA missile_view : BEQ player
+    LDA m_heading : STA m_idx : LDA m_heading+1
+    BRA got
+.player
+    LDA pl_heading : STA m_idx : LDA pl_heading+1
+.got
+    AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+.same
+    RTS
+}
+
+\ respawn (&0484E): dot X at random ahead: along = random8 & &1FFF,
+\ across = (random8 & &1FFF) - &1000, each random8 adding d0 as it stands
+\ (and leaving its result there), turned by the heading's sines onto the
+\ player's place (the missile's while it flies).
+.respawn
+{
+    ZA_AUTO2 along, across, nx, nz
+    ZA_AUTO1 dot
+    STX dot
+    JSR random8
+    LDA rng_d0+1 : AND #&1F : STA rng_d0+1
+    MOVW along, rng_d0
+    JSR random8
+    LDA rng_d0+1 : AND #&1F : SEC : SBC #&10 : STA rng_d0+1
+    MOVW across, rng_d0
+    MOVW mul_x, across : MOVW mul_y, trig_cos : JSR fmul16 : MOVW nx, mul_r
+    MOVW mul_x, along : MOVW mul_y, trig_sin : JSR fmul16 : ADDW nx, mul_r
+    MOVW mul_x, along : MOVW mul_y, trig_cos : JSR fmul16 : MOVW nz, mul_r
+    MOVW mul_x, across : MOVW mul_y, trig_sin : JSR fmul16 : SUBW nz, mul_r
+    LDA missile_view : BEQ player
+    ADDW nx, m_x
+    ADDW nz, m_z
+    BRA store
+.player
+    ADDW nx, pl_x
+    ADDW nz, pl_z
+.store
+    LDX dot
+    LDA nx : STA dot_x_lo,X : LDA nx+1 : STA dot_x_hi,X
+    LDA nz : STA dot_z_lo,X : LDA nz+1 : STA dot_z_hi,X
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ lists (&0561C, &057B8): the launch's count or the docked tunnel's
+\ stop, refill and pick-up, then the coarse list and the draw lists.
+.lists
+{
+    \ launching: launch_state neither 0 nor &1E
+    LDA launch_state+1 : BNE launching
+    LDA launch_state : BEQ not_launching
+    CMP #&1E : BEQ not_launching
+.launching
+    \ LAUNCHING FROM SILO (&0562E): a step of the count, colour 0 a
+    \ random word, five off the speed accumulator and effect 3; then the
+    \ normal coarse list, even docked
+    LDA launch_state : BNE count_lo
+    DEC launch_state+1
+.count_lo
+    DEC launch_state
+    JSR random32
+    MOVW colour0_flash, rng_d0
+    LDA speed_acc : CLC : ADC #5 : STA speed_acc
+    BCC sped
+    INC speed_acc+1
+.sped
+    LDA #3 : LDX #1
+    JSR sfx_start
+    LDA docked : PHA
+    STZ docked
+    JSR make_lists
+    PLA : STA docked
+    RTS
+.not_launching
+    LDA docked : BEQ open
+    JSR tunnel
+    LDX docked_silo : LDA ob_timer_a_hi,X : STA silo_missile
+.open
+    \ (fall into make_lists)
+}
+.make_lists
+    LDA #BANK_WORLD : STA bank_now : STA romsel
     JSR coarse_list
     JSR rotate_lists
     LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
     RTS
 
-.world_after
+\ tunnel (&05672): docked, the tunnel's end (the silo's z less the
+\ player's, by the N flag of that less &C8) stops the speed and refills the
+\ laser by &190 a step, until it would carry (at once with the cheat): then
+\ it's full, the launch may start and the docking speech is said on a
+\ step whose frame count's low byte is 0. Then the silo's missile is taken
+\ when within -&28 to &28 of the player, if the silo has one and the
+\ player has room.
+.tunnel
+{
+    ZA_AUTO2 dz
+    LDX docked_silo
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA dz
+    LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
+    LDA dz : SEC : SBC #&C8 : LDA dz+1 : SBC #0 : BPL pick_up
+    STZ speed_acc : STZ speed_acc+1
+    LDA cheat : BNE full
+    LDA laser_energy : CLC : ADC #&90 : TAY
+    LDA laser_energy+1 : ADC #&01 : BCC energy
+.full
+    LDA #&1E : STA launch_state : STZ launch_state+1
+    LDA frame_count : BNE quiet
+    \ clare2, if no clip is playing (the ST tests D_01E56 first)
+    LDA #2 : SEC
+    JSR sample_start
+.quiet
+    LDA #&FF : TAY
+.energy
+    STY laser_energy : STA laser_energy+1
+.pick_up
+    LDA missiles : CMP #2 : BEQ done
+    LDA ob_z_lo + SLOT_MISSILE : SEC : SBC pl_z : STA dz
+    LDA ob_z_hi + SLOT_MISSILE : SBC pl_z+1 : STA dz+1
+    LDA dz : SEC : SBC #&28 : LDA dz+1 : SBC #0 : BPL done
+    LDA dz : CLC : ADC #&28 : LDA dz+1 : ADC #0 : BMI done
+    LDX docked_silo
+    LDA ob_timer_a_hi,X : BEQ done
+    INC missiles
+    STZ ob_timer_a_hi,X
+    LDA #&D0 : STA ob_timer_b_lo,X : LDA #&07 : STA ob_timer_b_hi,X
+    LDA #&40 : STA colour0_flash : STZ colour0_flash+1
+.done
     RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ world_after (&05108 to the end): the draw loop's matrices, then in the
+\ normal view the player's laser (the waveforms and the refuelling
+\ message only draw). In the missile view nothing is drawn while its
+\ window moves.
+.world_after
+{
+    LDA mv_render : BEQ normal
+    LDA m_iris : BNE done
+    MOVW draw_p, m_pitch : MOVW draw_h, m_heading
+    LDA #0 : SEC : SBC m_roll : STA draw_r : LDA #0 : SBC m_roll+1 : STA draw_r+1
+    JMP draw_matrices
+.normal
+    MOVW draw_p, pl_pitch : MOVW draw_h, pl_heading
+    LDA #0 : SEC : SBC pl_roll : STA draw_r : LDA #0 : SBC pl_roll+1 : STA draw_r+1
+    JSR draw_matrices
+    JMP player_laser
+.done
+    RTS
+}
+
+\ draw_matrices (&05108, &04114): each object drawn builds its matrix
+\ from its angles plus the camera's, unless they're the last matrix's,
+\ and building one leaves its heading's sines in trig_sin and trig_cos.
+ZA_AUTO2 draw_p, draw_h, draw_r
+.draw_matrices
+{
+    ZA_AUTO2 ap, ah
+    ZA_AUTO1 built, i
+    STZ built
+    LDX draw_n : BEQ walked
+.each
+    DEX : STX i
+    LDY draw_slots,X
+    LDA ob_type,Y : BEQ next
+    LDA ob_pitch_lo,Y : CLC : ADC draw_p : STA ap
+    LDA ob_pitch_hi,Y : ADC draw_p+1 : STA ap+1
+    LDA ob_heading_lo,Y : CLC : ADC draw_h : STA ah
+    LDA ob_heading_hi,Y : ADC draw_h+1 : STA ah+1
+    LDA ap : CMP obm_pitch : BNE build
+    LDA ap+1 : CMP obm_pitch+1 : BNE build
+    LDA ah : CMP obm_heading : BNE build
+    LDA ah+1 : CMP obm_heading+1 : BNE build
+    LDA draw_r : CMP obm_roll : BNE build
+    LDA draw_r+1 : CMP obm_roll+1 : BEQ next
+.build
+    MOVW obm_pitch, ap : MOVW obm_heading, ah : MOVW obm_roll, draw_r
+    LDA #1 : STA built
+.next
+    LDX i : BNE each
+.walked
+    LDA built : BEQ done
+    LDA obm_heading : STA m_idx : LDA obm_heading+1 : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+.done
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ player_laser (&0866C): fired (not docked, with energy, a fire key held
+\ and no bolt in flight) at the sight; the bolt's count, stepped more
+\ slowly with fewer drawn; at its end the first drawn object whose
+\ projected box holds the target is hit.
+.player_laser
+{
+    LDA bolt_timer : BNE count
+    LDA laser_energy : ORA laser_energy+1 : BEQ done
+    LDA docked : BNE done
+    LDA key_fire_mouse : ORA key_fire_return : ORA key_fire_insert : ORA key_fire_enter
+    BEQ done
+    LDA #4 : STA bolt_timer
+    MOVW bolt_target_x, sight_x
+    MOVW bolt_target_y, sight_y
+    INC shots_fired : BNE counted
+    INC shots_fired+1 : BNE counted
+    INC shots_fired+2 : BNE counted
+    INC shots_fired+3
+.counted
+    LDA #&14 : LDX #1
+    JSR sfx_start
+    \ &100 a shot, down to 0
+    LDA laser_energy+1 : BEQ empty
+    DEC laser_energy+1
+    BRA count
+.empty
+    STZ laser_energy
+.count
+    \ every step with 6 or more drawn, odd frames with 3-5, 3 in 4 with 0-2
+    LDA draw_n : CMP #3 : BCS three
+    LDA frame_count : AND #3 : BEQ done
+    BRA step
+.three
+    CMP #6 : BCS step
+    LDA frame_count : AND #1 : BEQ done
+.step
+    DEC bolt_timer : BNE done
+    LDA draw_n : BEQ done
+    JMP laser_hit
+.done
+    RTS
+}
+
+\ laser_hit (&08708): the draw list in order (from its last pushed),
+\ skipping the exploding, beams and anything at z 0; each box projected
+\ (&08748: its centre and half-sizes << 7 / z, divs's overflow leaving
+\ the operand) and tested on N flags.
+.laser_hit
+{
+    ZA_AUTO2 d
+    ZA_AUTO1 i, slot_
+    LDX draw_n
+.each
+    DEX : STX i
+    LDY draw_slots,X : STY slot_
+    LDA ob_exploding,Y : BNE next
+    LDA ob_type,Y : CMP #11 : BEQ next
+    LDA ob_cz_lo,Y : STA div_d : ORA ob_cz_hi,Y : BEQ next
+    LDA ob_cz_hi,Y : STA div_d+1
+    JSR box : BCS next
+    JMP hit
+.next
+    LDX i : BNE each
+    RTS
+\ box: C clear if slot_'s box holds the target: x, the centre then the
+\ half-width, then y.
+.box
+    LDY slot_
+    LDA ob_cx_lo,Y : LDX ob_cx_hi,Y : JSR box_div
+    LDA div_q : CLC : ADC #LO(VIEW_CX) : STA laser_px
+    LDA div_q+1 : ADC #HI(VIEW_CX) : STA laser_px+1
+    LDA bolt_target_x : SEC : SBC laser_px : STA d
+    LDA bolt_target_x+1 : SBC laser_px+1 : STA d+1
+    LDX slot_ : LDY ob_type,X
+    LDA size_z_lo,Y : LDX size_z_hi,Y : JSR box_div
+    MOVW laser_half_w, div_q
+    JSR box_test : BCS missed
+    LDY slot_
+    LDA ob_cy_lo,Y : LDX ob_cy_hi,Y : JSR box_div
+    LDA div_q : CLC : ADC #LO(VIEW_CY) : STA laser_py
+    LDA div_q+1 : ADC #HI(VIEW_CY) : STA laser_py+1
+    LDA bolt_target_y : SEC : SBC laser_py : STA d
+    LDA bolt_target_y+1 : SBC laser_py+1 : STA d+1
+    LDX slot_ : LDY ob_type,X
+    LDA size_y_lo,Y : LDX size_y_hi,Y : JSR box_div
+    MOVW laser_half_h, div_q
+    JMP box_test
+.missed
+    RTS
+.hit
+    \ unless it's proof: a hit taken, and under 0 hits left it explodes,
+    \ its score into the mailbox and colour 0 &222
+    LDX slot_
+    LDA ob_flags,X : BMI struck
+    LDA ob_proof,X : BNE struck
+    INC hits_scored : BNE hit_counted
+    INC hits_scored+1 : BNE hit_counted
+    INC hits_scored+2 : BNE hit_counted
+    INC hits_scored+3
+.hit_counted
+    LDA ob_hits_lo,X : BNE hits_lo
+    DEC ob_hits_hi,X
+.hits_lo
+    DEC ob_hits_lo,X
+    LDA ob_hits_hi,X : BPL struck
+    LDA #&FF : STA ob_exploding,X
+    STZ ob_explosion,X
+    LDY ob_type,X
+    LDA kill_bcd_lo,Y : STA kill_score
+    LDA kill_bcd_hi,Y : STA kill_score+1
+    LDA #&22 : STA colour0_flash : LDA #&02 : STA colour0_flash+1
+.struck
+    \ a tower (&08894): from level 2 the layout's own tower (timer_c set)
+    \ switches its group's beam, three slots on, between types 11 and 0
+    LDA ob_type,X : CMP #4 : BNE sound
+    LDA level : CMP #1 : BEQ sound
+    LDA ob_timer_c_lo,X : ORA ob_timer_c_hi,X : BEQ sound
+    LDA ob_type+3,X : EOR #&0B : STA ob_type+3,X
+.sound
+    LDA #2 : LDX #1
+    JMP sfx_start
+\ box_test: C clear if -s < d < s, by the N flags of d - s and -d - s.
+.box_test
+    LDA d : SEC : SBC div_q : LDA d+1 : SBC div_q+1 : BPL beyond
+    LDA #0 : SEC : SBC d : STA d : LDA #0 : SBC d+1 : STA d+1
+    LDA d : SEC : SBC div_q : LDA d+1 : SBC div_q+1 : BPL beyond
+    CLC : RTS
+.beyond
+    SEC : RTS
+}
+
+\ box_div: div_q = the word A (low), X (high), sign-extended and shifted
+\ left 7, divs div_d: on an overflow the operand's low word, as divs
+\ leaves it.
+.box_div
+{
+    STZ mul_p
+    STA mul_p+1 : STX mul_p+2
+    LDA #0 : CPX #&80 : BCC pos
+    LDA #&FF
+.pos
+    STA mul_p+3
+    CMP #&80 : ROR mul_p+3 : ROR mul_p+2 : ROR mul_p+1 : ROR mul_p
+    JSR sdiv32 : BCC done
+    MOVW div_q, mul_p
+.done
+    RTS
+}
+
+\ world_whole: the two halves together, as the harness checks the missile
+\ view (it has no lists point).
+IF DEFINED(SPIKE)
+.world_whole
+    JSR world_lists
+    JMP world_after
+ENDIF

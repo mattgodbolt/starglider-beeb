@@ -1,0 +1,21 @@
+# The laser at the energy-tower group, on level 2 and standing still: the
+# group's own tower (slot 11, x &1EC0, z &1EC0) 800 ahead, a little to the
+# left, so that its box holds the sight. Each hit (the tower can't be hurt)
+# switches the group's beam, three slots on, between types 11 and 0; the
+# bolt's count runs at the rate the draw list's length sets.
+wait 38
+key 57
+wait 4
+debug w w $5c196 2
+debug w w $12206 0
+debug w w $5c02e $1e56 $ffd0 $1ba0
+debug w w $5c03c 0
+wait 0.3
+debug parse {arm}
+debug echo \nSEG tower\n
+down 0x1c
+wait 30
+up 0x1c
+wait 4
+debug echo \nSEG end\n
+quit

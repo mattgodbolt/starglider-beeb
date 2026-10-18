@@ -63,10 +63,27 @@ def variables(syms):
             name, spec = m.group(1), m.group(2).split()
             if name not in syms:
                 raise SystemExit(f"{path}: {name} isn't in the build's symbols")
-            addr, kind, args = spec[0], spec[1], [int(x) for x in spec[2:]]
+            # "in" last: an input the outside world writes at any moment (the
+            # ST's interrupts), put but never compared
+            given = spec[-1] == "in"
+            if given:
+                spec = spec[:-1]
+            addr, kind = spec[0], spec[1]
+            args = [] if kind == "list" else [int(x) for x in spec[2:]]
             region, offset = st_place(addr)
             e = {"name": name, "at": syms[name], "kind": kind, "region": region, "offset": offset}
-            if kind == "raw":
+            if given:
+                e["input"] = True
+            if kind == "list":
+                # list COUNT N: the ST's pointer to a list's first entry
+                # (record pointers, pushed downward), its count's ST
+                # address, and the port's count of it (slots, in the
+                # order pushed)
+                e["count_region"], e["count_offset"] = st_place(spec[2])
+                if spec[3] not in syms:
+                    raise SystemExit(f"{path}: {name}: {spec[3]} isn't in the build's symbols")
+                e["count_at"] = syms[spec[3]]
+            elif kind == "raw":
                 e["count"] = args[0]
             elif kind in ("wlo", "whi", "barr"):
                 e["count"], e["stride"] = args
