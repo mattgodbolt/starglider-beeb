@@ -1,77 +1,248 @@
 \ ***************************************************************************
 \ STARGLIDER for the BBC Master - the missile view's window (L_05248,
-\ &06B7E; docs/research/st-panel.md, section 8)
+\ &06B7E; docs/research/st-panel.md, section 8), and its objects' camera
+\ and clip
 \
 \ In the missile view the ST copies the cockpit picture's window rows over
 \ the view every frame, slid up by m_iris as the window opens and closes,
-\ the rows it leaves below cleared to row 130. m_iris steps by 8, so the
-\ slide moves whole character rows: each is copied whole from the
-\ picture's (build/gen/window.6502, in BANK_PIC at WIN_PIC, tools/
-\ mkcockpit.py), and the rows at the slide's edges are put right after,
-\ a few lines each. A screen that holds the open window already needs
-\ only what an erase can take from it put back: the inner window's set
-\ bytes (the missile's view is drawn there) and the bar's rows (which are
-\ ORed over the picture). The code is in the picture's bank, the loading
-\ area's, with it (view_under.6502's under_draw calls it): it sets
+\ the rows it leaves below cleared to row 130, and draws its objects only
+\ once the window is open. m_iris steps by 8, so the slide moves whole
+\ character rows. Each screen remembers which picture row each of its
+\ window's character rows shows, so only the rows that differ are drawn,
+\ from the picture as the port keeps it (build/gen/window.6502, in
+\ BANK_PIC at WIN_PIC, tools/mkcockpit.py): a row's sides, and its inner
+\ window (where the missile's view is drawn) only where it isn't empty,
+\ cleared only where it wasn't. A screen that holds the open window
+\ already needs only what an erase can take from it put back: the inner
+\ window's picture (the objects and dots are drawn there) and the bar's
+\ rows (which are ORed over it). The code is in the picture's bank, the
+\ loading area's, with it (view_under.6502's under_draw calls it): it sets
 \ ACCCON's X, which leaves sideways RAM where it is.
 \ ***************************************************************************
 
+\ The texts in the view that the missile view prints: MISSILE VIEW and the
+\ countdown, each in a character row of the window (panel.6502).
+MV_TEXT_ROW    = TXT_Y[TXT_MISSILE_VIEW] DIV 8
+COUNT_TEXT_ROW = TXT_Y[TXT_COUNTDOWN] DIV 8
+ASSERT TXT_Y[TXT_MISSILE_VIEW] MOD 8 = 0 AND TXT_Y[TXT_COUNTDOWN] MOD 8 = 0
+
 \ win_draw: the window as the ST has it this frame, on the screen draw_bank
-\ names, and the bar's win_blocks blocks over it (win_bar); win_shown
-\ keeps, by screen, the m_iris it was drawn for (&FF: the view's own,
-\ cleared).
+\ names, and when it's open the bar's win_blocks blocks over it (win_bar).
+\ win_shown keeps, by screen, the m_iris it was drawn for (&FF: none, the
+\ view's own). What the screen shows (win_old, by character row: its
+\ picture row, 0 cleared, &FF not known) is the window at win_shown; or,
+\ after the view's own or an erase that cleared the window (erase_screen,
+\ its list overflowed), cleared rows but the last's lines 129 and 130,
+\ which the view never draws. The rows of the texts it shows aren't known:
+\ they're drawn again, and the texts taken off (panel_messages draws this
+\ frame's again).
 .win_draw
 {
     ZA_AUTO1 c, k
     LDA draw_bank : TSB acccon
     LDX draw_buffer
-    LDA m_iris : CMP win_shown,X : BEQ same
-    STA win_shown,X
-    LSR A : LSR A : LSR A : STA k
-    ASSERT WIN_FIRST_ROW = 1 AND WIN_ROWS = 16
-    \ lines 8 and 9, above the view, which a slid row would cover: kept
-    LDA k : BEQ unslid
-    LDY #1 : JSR win_aim
-    LDX #0 : JSR win_lines01
-.unslid
+    LDA m_iris : LSR A : LSR A : LSR A : STA k
+    LDA erase_stop,X : BEQ view
+    LDA win_shown,X : CMP #&FF : BEQ view
+    CMP m_iris : BNE moved
+    LDA k : BNE moved                       ; (the same: but for its texts' rows)
+    \ the open window again: what the erase took put back, and the bar
+    JSR win_open
+    JMP bar
+.moved
+    \ the window at the m_iris drawn there
+    LDA win_shown,X : LSR A : LSR A : LSR A : STA c
+    LDY #1
+.slid
+    TYA : CLC : ADC c : CMP #WIN_ROWS + 1 : BCC row_on
+    LDA #0
+.row_on
+    STA win_old,Y
+    INY : CPY #WIN_ROWS + 1 : BNE slid
+    BRA texts
+.view
+    LDY #WIN_ROWS - 1 : LDA #0
+.cleared
+    STA win_old,Y
+    DEY : BNE cleared
+    LDA #&FF : STA win_old + WIN_ROWS
+.texts
+    LDA ps_texts,X : BEQ rows
+    AND #(TX_MVIEW OR TX_COUNT) EOR &FF : BNE all
+    LDA #&FF
+    LDY ps_texts,X : CPY #TX_COUNT : BEQ count
+    STA win_old + MV_TEXT_ROW
+    CPY #TX_MVIEW : BEQ known
+.count
+    STA win_old + COUNT_TEXT_ROW
+    BRA known
+.all
+    LDA #&FF : LDY #WIN_ROWS
+.unknown
+    STA win_old,Y
+    DEY : BNE unknown
+.known
+    STZ ps_texts,X
+.rows
+    LDA m_iris : STA win_shown,X
+    \ each row the picture's from c + m_iris / 8, or cleared past the last
     LDA #1 : STA c
 .row
-    LDY c : JSR win_aim
-    LDA c : CLC : ADC k : CMP #WIN_ROWS + 1 : BCS cleared
-    TAX : JSR win_copy
-    BRA next
-.cleared
-    LDA c : CMP #WIN_ROWS : BEQ next        ; (the last's view lines, after)
-    JSR win_clear
+    LDA c : CLC : ADC k : CMP #WIN_ROWS + 1 : BCC shown
+    LDA #0
+.shown
+    LDY c : CMP win_old,Y : BEQ next
+    JSR win_row
 .next
     INC c : LDA c : CMP #WIN_ROWS + 1 : BNE row
-    LDA k : BEQ bar
-    \ the slide's edges: the rows from 131 - m_iris cleared (in character row
-    \ 16 - k, lines 3-7, and in 16, lines 0-2), and lines 8 and 9 back
-    LDA #16 : SEC : SBC k : TAY : JSR win_aim
-    LDA #%11111000 : JSR win_zero_lines
-    LDY #16 : JSR win_aim
-    LDA #%00000111 : JSR win_zero_lines
-    LDY #1 : JSR win_aim
-    LDX #&80 : JSR win_lines01
-    BRA bar
-.same
-    \ as last drawn on this screen (nothing's drawn over a moving window):
-    \ what the erase took, and the last bar, put back
-    LDA m_iris : BNE done
-    LDX #WIN_INNER - 1
-.inner
-    LDY win_inner_row,X : JSR win_aim
-    LDA win_dst : CLC : ADC win_inner_lo,X : STA win_dst
-    LDA win_dst+1 : ADC win_inner_hi,X : STA win_dst+1
-    LDA win_inner_byte,X : STA (win_dst)
-    DEX : CPX #&FF : BNE inner
 .bar
+    LDA k : BNE done
     JSR win_bar
 .done
     LDA draw_bank : TRB acccon
     RTS
 }
+ASSERT WIN_FIRST_ROW = 1 AND MV_TEXT_ROW <= WIN_ROWS AND COUNT_TEXT_ROW >= WIN_FIRST_ROW
+ASSERT TX_MVIEW <> TX_COUNT
+.win_old SKIP WIN_ROWS + 1                  ; (in the bank's own RAM)
+
+\ win_row: character row Y of the window drawn as picture row A (0:
+\ cleared), over the row win_old says it shows: the sides always; the
+\ inner window as the two rows have it. The first row's top two lines are
+\ above the window, and the last's lines from 131 on below it.
+.win_row
+{
+    ZA_AUTO1 r, p, kind, o
+    \ (only a span reads win_src, set for it, which baron can't follow
+    \ through kind: without this it keeps win_src from frame to frame)
+    ZA_DISCARD win_src
+    STA p : STY r
+    LDA win_old,Y : STA o
+    JSR win_aim
+    CPY #WIN_ROWS : BNE not_last
+    JMP last
+.not_last
+    LDA p : BEQ blank
+    TAX
+    LDA win_kind - WIN_FIRST_ROW,X : STA kind
+    LDA win_row_lo - WIN_FIRST_ROW,X : STA win_src
+    LDA win_row_hi - WIN_FIRST_ROW,X : STA win_src+1
+    LDA kind : CMP #WK_FULL : BNE sides
+    LDX #WIN_CELLS : JSR cells_copy
+    BRA top
+.sides
+    LDX #WIN_SIDE : JSR cells_copy
+    JSR past_inner
+    LDX #WIN_SIDE : JSR cells_copy          ; (win_src is now the span's, if any)
+    BRA inner
+.blank
+    LDX #WIN_SIDE : JSR cells_zero
+    JSR past_inner
+    LDX #WIN_SIDE : JSR cells_zero
+    STZ kind
+    ASSERT WK_EMPTY = 0
+.inner
+    \ the old row's inner window: nothing to clear (cleared, or an empty
+    \ row's), its span, or all of it (a full row's, or not known)
+    LDX o : BEQ clean
+    CPX #&FF : BEQ dirty
+    LDA win_kind - WIN_FIRST_ROW,X : BEQ clean
+    ASSERT WK_EMPTY = 0
+    CMP #WK_SPAN : BEQ old_span
+.dirty
+    LDA #WIN_INNER : JSR aim
+    LDX #WIN_INNER_CELLS : JSR cells_zero
+.clean
+    LDA kind : CMP #WK_SPAN : BNE top
+.span
+    LDA #WIN_SPAN : JSR aim
+    LDX #WIN_SPAN_CELLS : JSR cells_copy
+    BRA top
+.old_span
+    LDA kind : CMP #WK_SPAN : BEQ span     ; (the new span's cells cover the old's)
+    LDA #WIN_SPAN : JSR aim
+    LDX #WIN_SPAN_CELLS : JSR cells_zero
+.top
+    \ the first row's lines above the window, from another picture row's:
+    \ the cockpit's again, which picture row 1's are
+    LDA r : CMP #WIN_FIRST_ROW : BNE done
+    LDA p : CMP #WIN_FIRST_ROW + 1 : BCC done
+    LDA #0 : JSR aim
+    LDA win_row_lo : STA win_src : LDA win_row_hi : STA win_src+1
+    LDX #WIN_CELLS : JMP lines_01
+.last
+    \ its lines to 130 alone: picture row 16's (whose lines past them are
+    \ zeros), or cleared, unless they are
+    LDA p : BEQ last_blank
+    LDA win_row_lo + WIN_ROWS - WIN_FIRST_ROW : STA win_src
+    LDA win_row_hi + WIN_ROWS - WIN_FIRST_ROW : STA win_src+1
+    LDX #WIN_CELLS : JMP lines_02
+.last_blank
+    LDA o : BEQ done
+    LDX #WIN_CELLS : JMP lines_02_zero
+.done
+    RTS
+\ past_inner: win_dst past the inner window, from its first cell
+.past_inner
+    LDA win_dst : CLC : ADC #LO(8 * WIN_INNER_CELLS) : STA win_dst
+    LDA win_dst+1 : ADC #HI(8 * WIN_INNER_CELLS) : STA win_dst+1
+    RTS
+\ aim: win_dst = the row's cell A
+.aim
+    PHA
+    LDY r : JSR win_aim
+    PLY : JMP win_cell
+}
+\ (the first and last rows are full, for their lines above and below; the
+\ last row's lines to the window's last, 130 (&06B7E), are its first three)
+ASSERT WIN_KINDS[0] = WK_FULL AND WIN_KINDS[WIN_ROWS - WIN_FIRST_ROW] = WK_FULL
+ASSERT 8 * WIN_ROWS + 2 = 130
+
+\ win_open: on the open window's screen, what an erase can have taken put
+\ back: the inner window's picture in rows 2 to 14 (from y 16 to 112,
+\ where the objects' lines and the dots lie), and the bar's rows (118 to
+\ 121, which win_bar ORs over row 14's last two lines and row 15's first
+\ two).
+.win_open
+{
+    ZA_AUTO1 c
+    LDA #MV_YMIN DIV 8 : STA c
+.row
+    LDX c
+    LDA win_row_lo - WIN_FIRST_ROW,X : STA win_src
+    LDA win_row_hi - WIN_FIRST_ROW,X : STA win_src+1
+    LDA win_kind - WIN_FIRST_ROW,X : BEQ next
+    ASSERT WK_EMPTY = 0
+    CMP #WK_SPAN : BEQ span
+    \ a full row's inner window
+    LDA win_src : CLC : ADC #LO(8 * WIN_INNER) : STA win_src
+    LDA win_src+1 : ADC #HI(8 * WIN_INNER) : STA win_src+1
+    LDY c : JSR win_aim
+    LDY #WIN_INNER : JSR win_cell
+    LDX #WIN_INNER_CELLS : JSR cells_copy
+    BRA next
+.span
+    LDA win_src : CLC : ADC #LO(2 * 8 * WIN_SIDE) : STA win_src     ; (past the sides)
+    LDA win_src+1 : ADC #HI(2 * 8 * WIN_SIDE) : STA win_src+1
+    LDY c : JSR win_aim
+    LDY #WIN_SPAN : JSR win_cell
+    LDX #WIN_SPAN_CELLS : JSR cells_copy
+.next
+    INC c : LDA c : CMP #MV_YMAX DIV 8 + 1 : BNE row
+    \ the bar's lines in row 15: its first two
+    LDX #(BAR_Y + 4) DIV 8
+    LDA win_row_lo - WIN_FIRST_ROW,X : CLC : ADC #LO(8 * WIN_INNER) : STA win_src
+    LDA win_row_hi - WIN_FIRST_ROW,X : ADC #HI(8 * WIN_INNER) : STA win_src+1
+    LDY #(BAR_Y + 4) DIV 8 : JSR win_aim
+    LDY #WIN_INNER : JSR win_cell
+    LDX #WIN_INNER_CELLS : JMP lines_01
+}
+\ (the rows it puts back whole hold the bar's first lines, and the row of
+\ its last is full; and it leaves the countdown's row, the one text the
+\ open view prints, for panel_messages)
+ASSERT BAR_Y DIV 8 = MV_YMAX DIV 8 AND (BAR_Y + 4) DIV 8 = MV_YMAX DIV 8 + 1 AND ((BAR_Y + 4) AND 7) <= 2
+ASSERT WIN_KINDS[(BAR_Y + 4) DIV 8 - WIN_FIRST_ROW] = WK_FULL
+ASSERT WIN_KINDS[COUNT_TEXT_ROW - WIN_FIRST_ROW] = WK_EMPTY
 
 \ win_bar (L_052EC): the missile's life as win_blocks blocks over the
 \ bar's pips, 4 by 4 in the ST's colour 7 (four of its 2 by 2 dots), each
@@ -82,33 +253,38 @@ BAR_Y    = &76                          ; its top row
 BAR_STEP = 6
 .win_bar
 {
-    ZA_AUTO1 b, x, col, mask
+    ZA_AUTO1 b, x, m0, m1
     LDA win_blocks : BNE some
     RTS
 .some
     STZ b
     LDA #BAR_X - 2 : STA x
 .block
-    LDA x : STA col
-.column
-    LDA col : AND #3 : TAY
-    LDA win_pix,Y : AND colour_map+7 : STA mask
-    LDA col : SEC : SBC #VIEW_XMIN          ; (its byte, from the window's first)
-    AND #&FC : ASL A : STA win_src
-    LDA #0 : ROL A : STA win_src+1
+    \ its four pixels from x: those of x's byte from x on, and those of the
+    \ next byte before x + 4
+    LDA x : AND #3 : TAY
+    LDA bar_from,Y : AND colour_map+7 : STA m0
+    LDA bar_before,Y : AND colour_map+7 : STA m1
     LDY #BAR_Y DIV 8 : JSR win_aim
-    LDA win_dst : CLC : ADC win_src : STA win_dst
-    LDA win_dst+1 : ADC win_src+1 : STA win_dst+1
+    LDA x : SEC : SBC #VIEW_XMIN : LSR A : LSR A : TAY
+    JSR win_cell
+    \ its rows in the first character row, then in the next
     LDY #BAR_Y AND 7
-.line
-    LDA mask : ORA (win_dst),Y : STA (win_dst),Y
-    INY : CPY #8 : BNE next_line
+.upper
+    LDA m0 : ORA (win_dst),Y : STA (win_dst),Y
+    TYA : ORA #8 : TAY
+    LDA m1 : ORA (win_dst),Y : STA (win_dst),Y
+    TYA : AND #7 : TAY
+    INY : CPY #8 : BNE upper
     LDA win_dst : CLC : ADC #LO(SCREEN_ROW) : STA win_dst
     LDA win_dst+1 : ADC #HI(SCREEN_ROW) : STA win_dst+1
     LDY #0
-.next_line
-    CPY #(BAR_Y + 4) AND 7 : BNE line
-    INC col : LDA col : SEC : SBC x : CMP #4 : BNE column
+.lower
+    LDA m0 : ORA (win_dst),Y : STA (win_dst),Y
+    TYA : ORA #8 : TAY
+    LDA m1 : ORA (win_dst),Y : STA (win_dst),Y
+    TYA : AND #7 : TAY
+    INY : CPY #(BAR_Y + 4) AND 7 : BNE lower
     \ the next block left
     INC b
     LDA x : SEC : SBC #BAR_STEP : STA x
@@ -121,135 +297,150 @@ BAR_STEP = 6
     JMP block
 .done
     RTS
+\ a byte's pixels from the one at A AND 3 on, and before it
+.bar_from
+    EQUB &FF, &77, &33, &11
+.bar_before
+    EQUB &00, &88, &CC, &EE
 }
-.win_pix                                ; each pixel of a byte, from the left
-    EQUB &88, &44, &22, &11
 ZA_AUTO1 win_blocks                     ; the bar's blocks this frame (under_draw's)
 ASSERT (BAR_Y AND 7) + 4 > 8               ; (its rows span two character rows)
-ASSERT BAR_X - 2 - 16 * BAR_STEP - 4 >= VIEW_XMIN
+\ (and it lies in the inner window, which win_open puts back)
+ASSERT BAR_X - 2 - 16 * BAR_STEP - 4 >= 4 * (WINDOW_COL0 + WIN_INNER)
+ASSERT BAR_X + 1 < 4 * (WINDOW_COL0 + WIN_INNER + WIN_INNER_CELLS)
 
-\ win_aim: win_dst = character row Y's first window byte.
+\ win_aim: win_dst = character row Y's first window byte. win_cell: win_dst
+\ moved on Y cells.
 ZA_AUTO2 win_dst, win_src
 .win_aim
     LDA screen_row_lo,Y : CLC : ADC #LO(WINDOW_COL0 * 8) : STA win_dst
     LDA screen_row_hi,Y : ADC #HI(WINDOW_COL0 * 8) : STA win_dst+1
     RTS
-
-\ win_copy: the picture's character row X (from 1) at win_dst: its runs,
-\ each literal run read through win_src set back by Y, so that one index
-\ walks both.
-.win_copy
-{
-    ZA_AUTO1 n
-    LDA win_row_lo - WIN_FIRST_ROW,X : STA win_src
-    LDA win_row_hi - WIN_FIRST_ROW,X : STA win_src+1
-    LDA win_dst+1 : CLC : ADC #HI(WIN_BYTES) : STA win_end
-    LDY #0
-.run
-    LDA (win_src) : BMI zeros
-    STA n
-    INC win_src : BNE from
-    INC win_src+1
-.from
-    \ win_src - Y, so (win_src),Y is the run's next byte
-    TYA : EOR #&FF : SEC : ADC win_src : STA win_src
-    BCS lit
-    DEC win_src+1
-.lit
-    LDA (win_src),Y : STA (win_dst),Y
-    INY : BEQ lit_page
-.lit_next
-    DEC n : BNE lit
-    \ win_src back to the run's end
-    TYA : CLC : ADC win_src : STA win_src
-    BCC more
-    INC win_src+1
-    BRA more
-.lit_page
-    INC win_dst+1 : INC win_src+1
-    BRA lit_next
-.zeros
-    AND #&7F : TAX
-    INC win_src : BNE zero
-    INC win_src+1
-.zero
-    LDA #0
-.zero_byte
-    STA (win_dst),Y
-    INY : BEQ zero_page
-.zero_next
-    DEX : BNE zero_byte
-.more
-    \ (each row ends where its 576th byte does: 2 pages and 64 bytes)
-    LDA win_dst+1 : CMP win_end : BNE run
-    CPY #LO(WIN_BYTES) : BNE run
-    RTS
-.zero_page
+.win_cell
+    TYA : ASL A : ASL A : ASL A
+    BCC low
     INC win_dst+1
-    BRA zero_next
-}
-ZA_AUTO1 win_end                        ; win_dst's high byte at a row's end
-ASSERT WIN_BYTES = 2 * 256 + 64
-
-\ win_clear: the 576 bytes at win_dst cleared.
-.win_clear
-{
-    LDA #0 : LDY #0 : LDX #2
-.page
-    STA (win_dst),Y : INY : BNE page
-    INC win_dst+1
-    DEX : BNE page
-.last
-    STA (win_dst),Y : INY : CPY #LO(WIN_BYTES) : BNE last
-    RTS
-}
-
-\ win_zero_lines: in the character row at win_dst, the lines whose bits
-\ are set in A cleared, in each of its cells.
-.win_zero_lines
-{
-    ZA_AUTO1 lines, cell
-    STA lines
-    LDA #WIN_BYTES / 8 : STA cell
-.each
-    LDY #7 : LDA lines
-.line
-    ASL A : BCC kept
-    PHA : LDA #0 : STA (win_dst),Y : PLA
-.kept
-    DEY : BPL line
-    LDA win_dst : CLC : ADC #8 : STA win_dst
+    CLC
+.low
+    ADC win_dst : STA win_dst
     BCC same
     INC win_dst+1
 .same
-    DEC cell : BNE each
+    RTS
+ASSERT WIN_INNER < 64 AND WIN_SPAN < 64  ; (win_cell's cells: their offsets' high bytes from the shift)
+
+\ CELL_RUN first, last, copy: a routine for X cells (1-255) from win_dst on,
+\ each line from first to last copied from win_src's cells (copy TRUE) or
+\ cleared, win_dst and win_src moved on past them.
+MACRO CELL_RUN first, last, copy
+    IF NOT(copy)
+        LDA #0
+    ENDIF
+    LDY #0
+.cell
+    FOR l = 0..7
+        IF l >= first AND l <= last
+            IF copy
+                LDA (win_src),Y
+            ENDIF
+            STA (win_dst),Y
+        ENDIF
+        INY
+    NEXT
+    BNE same_page
+    INC win_dst+1
+    IF copy
+        INC win_src+1
+    ENDIF
+.same_page
+    DEX : BNE cell
+    TYA : CLC : ADC win_dst : STA win_dst
+    BCC dst_on
+    INC win_dst+1
+.dst_on
+    IF copy
+        TYA : CLC : ADC win_src : STA win_src
+        BCC src_on
+        INC win_src+1
+.src_on
+    ENDIF
+    RTS
+ENDMACRO
+.cells_copy
+    CELL_RUN 0, 7, TRUE
+.cells_zero
+    CELL_RUN 0, 7, FALSE
+.lines_01
+    CELL_RUN 0, 1, TRUE
+.lines_02
+    CELL_RUN 0, 2, TRUE
+.lines_02_zero
+    CELL_RUN 0, 2, FALSE
+
+\ ---------------------------------------------------------------------------
+\ objects_view (L_05248's draw loop, &05454): C set if no object is drawn,
+\ as none is while the missile view's window moves; otherwise, in the
+\ missile view, the camera made the missile (its place and angles stand
+\ in for the player's, as they did for its lists: worldlogic.6502's
+\ missile_lists) and the clip its window. objects_unview puts back what
+\ objects_view changed. (code.6502's view_objects.)
+.objects_view
+{
+    CLC
+    LDA mv_render : BEQ done
+    LDA m_iris : BEQ open
+    SEC
+.done
+    RTS
+.open
+    JSR camera_swap
+    LDY #CLIP_N
+    JMP clip_window
+}
+.objects_unview
+{
+    LDA mv_render : BEQ done
+    JSR camera_swap
+    LDY #0
+    JMP clip_window
+.done
     RTS
 }
 
-\ win_lines01: lines 0 and 1 of the character row at win_dst, from it into
-\ win_keep (X = 0) or back (X = &80): above the view, the cockpit's own.
-.win_lines01
+\ camera_swap: the player's place and angles (pl_x to pl_roll) and the
+\ missile's (m_x to m_roll) swapped.
+.camera_swap
 {
-    ZA_AUTO1 cell, way
-    STX way
-    LDX #0
-    LDA #WIN_BYTES / 8 : STA cell
+    LDX #11
 .each
-    LDY #0
-.line
-    BIT way : BMI back
-    LDA (win_dst),Y : STA win_keep,X
-    BRA moved
-.back
-    LDA win_keep,X : STA (win_dst),Y
-.moved
-    INX : INY : CPY #2 : BNE line
-    LDA win_dst : CLC : ADC #8 : STA win_dst
-    BCC same
-    INC win_dst+1
-.same
-    DEC cell : BNE each
+    LDY pl_x,X : LDA m_x,X : STA pl_x,X
+    TYA : STA m_x,X
+    DEX : BPL each
     RTS
-.win_keep SKIP 2 * WIN_BYTES / 8
 }
+ASSERT pl_roll = pl_x + 10 AND m_roll = m_x + 10
+
+\ clip_window: render.6502's clip made the view's window's (Y = 0) or the
+\ missile view's (Y = CLIP_N), each of CLIP_SITES' operands patched. C is
+\ left clear.
+.clip_window
+{
+    ZA_AUTO2 at
+    TYA : CLC : ADC #CLIP_N - 1 : TAY
+    LDX #CLIP_N - 1
+.each
+    LDA clip_lo,X : STA at : LDA clip_hi,X : STA at+1
+    LDA clip_val,Y : STA (at)
+    DEY : DEX : BPL each
+    CLC
+    RTS
+}
+.clip_lo
+    EQUB LO(CLIP_SITES)
+.clip_hi
+    EQUB HI(CLIP_SITES)
+.clip_val
+    EQUB clip_values(VIEW_XMIN, VIEW_XMAX, VIEW_YMIN, VIEW_YMAX)
+    EQUB clip_values(MV_XMIN, MV_XMAX, MV_YMIN, MV_YMAX)
+ASSERT 2 * CLIP_N <= 256
 ASSERT win_draw >= &8000                    ; (it sets X, which moves &3000-&7FFF)

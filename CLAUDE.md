@@ -135,7 +135,8 @@ the ST's mouse moves.
   the objects and lists are there.
 `node tools/scenerun.mjs SCENES OUT --profile 37` samples where the cycles
 go. On the disc, `tools/listprof.mjs` splits world_lists into its parts and
-`tools/stepprof.mjs` times named routines a step, both holding keys.
+`tools/stepprof.mjs` times named routines a step, both holding keys. `tools/missilefps.mjs` times a missile view on the disc, its slide and
+its open window.
 
 `tools/fat12.py IMAGE [OUTDIR]` lists or extracts an ST (or PC) floppy,
 `tools/adf.py IMAGE [OUTDIR]` an Amiga one.

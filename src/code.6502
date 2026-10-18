@@ -16,6 +16,21 @@ INCLUDE "step.6502"
     BANK_ANDY BANK_PIC
     JMP under_draw
 
+\ view_objects: the draw list's objects, as world_render draws them: in
+\ the missile view (L_05248) none while its window moves, and once it's
+\ open, from the missile's place and angles, clipped to its window
+\ (mview.6502's objects_view and objects_unview).
+.view_objects
+{
+    BANK_ANDY BANK_PIC
+    JSR objects_view : BCS none
+    JSR draw_objects
+    BANK_ANDY BANK_PIC
+    JMP objects_unview
+.none
+    RTS
+}
+
 \ dot_exact: rotate_exact for view_under.6502's dots_draw, from the world's
 \ bank, below ANDY's top, and back.
 .dot_exact

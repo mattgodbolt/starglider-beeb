@@ -1033,3 +1033,53 @@ approximations from 40.9 to 32.0 a step; flying straight, 9,900 to 9,700
 sine table, which is aligned to 1K: much more code there would move the
 table, and everything after it, 1K on.
 
+### The missile view drawn as the ST draws it
+
+The ST was caught in its missile view (`tests/st/missile.txt`).
+`tools/st_scenes.py` now sees every frame of it, not only those that make
+lists, and `tools/st_render.py` takes the missile's camera there.
+
+- **While the window moves,** opening or closing, the ST draws nothing
+  but the cockpit's picture: no lists, no dots, no objects, a frame of 2
+  fields.
+- **Once it's open,** it makes the lists from the missile's place and
+  angles, and draws them clipped to a window of its own, x 80-239 and y
+  16-112, the projection's centre still the view's. The model draws every
+  line the ST drew there.
+
+The port drew the stale lists over the sliding window, with the player's
+angles, clipped to the view's window, so lines crossed the window's
+walls and erasing them left holes. Now (`view_objects`):
+
+- **None while it moves.** Once it's open, the missile's place and angles
+  stand in for the player's while the objects are drawn, as they do for
+  the lists.
+- **Its window.** The clip's window was the view's, in its immediates;
+  now `clip_window` patches each of them (`CLIP_SITES`) for the view's or
+  the missile view's. A window short of x 256 needs x's low byte tested
+  against its right edge, which the view's never does: the low byte's
+  branch is patched on to the high byte's test, so the view's clip costs
+  what it did. On the missile capture's open frames every line is within
+  3 pixels of the ST's (`make spike`, which now has the missile scene).
+- **The slide.** Drawing the window whole from its runs took about
+  200,000 cycles a frame, and the disc drew one frame in two or three of
+  the slide's steps. Each screen now remembers which picture row each of
+  its window's character rows shows, and draws only the rows that differ:
+  a row's sides, its inner window only where it has something in it,
+  cleared only where it had. The picture is kept by rows
+  (`tools/mkcockpit.py`), in less room than the runs and their put-back
+  tables took. The disc now draws a frame every step of the slide, at
+  most 101,000 cycles (`tools/missilefps.mjs`, measured 2026-10-18).
+- **MISSILE VIEW's holes.** When a text the screen shows is in rows the
+  window draws again, those rows are drawn and the text is taken off the
+  panel's record (`ps_texts`), so `panel_messages` no longer clears its
+  pixels from the picture just drawn.
+- **The bar** is drawn a block at a time, and the open window's put-back
+  takes 20,000 cycles, not 31,000.
+
+`make view` draws the window over each other step's, over texts and over
+an overflowed erase, and checks the objects; `erasecheck` launches and
+steers a missile and checks the window after every erase on the disc.
+The ST's slide takes 14 of its 2-field frames; the port's takes 14 steps
+(decision 4), twice as long.
+

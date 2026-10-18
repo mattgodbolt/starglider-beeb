@@ -1,0 +1,24 @@
+# The missile view: a missile launched (L) after a short flight and flown
+# from its nose, turning so that objects cross the window's walls, its
+# life cut to 120: the window opening (no objects drawn), open, closing
+# over its last 15 frames, and the view's end.
+wait 38
+key 57
+wait 3
+debug parse {arm}
+debug echo \nSEG flight\n
+key 57 3
+wait 4
+key l 0.3
+debug w w $5c176 120
+debug echo \nSEG missile\n
+wait 12
+down 0x4b
+wait 4
+up 0x4b
+down 0x4d
+wait 8
+up 0x4d
+wait 40
+debug echo \nSEG end\n
+quit

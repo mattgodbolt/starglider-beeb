@@ -12,7 +12,9 @@ Each frame becomes:
   +22 to +25 as they are), the ST's 140 slots then the silo's tunnel
   (&1218) and missile (&1258);
 - `zp`: the frame's inputs, by symbol: the player, the slot count, the
-  docked and silo-missile flags, the all-faces flag and the beam's colour;
+  docked and silo-missile flags, the all-faces flag, the beam's colour,
+  and the missile view's flag, the missile's place and angles and the
+  window's step (in the missile view its camera is the missile's);
 - `anim`: each shape's animation frame, the index into its list of the
   vertex block the ST's shape table names;
 - `expect`: the ST's coarse, near and draw lists (slots, in the order
@@ -84,6 +86,11 @@ def main():
             "all_faces": 0x80 if mem.u8(R.A6 + 0x2BD) else 0,
             # (captures before the beam's colour was dumped draw it in 15)
             "beam_colour": mem.u16(R.BASE + 0x0D97E) & 15 if mem.has(R.BASE + 0x0D97E) else 15,
+            # the missile view (L_05248): its camera, and its window's step
+            "mv_render": mem.u8(R.A6 + 0x2C9),
+            "m_x": mem.var(0x26A), "m_y": mem.var(0x26C), "m_z": mem.var(0x26E),
+            "m_pitch": mem.var(0x270), "m_heading": mem.var(0x272), "m_roll": mem.var(0x274),
+            "m_iris": mem.var(0x27C),
         }
         anim = []
         for s in shapes:

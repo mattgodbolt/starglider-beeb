@@ -29,6 +29,13 @@ The breakpoints (text-segment offsets; EmuTOS loads the text at &109BE):
   (d4-d7) and the colour ($208(a6)).
 - &05166, after the last object: an AFTER record, so the lines after it
   (the lasers, enemy fire) are kept apart from the last object's.
+- In the missile view (L_05248): &05380, which every missile-view frame
+  passes once the window is copied, an MVIEW record (the VBL count, the
+  window's step $27C and the missile's life $276), so a frame that draws
+  no objects is seen too; &0544E, once its lists are built from the
+  missile and the player's place is back, the FRAME record and dumps; and
+  &054AC, after its draw loop (or none), an AFTER record. Lines after an
+  MVIEW and before its FRAME, if any, are the MVIEW's.
 
 Breakpoints don't change the emulated timing (docs/research/st.md, "Work
 per frame"), but the dumps make Hatari slower than real time, so a
@@ -43,11 +50,12 @@ from pathlib import Path
 
 BASE = 0x109BE
 A6 = 0x5BF00
-FRAME, OBJECT, LINE, AFTER = 0xF00D, 0x0B1E, 0x11E0, 0xAF7E
+FRAME, OBJECT, LINE, AFTER, MVIEW = 0xF00D, 0x0B1E, 0x11E0, 0xAF7E, 0x5EED
 AFTER_LISTS = 0x05108
 DRAW_SHAPE, DRAW_EXPLODING = 0x04B1C, 0x04DAC
 LINE_DRAWER = 0x09128
 AFTER_OBJECTS = 0x05166
+MISSILE_TOP, MISSILE_LISTS, MISSILE_AFTER = 0x05380, 0x0544E, 0x054AC
 # (name, address, length): what each FRAME dumps
 REGIONS = [
     ("vars", A6, 0x359A),                       # variables, lists, 140 objects
@@ -65,13 +73,17 @@ def setup(d):
     (d / "frame.ini").write_text("\n".join(frame) + "\n")
     (d / "obj.ini").write_text(f"e ${OBJECT:x}\ne a4\n")
     (d / "after.ini").write_text(f"e ${AFTER:x}\n")
+    (d / "mview.ini").write_text(f"e ${MVIEW:x}\ne VBL\ne (${A6 + 0x27C:x}).w\ne (${A6 + 0x276:x}).w\n")
     (d / "line.ini").write_text(f"e ${LINE:x}\ne d4&$ffff\ne d5&$ffff\ne d6&$ffff\ne d7&$ffff\n"
                                 f"e (${A6 + 0x208:x}).w\n")
     arm = [f"b pc = ${BASE + AFTER_LISTS:x} :trace :quiet :file {d / 'frame.ini'}",
            f"b pc = ${BASE + DRAW_SHAPE:x} :trace :quiet :file {d / 'obj.ini'}",
            f"b pc = ${BASE + DRAW_EXPLODING:x} :trace :quiet :file {d / 'obj.ini'}",
            f"b pc = ${BASE + LINE_DRAWER:x} :trace :quiet :file {d / 'line.ini'}",
-           f"b pc = ${BASE + AFTER_OBJECTS:x} :trace :quiet :file {d / 'after.ini'}"]
+           f"b pc = ${BASE + AFTER_OBJECTS:x} :trace :quiet :file {d / 'after.ini'}",
+           f"b pc = ${BASE + MISSILE_TOP:x} :trace :quiet :file {d / 'mview.ini'}",
+           f"b pc = ${BASE + MISSILE_LISTS:x} :trace :quiet :file {d / 'frame.ini'}",
+           f"b pc = ${BASE + MISSILE_AFTER:x} :trace :quiet :file {d / 'after.ini'}"]
     (d / "arm.ini").write_text("\n".join(arm) + "\n")
     return d / "arm.ini"
 
@@ -81,12 +93,15 @@ def signed(v):
 
 
 def parse(path):
-    """The frames in a Hatari output, in order. The first is dropped if its
-    dumps are incomplete (the breakpoints were set mid-frame)."""
+    """The frames in a Hatari output, in order, and the missile view's
+    (MVIEW records: each with the index of the FRAME it went on to, or
+    None, and any lines drawn before that). The first frame is dropped if
+    its dumps are incomplete (the breakpoints were set mid-frame)."""
     value = re.compile(r"#(-?\d+)(?:/-?\d+)? \(dec\)")
     dump = re.compile(r"^([0-9A-F]{8}): ((?:[0-9a-f]{2} )+)")
     seg = re.compile(r"^SEG (\S+)")
     frames, cur, pending, segment = [], None, [], "start"
+    mviews, mv = [], None
     mem = {}
 
     def finish():
@@ -113,8 +128,18 @@ def parse(path):
         tag = pending[0]
         if tag == FRAME and len(pending) == 2:
             finish()
+            if mv is not None:
+                mv["frame"] = len(frames)
+                mv = None
             cur = {"segment": segment, "vbl": pending[1], "lines": []}
             mem = {}
+            pending = []
+        elif tag == MVIEW and len(pending) == 4:
+            finish()
+            cur = None
+            mv = {"segment": segment, "vbl": pending[1], "iris": signed(pending[2] & 0xFFFF),
+                  "life": signed(pending[3] & 0xFFFF), "frame": None, "lines": []}
+            mviews.append(mv)
             pending = []
         elif tag == OBJECT and len(pending) == 2:
             if cur is not None:
@@ -125,11 +150,13 @@ def parse(path):
                 cur["lines"].append({"object": "after"})
             pending = []
         elif tag == LINE and len(pending) == 6:
+            line = [*(signed(v) for v in pending[1:5]), pending[5] & 0xFFFF]
             if cur is not None:
-                x0, y0, x1, y1 = (signed(v) for v in pending[1:5])
-                cur["lines"].append([x0, y0, x1, y1, pending[5] & 0xFFFF])
+                cur["lines"].append(line)
+            elif mv is not None:
+                mv["lines"].append(line)
             pending = []
-        elif tag not in (FRAME, OBJECT, LINE, AFTER):
+        elif tag not in (FRAME, OBJECT, LINE, AFTER, MVIEW):
             pending = []                            # some other output
     finish()
     # each frame's lines were drawn after its dump; regroup them by object
@@ -145,7 +172,15 @@ def parse(path):
                 current["lines"].append(item)
         objects.append(current)
         f["drawn"] = objects
-    return frames[1:] if frames else frames
+    if not frames:
+        return frames, mviews
+    # an MVIEW's frame is the next FRAME only if that's the missile view's
+    # (its $2C9 set), not the normal view's after the missile view's last
+    for m in mviews:
+        f = m["frame"]
+        missile = f and bytes.fromhex(frames[f]["memory"]["vars"])[0x2C9]
+        m["frame"] = f - 1 if missile else None
+    return frames[1:], mviews
 
 
 def run(script, outdir, rest):
@@ -156,9 +191,9 @@ def run(script, outdir, rest):
     here = Path(__file__).resolve().parent
     subprocess.run([sys.executable, "-I", str(here / "st_hatari.py"), str(outdir / "script.txt"),
                     "--out", str(outdir), *rest], check=True)
-    frames = parse(outdir / "hatari.out")
-    (outdir / "scenes.json").write_text(json.dumps({"regions": REGIONS, "frames": frames}))
-    print(f"{outdir / 'scenes.json'}: {len(frames)} frames")
+    frames, mviews = parse(outdir / "hatari.out")
+    (outdir / "scenes.json").write_text(json.dumps({"regions": REGIONS, "frames": frames, "mview": mviews}))
+    print(f"{outdir / 'scenes.json'}: {len(frames)} frames, {len(mviews)} of the missile view")
 
 
 def main():
@@ -166,9 +201,9 @@ def main():
     if len(a) >= 2 and a[0] == "setup":
         print(setup(a[1]))
     elif len(a) == 3 and a[0] == "parse":
-        frames = parse(a[1])
-        Path(a[2]).write_text(json.dumps({"regions": REGIONS, "frames": frames}))
-        print(f"{a[2]}: {len(frames)} frames")
+        frames, mviews = parse(a[1])
+        Path(a[2]).write_text(json.dumps({"regions": REGIONS, "frames": frames, "mview": mviews}))
+        print(f"{a[2]}: {len(frames)} frames, {len(mviews)} of the missile view")
     elif len(a) >= 3 and a[0] == "run":
         run(a[1], a[2], a[3:])
     else:

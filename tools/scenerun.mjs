@@ -5,7 +5,7 @@
 //
 // SCENES.json is tools/mkscene.py's: each frame's objects (the ST's
 // records), inputs and animation frames. The build directory holds the
-// spike's binaries (SPIKE, SHAPES, WORLD) and its symbols.json. Each frame
+// spike's binaries (SPIKE, SHAPES, WORLD, WINDOW) and its symbols.json. Each frame
 // is written into memory, the records into the port's object table by
 // build/gen/objects.json (decision 13's layout, tools/mkobjects.py),
 // spike_frame is called from a stub with interrupts off, and the
@@ -68,6 +68,7 @@ load("TABLES", where(need("TABLES")));
 load("CODE2", where(need("CODE2")));
 load("SHAPES", bank(need("BANK_SHAPES")));
 load("WORLD", bank(need("BANK_WORLD")));
+load("WINDOW", bank(need("BANK_PIC")) + need("WIN_PIC") - 0x8000);
 
 // The stub: SEI, JSR entry, JMP to itself.
 const STUB = 0x0140;
@@ -182,7 +183,7 @@ for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
     const fr = scenes[n];
     putObjects(Buffer.from(fr.objects, "hex"), n === lo);
     for (const [name, v] of Object.entries(fr.zp)) {
-        if (name.startsWith("pl_")) pokew(need(name), v);
+        if (name.startsWith("pl_") || name.startsWith("m_")) pokew(need(name), v);
         else ram[need(name)] = v & 0xff;
     }
     ram.set(fr.anim, need("anim_frame"));

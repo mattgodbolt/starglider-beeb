@@ -23,9 +23,15 @@
 //   the window: the whole screen must be the cockpit with the picture's
 //   window rows slid by m_iris, cleared below, and the bar on it when it's
 //   open (&06B7E, L_052EC: tools/mkcockpit.py's picture); and again, the
-//   same, once erased and put back as an open window is. The dots over it
-//   are checked where they change the picture. A frame after the missile
-//   view, drawn over the open window, must clear it.
+//   same, once erased and put back as an open window is; and drawn over
+//   the window as each other step left it (an open one with holes where an
+//   erase took lines), over the texts the missile view prints and the
+//   view's own (which it must take off the panel's ps_texts), and over a
+//   window an overflowed erase cleared. The dots over it are checked where
+//   they change the picture. Its objects (spike_objects) must draw no line
+//   while the window moves, and once it's open only inside its window, the
+//   camera put back after. A frame after the missile view, drawn over the
+//   open window, must clear it.
 // - the bolt: from `lists`, world_after, then spike_over: the bolt's lines
 //   (slot VIEW_BOLT in the line log) must be the ST's (&087FA) for the
 //   state at `render`, cut to the window by &0A170's arithmetic.
@@ -505,6 +511,49 @@ function stWindow(iris, life) {
     }
     return s;
 }
+// holes: bytes of the open window's inner window cut, as an erase takes the
+// pixels of a frame's lines and dots
+function holes() {
+    let seed = 12345;
+    for (let y = 0x10; y <= 0x70; y++)
+        for (let x = 0x50; x <= 0xef; x += 4) {
+            seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+            if (seed % 3 === 0) ram[SCREEN + at(x, y)] &= (seed >> 8) & 0xff;
+        }
+}
+// clearWindow: the view's window cleared, as erase_screen clears it when
+// its list overflowed (screen.6502's window_clear)
+function clearWindow() {
+    for (let y = VIEW.ymin; y <= VIEW.ymax; y++) for (let x = VIEW.xmin; x <= VIEW.xmax; x += 4) ram[SCREEN + at(x, y)] = 0;
+}
+// garble: the texts of ps_texts' bits (texts_do's tx_first and tx_n) as
+// shown on the screen: their cells (build/gen/panel.json's places, a
+// number's as long as a word's) filled, and the bits set
+const panelLayout = JSON.parse(fs.readFileSync("build/gen/panel.json", "utf8"));
+const TEXTS_OF_BIT = [[0], [1], [2], [3], [4], [5, 6], [7, 8, 9], [10, 11, 12]];
+function garble(bits) {
+    ram[need("ps_texts")] = bits;
+    for (let b = 0; b < 8; b++)
+        if (bits & (1 << b))
+            for (const id of TEXTS_OF_BIT[b]) {
+                const t = panelLayout.texts[id];
+                const [x0, y0] = panelLayout.places[t.place];
+                const x = x0 + 8 * (t.after ? panelLayout.level_prefix : 0);
+                const n = t.string === "num_text" ? 5 : panelLayout.strings[t.string].length;
+                for (let y = y0; y < y0 + 8; y++) for (let px = x; px < x + 8 * n; px += 4) ram[SCREEN + at(px, y)] = 0xff;
+            }
+}
+// every line in the line log since it was cleared: its slot and ends
+function allLogged() {
+    const n = ram[need("log_n")] | (ram[need("log_n") + 1] << 8);
+    const log = bank(need("BANK_LOG")) + (need("line_log") - 0x8000);
+    const out = [];
+    for (let k = 0; k < n; k++) {
+        const e = ram.subarray(log + 9 * k, log + 9 * k + 9);
+        out.push({ slot: e[0], x0: w16(e[2] | (e[3] << 8)), y0: e[4], x1: w16(e[5] | (e[6] << 8)), y1: e[7] });
+    }
+    return out;
+}
 const windowBad = (iris, life) => {
     const want = stWindow(iris, life);
     let bad = 0;
@@ -545,8 +594,8 @@ const BOLT = need("VIEW_BOLT"),
 // spike_under's drawing, timed from its start to its end, and the dots
 // from theirs
 const marksUnder = [need("spike_under_draw"), need("dots_draw")];
-const cyc = { under: [], dots: [], erase: [], bolt: [], shots: [], window: [], windowOpen: [] };
-const tally = { frames: 0, mvFrames: 0, mvBad: 0, mvLeft: 0, dotFrames: 0, stDots: 0, exact: 0, near: 0, edge: 0, missed: 0, extra: 0, model: 0, pixWant: 0, pixExact: 0, pixNear: 0, pixEdge: 0, sight: 0, sightBad: 0, erased: 0, unerased: 0, bolts: 0, boltBad: 0, boltNear: 0, shots: 0, shotBad: 0, replayBad: 0 };
+const cyc = { under: [], dots: [], erase: [], bolt: [], shots: [], window: [], windowOpen: [], slide: [], slideAll: [] };
+const tally = { frames: 0, mvFrames: 0, mvBad: 0, mvLeft: 0, mvSlid: 0, mvLines: 0, dotFrames: 0, stDots: 0, exact: 0, near: 0, edge: 0, missed: 0, extra: 0, model: 0, pixWant: 0, pixExact: 0, pixNear: 0, pixEdge: 0, sight: 0, sightBad: 0, erased: 0, unerased: 0, bolts: 0, boltBad: 0, boltNear: 0, shots: 0, shotBad: 0, replayBad: 0 };
 const bad = [];
 const note = (s) => {
     if (bad.length < show * 6) bad.push(s);
@@ -589,6 +638,16 @@ for (const stepsPath of args) {
                 const fresh = () => {
                     ram.set(cockpit, SCREEN);
                     ram[need("win_shown")] = 0xff;
+                    ram[need("ps_texts")] = 0;
+                };
+                // (the screen as the last frame drawn on it left it)
+                const shown = (kOld, texts = 0, overflowed = false) => () => {
+                    ram.set(stWindow(8 * kOld, 0xff), SCREEN);
+                    if (kOld === 0) holes();
+                    ram[need("win_shown")] = 8 * kOld;
+                    ram[need("erase_stop")] = overflowed ? 0 : 1;
+                    if (overflowed) clearWindow();
+                    garble(texts);
                 };
                 const t = await under(fresh);
                 cyc.window.push(t[1] - t[0]);
@@ -609,6 +668,55 @@ for (const stepsPath of args) {
                         tally.mvBad++;
                         note(`${name} frame ${n}: the open window put back: ${bad2} bytes not the ST's`);
                     }
+                }
+                // drawn over the window as each step left it on the screen
+                // (an open one with holes where an erase took lines), as the
+                // slide's frames are; over the texts the missile view prints
+                // (and others, from the view's own), which it must take off;
+                // and over a window an overflowed erase cleared
+                const k = iris >> 3;
+                const cases = [];
+                for (let kOld = 0; kOld <= 14; kOld++) if (kOld !== k || k) cases.push([kOld, 0, false]);
+                for (const kOld of [k + 1, k + 2, k - 2].filter((x) => x >= 0 && x <= 14))
+                    cases.push([kOld, need("TX_MVIEW") | need("TX_COUNT"), false]);
+                cases.push([k + 2 <= 14 ? k + 2 : 0, 0, true]);
+                for (const [kOld, texts, overflowed] of cases) {
+                    const ts = await under(shown(kOld, texts, overflowed));
+                    if (!texts && !overflowed) (Math.abs(kOld - k) === 2 ? cyc.slide : cyc.slideAll).push(ts[1] - ts[0]);
+                    const b = windowBad(iris, life);
+                    const left = ram[need("ps_texts")];
+                    if (b || left) {
+                        tally.mvBad++;
+                        note(`${name} frame ${n}: the window at m_iris ${iris} over m_iris ${8 * kOld}` +
+                            `${texts ? " with texts" : ""}${overflowed ? " cleared" : ""}: ${b} bytes not the ST's, texts ${left}`);
+                    }
+                    tally.mvSlid++;
+                }
+                // from the view's own, with its texts
+                await under(() => {
+                    fresh();
+                    garble(need("TX_LEVEL"));
+                });
+                if (windowBad(iris, life) || ram[need("ps_texts")]) {
+                    tally.mvBad++;
+                    note(`${name} frame ${n}: the window at m_iris ${iris} over the view's texts not the ST's`);
+                }
+                // the objects: none while the window moves, and once it's
+                // open each line inside its window, the camera put back
+                putState(steps, top);
+                setD0(fr, "top");
+                callIn("world_lists", "BANK_WORLD");
+                const camera = Array.from(ram.subarray(need("pl_x"), need("pl_x") + 12));
+                await run(need("spike_objects"));
+                const objectLines = allLogged().filter((l) => l.slot < need("SLOTS") + 2);
+                const w = MISSILE_VIEW;
+                const inside = (x, y) => x >= w.xmin && x <= w.xmax && y >= w.ymin && y <= w.ymax;
+                const outside = objectLines.filter((l) => !inside(l.x0, l.y0) || !inside(l.x1, l.y1));
+                const moved = camera.some((b, i) => ram[need("pl_x") + i] !== b);
+                tally.mvLines += objectLines.length;
+                if ((iris !== 0 && objectLines.length) || outside.length || moved) {
+                    tally.mvBad++;
+                    note(`${name} frame ${n}: m_iris ${iris}: ${objectLines.length} objects' lines, ${outside.length} outside the window${moved ? ", the camera not put back" : ""}`);
                 }
                 // with the dots: those that change the picture's bit plane
                 ram[colourMap + 2] = 0x0f;
@@ -785,11 +893,12 @@ console.log(`  sight: shown in ${tally.sight}, ${tally.sightBad} frames' pixels 
 console.log(`  erase: ${tally.erased} frames emptied, ${tally.unerased} not`);
 console.log(`  bolt: drawn in ${tally.bolts} frames, ${tally.boltNear} within a pixel, ${tally.boltBad} wrong`);
 console.log(`  shots: ${tally.shots} the ST's, ${tally.shotBad} frames wrong; the numbers' replay wrong ${tally.replayBad} times`);
-console.log(`  missile view: ${tally.mvFrames} frames, ${tally.mvBad} windows not the ST's; ${tally.mvLeft} frames after it cleared`);
+console.log(`  missile view: ${tally.mvFrames} frames, ${tally.mvBad} windows not the ST's; ${tally.mvSlid} drawn over another step's; ${tally.mvLines} objects' lines; ${tally.mvLeft} frames after it cleared`);
 if (wantCycles) {
     console.log(`  cycles: the sight and the dots mean ${mean(cyc.under)}, most ${most(cyc.under)}; the dots alone mean ${mean(cyc.dots)}, most ${most(cyc.dots)}`);
     console.log(`          erasing them mean ${mean(cyc.erase)}, most ${most(cyc.erase)}; the bolt mean ${mean(cyc.bolt)}, most ${most(cyc.bolt)}; frames with shots mean ${mean(cyc.shots)}, most ${most(cyc.shots)}`);
     console.log(`          the missile view's window drawn whole mean ${mean(cyc.window)}, most ${most(cyc.window)}; open and put back mean ${mean(cyc.windowOpen)}, most ${most(cyc.windowOpen)}`);
+    console.log(`          over the window two steps away mean ${mean(cyc.slide)}, most ${most(cyc.slide)}; over any other step's mean ${mean(cyc.slideAll)}, most ${most(cyc.slideAll)}`);
 }
 for (const b of bad) console.log("  " + b);
 const failed = tally.missed + tally.extra + tally.model + tally.sightBad + tally.unerased + tally.boltBad + tally.shotBad + tally.replayBad + tally.mvBad;
