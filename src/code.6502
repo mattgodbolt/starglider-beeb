@@ -38,6 +38,33 @@ INCLUDE "step.6502"
     JSR rotate_exact
     BANK_ANDY BANK_PIC
     RTS
+
+\ ground_rows, ground_make: the ground dots' rotation (build/gen/ground.6502,
+\ in the loading area's bank) for ground_dots, from the world's bank and
+\ back: a dot's three rows, and the rows made for the frame's camera,
+\ which the drawing then uses too.
+.ground_rows
+    BANK_ANDY BANK_PIC
+    JSR ground_all
+    BANK_ANDY BANK_WORLD
+    RTS
+.ground_make
+    BANK_ANDY BANK_PIC
+    JSR ground_start
+    JSR ground_setup
+    BANK_ANDY BANK_WORLD
+    RTS
+
+\ dots_erase: the ground dots on the screen draw_buffer names erased from
+\ their own list (view_under.6502's dots_wipe, in the loading area's bank),
+\ if it has any.
+.dots_erase
+    LDX draw_buffer
+    LDA dot_wipes,X : BEQ none
+    BANK BANK_PIC
+    JMP dots_wipe
+.none
+    RTS
 INCLUDE "sound.6502"
 
 

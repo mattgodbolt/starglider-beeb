@@ -199,7 +199,16 @@ free_top = free_n           ; {ST $09C(a6) index &94C 4} (the ST's pointer past 
     \ the drawing to draw (view.6502): the port's own, all of it, each the
     \ last step's
 .dots_ran     SKIP 1        ; non-zero when ground_dots ran (world_lists)
-.dot_seen     SKIP 40       ; by dot: non-zero if ground_dots found it in view, so plotted it
+.dot_seen     SKIP 40       ; by dot: non-zero if ground_dots found it in view, so plotted it (DOT_KEPT ...)
+.dot_cx_lo    SKIP 40       ; ... and where it is in camera space, if ground_dots rotated it
+.dot_cx_hi    SKIP 40
+.dot_cy_lo    SKIP 40
+.dot_cy_hi    SKIP 40
+.dot_cz_lo    SKIP 40
+.dot_cz_hi    SKIP 40
+DOT_KEPT   = &80            ; dot_seen: in view, by what was known of it (not rotated)
+DOT_GROUND = &C0            ; ... rotated by the ground's rotation, within 4 (bit 6: rotated)
+DOT_EXACT  = &E0            ; ... rotated exactly (bit 5)
 .bolt_shown   SKIP 1        ; non-zero when player_laser drew the bolt (world_after)
 SHOTS = 16                  ; the enemies' laser shots kept for a frame, four a step for a frame's most steps (MAX_STEPS): no more are drawn
 .shot_n       SKIP 1        ; the shots since the last frame drawn (enemy_laser's, decision 30) ...

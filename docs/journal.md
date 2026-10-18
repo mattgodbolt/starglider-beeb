@@ -1083,3 +1083,56 @@ steers a missile and checks the window after every erase on the disc.
 The ST's slide takes 14 of its 2-field frames; the port's takes 14 steps
 (decision 4), twice as long.
 
+### The dots made cheaper
+
+The ground dots were the largest single cost in flight: about 61K cycles
+a frame to draw and 16K a step to decide flying straight, 42K a step in a
+hard turn. Both halves are cheaper, and the decision is still the ST's on
+every capture.
+
+- **Kept by its own distance.** A dot surely in view keeps its decision
+  while its margin outlasts the drift. The drift's classes went by powers
+  of two of the dot's |dx| + |dy| + |dz|, its rotation's part from the most
+  any entry moved. Now they go by 1024 units of the dot's own bound (its
+  sum, plus half its margin for the camera's moves while it lasts), the
+  rotation's part from what each column's change can do to the cone's
+  tests. In a hard turn 13 dots a step are worked out, not 23.6.
+- **One rotation for both.** The decision took its own approximation,
+  with a bound of a hundred or more, and the exact rotation within that of
+  the cone's edges. Now it takes the drawing's ground rotation, every term
+  of which is within 2 of the ST's floor(m d / 16384) for every entry and
+  offset (`tools/groundcheck.py`, which the build runs when the generator
+  changes). So the exact rotation is wanted for 0.09 dots a step in a hard
+  turn, not 2.5, and the drawing takes each dot ground_dots rotated rather
+  than rotating it again. ground_dots makes the rotation, in bank 7 with
+  the view's code, only when the camera or the height changes.
+- **Carried while the matrix holds.** While the camera's matrix is the
+  last frame's, a far dot's camera-space position changes only by the
+  matrix's product with the camera's move, so the drawing keeps each
+  one's and takes that off. Flying straight hardly a dot is rotated.
+- **Their own projection.** A far dot can only be in the window 512 or
+  more deep, so its projection skips the shallow cases, tests x and y
+  against the depth first, and interpolates the reciprocal between its
+  9-bit mantissa's entries, where proj_z takes the mantissa's middle:
+  97.6% of the ST's dots at its pixel, from 95.0%.
+- **Their own erase list** (decision 29). Each screen keeps its dots' top
+  bytes, 2 bytes a dot, and zeroes those and the ones below before it's
+  drawn again, rather than a 6-byte line set-up a column on the lines'
+  list.
+
+A far dot's height from the ground's plane, decision 29's other half,
+was built and measured. It stands in for row y' only for the dots the
+drawing rotates itself, which the rest has made few, and making the plane
+each time the roll or the height changes takes back about what it saves,
+for 0.3% of the dots off the ST's pixel. It is left out.
+
+| On the disc, cycles | Straight | Hard turn |
+|---|---|---|
+| ground_dots, a step | 15,966 → 8,588 | 42,252 → 28,020 |
+| The dots drawn, a frame | 61,059 → 44,131 | 67,698 → 58,428 |
+| The erase, a frame | 18,617 → 16,085 | 23,501 → 20,354 |
+
+`make fps`: 5.50 to 6.37 frames a second flying straight, 2.90 to 3.40
+held turning (measured 2026-10-18). Bank 7 holds most of the cost, 1.8K of
+its window section.
+

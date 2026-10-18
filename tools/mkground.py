@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Generate the ground dots' rotation into camera space, for drawing
-(Baron source).
+"""Generate the ground dots' rotation into camera space, for ground_dots'
+decision and their drawing (Baron source).
 
     mkground.py > build/gen/ground.6502
 
@@ -14,16 +14,18 @@ as rotate_exact's are (tools/mkrotate.py): D = d + 32768, unsigned, and a
 table reads, so that floor(m d / 16384) is the high word of M D, plus
 -2m (and for m < 0, negated: the high word's ceiling).
 
-Only drawing reads them (decision 1), so each term takes M's high byte by
-D's, and the high bytes only of M's low byte by D's high and M's high by
-D's low, each read without the borrow from its low byte: the high word
-less the carries the dropped bytes would have made (0 to 2), and plus
-the borrows (0 or 1 each), which about cancel. A term is within 2 of the
-ST's, a coordinate within 4, and a dot then within a pixel when its
-offset is NEAR_D or more on x or z (view.6502, which rotates the nearer
-ones exactly, measures it: tools/viewrun.mjs). An entry of +-16384 (M =
-65536) takes M = &FFFF and 1 more in the constant. The sign of each term
-picks its add or subtract, patched.
+Each term takes M's high byte by D's, and the high bytes only of M's low
+byte by D's high and M's high by D's low, each read without the borrow
+from its low byte: the high word less the carries the dropped bytes would
+have made (0 to 2), and plus the borrows (0 or 1 each), which about
+cancel. A term is within 2 of the ST's (tools/groundcheck.py checks every
+m and d), a coordinate within 4: ground_dots decides by that bound, the
+exact rotation deciding only within it of the cone's edges, and a dot is
+drawn within a pixel by it when its offset is NEAR_D or more on x or z
+(view_under.6502, which rotates the nearer ones exactly, measures it:
+tools/viewrun.mjs). An entry of +-16384 (M = 65536) takes M = &FFFF and 1
+more in the constant. The sign of each term picks its add or subtract,
+patched.
 """
 
 out = []
@@ -130,9 +132,25 @@ emit("""    LDX term
 }
 
 \\ ground_start: each row's constant begun with its column y's term,
-\\ floor(m dy / 16384) (the ST's), before ground_setup adds the rest.
+\\ floor(m dy / 16384) (the ST's), before ground_setup adds the rest: the
+\\ last ones made while column y and dy are what they were (a steady
+\\ turn's).
 .ground_start
 {
+    LDX #5
+.same
+    LDY gy_entry,X
+    LDA cam,Y : ZA_INDEXEDBY {2, 3, 8, 9, 14, 15}
+    CMP gy_was,X : BNE made
+    DEX : BPL same
+    LDA rot_d+2 : CMP gy_was+6 : BNE made
+    LDA rot_d+3 : CMP gy_was+7 : BNE made
+    LDX #5
+.kept
+    LDA gy_k,X : STA kacc,X
+    DEX : BPL kept
+    RTS
+.made
     LDX #4
 .each
     LDA gt_y_entry,X : TAY
@@ -143,10 +161,19 @@ emit("""    LDX term
     PHX
     JSR fmul16
     PLX
-    LDA mul_r : STA kacc,X
-    LDA mul_r+1 : STA kacc+1,X
+    LDA mul_r : STA kacc,X : STA gy_k,X
+    LDA mul_r+1 : STA kacc+1,X : STA gy_k+1,X
     DEX : DEX : BPL each
+    LDX #5
+.was
+    LDY gy_entry,X
+    LDA cam,Y : ZA_INDEXEDBY {2, 3, 8, 9, 14, 15}
+    STA gy_was,X
+    DEX : BPL was
+    LDA rot_d+2 : STA gy_was+6 : LDA rot_d+3 : STA gy_was+7
     RTS
+.gy_entry
+    EQUB 2, 3, 8, 9, 14, 15
 }
 """)
 emit("\\ by term: its entry of cam, its row's offset in rot_acc, and its code")
@@ -164,6 +191,11 @@ emit("    EQUB 2, 0, 8, 0, 14")
 emit("\\ the rows' constants as they're made (in the bank's own RAM: the draw")
 emit("\\ phase leaves zero page little room)")
 emit(".kacc SKIP 6")
+emit("\\ column y's terms as ground_start last made them, and its entries and")
+emit("\\ dy then (none at first: no column of a rotation is all -1)")
+emit(".gy_k SKIP 6")
+emit(".gy_was")
+emit("    EQUB &FF, &FF, &FF, &FF, &FF, &FF, &FF, &FF")
 emit()
 
 
@@ -210,20 +242,20 @@ def term(t):
     emit(f"    ADC gr_hi : STA rot_acc+{2 * r + 1}")
 
 
-emit("""\\ ground_x, ground_y, ground_z: one row of rot_acc = cam rot_d, x', y' or
-\\ z', for a dot at the ground, within 2 of the ST's (ground_setup made
-\\ them for this frame's cam and dy), a row at a time so that a dot can be
-\\ given up before its other rows. X and Y are a column's D, low and high
-\\ byte.""")
+emit("""\\ ground_all: rot_acc = cam rot_d, x', y' and z', for a dot at the
+\\ ground, each within 4 of the ST's (ground_setup made them for this
+\\ frame's cam and dy): the rows' constants, then column x's terms and
+\\ column z's, X and Y each column's D, low and high byte.
+.ground_all""")
 for r in range(3):
-    emit(f".ground_{'xyz'[r]}")
     emit(f".gk{2 * r}")
     emit(f"    LDA #0 : STA rot_acc+{2 * r}             ; patched: the row's constant")
     emit(f".gk{2 * r + 1}")
     emit(f"    LDA #0 : STA rot_acc+{2 * r + 1}")
-    for c in (0, 2):
-        emit(f"    LDX rot_d+{2 * c}                      ; column {'xyz'[c]}'s D")
-        emit(f"    LDA rot_d+{2 * c + 1} : EOR #&80 : TAY")
+for c in (0, 2):
+    emit(f"    LDX rot_d+{2 * c}                      ; column {'xyz'[c]}'s D")
+    emit(f"    LDA rot_d+{2 * c + 1} : EOR #&80 : TAY")
+    for r in range(3):
         term(TERMS.index((r, c)))
-    emit("    RTS")
+emit("    RTS")
 print("\n".join(out))

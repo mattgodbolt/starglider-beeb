@@ -80,14 +80,16 @@ INCLUDE "../build/gen/sight.6502"
 
 \ ---------------------------------------------------------------------------
 \ dots_draw (&047AA): the dots this step's ground_dots kept in view (as it
-\ records in dot_seen), each rotated into camera space, projected by the
-\ drawing's projection (proj_z, proj_x) and plotted if that's inside the
-\ window (strictly, as the ST tests it), as the ST plots it (dot_put), in
-\ the ST's colour 2. A dot whose offset from the camera is under NEAR_D on
-\ both x and z is rotated exactly (rotate_exact, as the logic does), the
-\ rest by ground_x, ground_y and ground_z (build/gen/ground.6502), within a
-\ pixel, a row at a time, depth first, so that one outside the window in x
-\ needs no y. In the missile view the camera is the missile, and the
+\ records in dot_seen), each in camera space, projected and plotted if
+\ that's inside the window (strictly, as the ST tests it), as the ST plots
+\ it (dot_put), in the ST's colour 2. A dot whose offset from the camera is
+\ under NEAR_D on both x and z is rotated exactly (rotate_exact, as the
+\ logic does, unless it did) and projected by the drawing's projection
+\ (proj_z, proj_x). The rest are where ground_dots rotated them, or where
+\ they were, moved with the camera while its matrix holds (dot_kept), or
+\ else rotated by ground_all (build/gen/ground.6502, which ground_dots made
+\ for this camera), within a pixel; and they're projected by their own
+\ (far_x, far_y). In the missile view the camera is the missile, and the
 \ window its own (L_05248), its bottom where the window's opening leaves
 \ it: the dots are only drawn when it's open.
 NEAR_D = 1024
@@ -121,47 +123,241 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     \ the ground's dy, the same for every dot
     LDA #0 : SEC : SBC at+2 : STA rot_d+2
     LDA #0 : SBC at+3 : STA rot_d+3
-    JSR ground_start
-    JSR ground_setup
-    \ dot_put's stores onto this screen's erase list, and its colour
-    LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
-    ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
-    STA dot_put.f_lo+2 : ADC #2
-    STA dot_put.f_hi+2 : ADC #2
-    STA dot_put.f_row+2 : ADC #2
-    STA dot_put.f_dx+2 : ADC #2
-    STA dot_put.f_dy+2 : ADC #2
-    STA dot_put.f_code+2
+    \ (ground_dots made the ground's rotation for this camera)
+    JSR dots_steady
+    \ this screen's list of dots, from its start, and their colour
+    LDX draw_buffer
+    LDA dpe_base,X : STA dpe_i
     LDA colour_map+2 : STA dot_colour
     LDA #39 : STA dot
 .each
+    \ (each way makes it before it's read, as the carry chooses, which
+    \ baron can't follow: without this it keeps it from one dot to the next)
+    ZA_DISCARD rot_acc
     LDX dot
     LDA dot_seen,X : BEQ next
+    JSR one
+.next
+    DEC dot : BPL each
+    \ how many, for dots_wipe
+    LDX draw_buffer
+    LDA dpe_i : SEC : SBC dpe_base,X : STA dot_wipes,X
+    RTS
+\ one: dot X, in view
+.one
     LDA dot_x_lo,X : SEC : SBC at : STA rot_d
     LDA dot_x_hi,X : SBC at+1 : STA rot_d+1
     LDA dot_z_lo,X : SEC : SBC at+4 : STA rot_d+4
     LDA dot_z_hi,X : SBC at+5 : STA rot_d+5
     LDA rot_d+1 : CLC : ADC #HI(NEAR_D) : CMP #2 * HI(NEAR_D) : BCS far
     LDA rot_d+5 : CLC : ADC #HI(NEAR_D) : CMP #2 * HI(NEAR_D) : BCS far
+    \ near: exactly, as ground_dots may have rotated it
+    LDA dot_seen,X : CMP #DOT_EXACT : BNE exact
+    JSR dot_given
+    BRA near
+.exact
     JSR dot_exact
-    JSR dot_x : BCS next
-    JSR dot_y : BCS next
-    BRA put
+.near
+    JSR dot_x : BCS done
+    JSR dot_y : BCS done
+    JMP dot_put
 .far
-    JSR ground_z
-    JSR ground_x
-    JSR dot_x : BCS next
-    JSR ground_y
-    JSR dot_y : BCS next
-.put
-    JSR dot_put
-.next
-    DEC dot : BPL each
+    \ as ground_dots rotated it, or as it was, or rotated
+    BIT dot_seen,X : BVC unrotated
+    JSR dot_given
+    BRA based
+.unrotated
+    BIT dv_steady : BPL rotate
+    JSR dot_kept : BCC known
+.rotate
+    JSR ground_all
+.based
+    BIT dv_steady : BPL known
+    JSR dot_base
+.known
+    JSR far_x : BCS done
+    JSR far_y : BCS done
+    JMP dot_put
+.done
     RTS
 \ (in the bank's own RAM, as the draw phase leaves zero page little room)
 .dot  SKIP 1                            ; the dot drawn
 .at   SKIP 6                            ; the camera's place
 }
+
+\ A far dot's camera-space position is cam (d - c) / 16384 for the camera
+\ at c, which while cam holds is the same less cam (c - c0) / 16384 since
+\ c0: so each such dot keeps its rotated position, plus that at the frame
+\ it was rotated, rounded (its base), and the frames after take off this
+\ frame's, rounded, dv_t, as long as cam is the same and the camera within
+\ 8192 of c0 on each axis (dots_steady). Bases are kept only in frames
+\ whose matrix held from the last frame's, so that a turn makes none.
+DV_LO = 0 : DV_HI = 1                   ; a base's low and high bytes, x' y' z' in turn
+
+\ dots_steady: dv_steady and dv_t for this frame's camera (cam, at): a
+\ matrix not the last frame's (or the other view's) makes no base good;
+\ a camera too far from c0 starts again from where it is.
+.dots_steady
+{
+    LDA mv_render : CMP dv_mv : BNE turned
+    LDX #17
+.same
+    LDA cam,X : ZA_INDEXEDBY 0..17
+    CMP dv_cam,X : BNE turned
+    DEX : BPL same
+    LDA #&FF : STA dv_steady
+    \ c - c0, each within 8192, or start again (as costs nothing while
+    \ there are no bases)
+    LDA dv_some : BEQ again
+    LDX #4
+.offset
+    LDA dots_draw.at,X : SEC : SBC dv_c0,X : STA dv_d,X
+    LDA dots_draw.at+1,X : SBC dv_c0+1,X : STA dv_d+1,X
+    CLC : ADC #&20 : CMP #&40 : BCS again
+    DEX : DEX : BPL offset
+    JMP dots_move
+.turned
+    STZ dv_steady
+    LDA mv_render : STA dv_mv
+    LDX #17
+.copy
+    LDA cam,X : ZA_INDEXEDBY 0..17
+    STA dv_cam,X
+    DEX : BPL copy
+.again
+    \ no base good (bases are good while they're the generation's), and c0
+    \ here, where dv_t is 0
+    STZ dv_some
+    INC dv_gen : BNE forgot
+    INC dv_gen                          ; (0 is none's: a wrap clears them)
+    LDX #39
+.forget
+    STZ dv_valid,X
+    DEX : BPL forget
+.forgot
+    LDX #5
+.c0
+    LDA dots_draw.at,X : STA dv_c0,X
+    DEX : BPL c0
+    LDX #8
+.zero
+    STZ dv_t,X
+    DEX : BPL zero
+    RTS
+}
+
+\ dots_move: dv_t, cam (c - c0) / 16384 by row, to 1/256 (with the
+\ entries within about 16384 and c - c0 within 8192, a row's three
+\ products sum to under 2^29, which / 64 fits 24 bits): an entry of 0 has
+\ no product.
+.dots_move
+{
+    STZ entry : STZ row
+.rows
+    STZ dv_acc : STZ dv_acc+1 : STZ dv_acc+2 : STZ dv_acc+3
+    STZ column
+.terms
+    \ (smul16 takes X and Y)
+    LDX entry
+    LDA cam,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    STA mul_x
+    LDA cam+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    STA mul_x+1
+    ORA mul_x : BEQ none
+    LDY column
+    LDA dv_d,Y : STA mul_y : LDA dv_d+1,Y : STA mul_y+1
+    ORA mul_y : BEQ none
+    JSR smul16
+    CLC
+    LDA dv_acc : ADC mul_p : STA dv_acc
+    LDA dv_acc+1 : ADC mul_p+1 : STA dv_acc+1
+    LDA dv_acc+2 : ADC mul_p+2 : STA dv_acc+2
+    LDA dv_acc+3 : ADC mul_p+3 : STA dv_acc+3
+.none
+    INC entry : INC entry
+    LDA column : CLC : ADC #2 : STA column
+    CMP #6 : BNE terms
+    \ / 64: the sum << 2's upper three bytes
+    ASL dv_acc : ROL dv_acc+1 : ROL dv_acc+2 : ROL dv_acc+3
+    ASL dv_acc : ROL dv_acc+1 : ROL dv_acc+2 : ROL dv_acc+3
+    LDX row
+    LDA dv_acc+1 : STA dv_t,X
+    LDA dv_acc+2 : STA dv_t+1,X
+    LDA dv_acc+3 : STA dv_t+2,X
+    INX : INX : INX : STX row
+    CPX #9 : BEQ done
+    JMP rows
+.done
+    RTS
+\ (in the bank's own RAM)
+.entry  SKIP 1                          ; cam's, by its offset
+.column SKIP 1                          ; c - c0's, by its offset
+.row    SKIP 1                          ; dv_t's, by its offset
+}
+
+\ dot_given: rot_acc = dot X's camera-space position as ground_dots
+\ rotated it.
+.dot_given
+    LDA dot_cx_lo,X : STA rot_acc : LDA dot_cx_hi,X : STA rot_acc+1
+    LDA dot_cy_lo,X : STA rot_acc+2 : LDA dot_cy_hi,X : STA rot_acc+3
+    LDA dot_cz_lo,X : STA rot_acc+4 : LDA dot_cz_hi,X : STA rot_acc+5
+    RTS
+
+\ dot_kept: rot_acc = dot X's position from its base, moved with the
+\ camera, and C clear; C set if it has none it can use. (dv_steady is
+\ set.)
+.dot_kept
+{
+    LDA dv_valid,X : CMP dv_gen : BNE none
+    LDA dot_x_lo,X : CMP dv_xlo,X : BNE none
+    LDA dot_x_hi,X : CMP dv_xhi,X : BNE none
+    LDA dot_z_lo,X : CMP dv_zlo,X : BNE none
+    LDA dot_z_hi,X : CMP dv_zhi,X : BNE none
+FOR r = 0..2
+    LDA #&7F : CMP dv_t + 3 * r           ; (C clear, 1 more off, from a half)
+    LDA dv_base + DV_LO * 40 + 80 * r,X : SBC dv_t + 3 * r + 1 : STA rot_acc + 2 * r
+    LDA dv_base + DV_HI * 40 + 80 * r,X : SBC dv_t + 3 * r + 2 : STA rot_acc + 2 * r + 1
+NEXT
+    CLC : RTS
+.none
+    SEC : RTS
+}
+
+\ dot_base: the dot's rotated position (rot_acc) kept as its base, dv_t
+\ rounded on, with where the dot is.
+.dot_base
+{
+    LDX dots_draw.dot
+FOR r = 0..2
+    LDA dv_t + 3 * r : CMP #&80           ; (C set, 1 more on, from a half)
+    LDA rot_acc + 2 * r : ADC dv_t + 3 * r + 1 : STA dv_base + DV_LO * 40 + 80 * r,X
+    LDA rot_acc + 2 * r + 1 : ADC dv_t + 3 * r + 2 : STA dv_base + DV_HI * 40 + 80 * r,X
+NEXT
+    LDA dot_x_lo,X : STA dv_xlo,X
+    LDA dot_x_hi,X : STA dv_xhi,X
+    LDA dot_z_lo,X : STA dv_zlo,X
+    LDA dot_z_hi,X : STA dv_zhi,X
+    LDA dv_gen : STA dv_valid,X
+    STA dv_some
+    RTS
+}
+
+\ (in the bank's own RAM)
+.dv_steady SKIP 1                       ; bit 7: cam is the last frame's
+.dv_mv     EQUB &FF                     ; the view the matrix was for (none yet)
+.dv_cam    SKIP 18                      ; the last frame's matrix
+.dv_c0     SKIP 6
+.dv_d      SKIP 6                       ; c - c0
+.dv_acc    SKIP 4
+.dv_t      SKIP 9                       ; by row, cam (c - c0) / 16384: its fraction, low and high bytes
+.dv_gen    EQUB 1                       ; the bases' generation, never 0
+.dv_some   EQUB 0                       ; non-zero once the generation has a base
+.dv_valid  SKIP 40                      ; by dot: its base's generation, 0 for none
+.dv_xlo    SKIP 40                      ; where it was then
+.dv_xhi    SKIP 40
+.dv_zlo    SKIP 40
+.dv_zhi    SKIP 40
+.dv_base   SKIP 6 * 40
 
 \ The windows a dot must be strictly inside, as tests on its projection
 \ (128 x / z, 128 y / z): an offset that puts the inside from 0, and the
@@ -202,6 +398,7 @@ WIN_MISSILE = 8
     JSR proj_z
     MOVW px, rot_acc
     JSR proj_x
+.win
     LDA pq : CLC : ADC #LO(VIEW_CX) : STA line_x0
     LDA pq+1 : ADC #HI(VIEW_CX) : STA line_x0+1
     LDA pq
@@ -225,6 +422,7 @@ WIN_MISSILE = 8
 {
     MOVW px, rot_acc+2
     JSR proj_x
+.win
     LDA pq : CLC : ADC #LO(VIEW_CY) : STA line_y0
     LDA pq
     CLC
@@ -242,87 +440,306 @@ WIN_MISSILE = 8
     RTS
 }
 
-\ dot_put (&0976E): the dot at (line_x0, line_y0), rot_acc+4 deep, as the
-\ ST plots it: a column of a pixel, or 2 down when it's under &1000 deep,
-\ and a second column beside it when it's under &700. Each column goes onto
-\ the erase list as the line drawer sets a column up (line_go's kind 0,
-\ dx 0: tools/mkline.py), and is ORed into the screen draw_bank names.
-\ ACCCON's X is set for the erase list, and stays set to draw into shadow
-\ RAM: this runs from the logic's bank, and reads only zero page, the bank
-\ and HAZEL while it's set.
-.dot_put
+\ far_x, far_y: dot_x and dot_y for a far dot (NEAR_D or more on x or z),
+\ which can only be in the window 512 or more deep: |d| is
+\ 1024 or more, and |x| < 1.25 z with |y| < 0.47 z (the view's window, the
+\ wider) has |d| under 1.67 z. The depth's reciprocal is made for both
+\ (far_recip), and each projected by it (far_pv).
+.far_x
 {
-    STZ dy : LDA #1 : STA cols
-    LDA rot_acc+5 : CMP #HI(&1000) : BCS sized
-    INC dy
-    CMP #HI(&700) : BCS sized
-    INC cols
-.sized
-.column
-    \ the column's lower end, from which the line drawer draws: its byte
-    \ (its character row's, 8 a column of 4 pixels) and its row in that
-    LDA line_y0 : CLC : ADC dy : TAY
-    AND #7 : STA row
-    TYA : LSR A : LSR A : LSR A : TAY
-    LDA line_x0 : AND #&FC : ASL A : STA line_scr   ; C = bit 7 of x
-    LDA line_x0+1 : ROL A : STA line_scr+1
-    LDA line_scr : CLC : ADC screen_row_lo,Y : STA line_scr
-    LDA line_scr+1 : ADC screen_row_hi,Y : STA line_scr+1
-    LDA line_x0 : AND #3 : TAX
-    LDA dot_pix,X : AND dot_colour : STA mask
-    LDA #ACCCON_X : TSB acccon
-    LDY erase_i
-    LDA line_scr
-.f_lo
-    STA ERASE_LIST + EF_LO * 512,Y          ; (each patched to this screen's page)
-    LDA line_scr+1
-.f_hi
-    STA ERASE_LIST + EF_HI * 512,Y
-    LDA row
-.f_row
-    STA ERASE_LIST + EF_ROW * 512,Y
-    LDA #0
-.f_dx
-    STA ERASE_LIST + EF_DX * 512,Y
-    LDA dy
-.f_dy
-    STA ERASE_LIST + EF_DY * 512,Y
-    TXA : ASL A                             ; kind 0, its pixel's block * 2
-.f_code
-    STA ERASE_LIST + EF_CODE * 512,Y
-    TYA : BEQ logged                        ; full: the overflow stays on index 0
-    DEC erase_i
-.logged
-    LDA draw_bank : BNE drawn_x
-    LDA #ACCCON_X : TRB acccon
-.drawn_x
-    LDY row
-    LDA mask : ORA (line_scr),Y : STA (line_scr),Y
-    LDA dy : BEQ shown
-    DEY : BPL up
-    LDA line_scr : SEC : SBC #LO(SCREEN_ROW) : STA line_scr
-    LDA line_scr+1 : SBC #HI(SCREEN_ROW) : STA line_scr+1
-    LDY #7
-.up
-    LDA mask : ORA (line_scr),Y : STA (line_scr),Y
-.shown
-    LDA #ACCCON_X : TRB acccon
-    DEC cols : BEQ done
-    INC line_x0 : BNE again
-    INC line_x0+1
-.again
-    JMP column
+    LDA rot_acc+5 : BMI out
+    CMP #HI(512) : BCC out
+    STA pz+1 : LDA rot_acc+4 : STA pz
+    \ outside if x < -z (128 x / z under -128) or x >= 1.25 z (160 up),
+    \ whichever window it is
+    LDA rot_acc+1 : BPL x_pos
+    LDA rot_acc : CLC : ADC pz : LDA rot_acc+1 : ADC pz+1 : BMI out
+    CLC : RTS
+.x_pos
+    \ 1.25 z, which fits a word
+    LDA pz+1 : LSR A : STA px+1
+    LDA pz : ROR A : LSR px+1 : ROR A
+    CLC : ADC pz : STA px
+    LDA px+1 : ADC pz+1 : STA px+1
+    LDA rot_acc : CMP px : LDA rot_acc+1 : SBC px+1 : BCS out
+    CLC : RTS
+.out
+    SEC : RTS
+}
+\ far_y: and outside if y < -z / 2 or y >= z / 2 (|128 y / z| 64 up);
+\ otherwise both projected, and C set if either is outside the window.
+.far_y
+{
+    LDA pz+1 : LSR A : STA px+1
+    LDA pz : ROR A : STA px
+    LDA rot_acc+3 : BPL y_pos
+    LDA rot_acc+2 : CLC : ADC px : LDA rot_acc+3 : ADC px+1 : BMI out
+    BRA in
+.y_pos
+    LDA rot_acc+2 : CMP px : LDA rot_acc+3 : SBC px+1 : BCS out
+.in
+    JSR far_recip
+    LDX #0 : JSR far_pv
+    JSR dot_x.win : BCS out
+    LDX #2 : JSR far_pv
+    JMP dot_y.win
+.out
+    SEC : RTS
+}
+ASSERT LO(512) = 0
+
+\ far_recip: for the depth z (rot_acc+4, 512 up, so its shift Y is 1 to
+\ 6), R = 2^24 / (m + f) for z = (m + f) 2^Y, m its 9-bit mantissa and f
+\ the rest (recip.6502's 2^24 / m, between m's and m + 1's in proportion
+\ to f: each step under 256, as 2^24 / m^2 is from m = 256), into far_pv's
+\ reads, which then take Y + 1 bits off its high word. It's that much
+\ nearer the ST's divide than proj_z's 2^24 / (m + 1/2), which is out by
+\ up to 1/512 of the projection.
+.far_recip
+{
+    ZA_AUTO1 m, f
+    LDX rot_acc+5
+    LDY zhigh_sh,X
+    LDA far_shift_lo-1,Y : STA far_pv.shift+1
+    LDA far_shift_hi-1,Y : STA far_pv.shift+2
+    LDA rot_acc+4 : STA m
+    STZ f
+    TXA
+.down
+    LSR A : ROR m : ROR f               ; (the rest into f, from its top)
+    DEY : BNE down
+    \ the step to m + 1's (m's low byte 255: 2^24 / 512, whose low byte is 0)
+    LDY m
+    LDA rcpx_lo,Y
+    INY : BEQ last
+    SEC : SBC rcpx_lo,Y
+.last
+    \ R(m) less the step's share, f step / 256, its high byte read without
+    \ the borrow from its low byte's (so 1 more at most: 1 in 2^15 of R)
+    TAY
+    LDA f : STA m_sqhi : EOR #&FF : STA m_nghi
+    SEC
+    LDA (m_sqhi),Y : SBC (m_nghi),Y
+    STA t
+    LDY m
+    LDA rcpx_lo,Y : SEC : SBC t
+    STA far_pv.a+1 : STA far_pv.g+1 : STA far_pv.i+1
+    EOR #&FF
+    STA far_pv.b+1 : STA far_pv.h+1 : STA far_pv.j+1
+    LDA rcpx_hi,Y : SBC #0              ; (the borrow, kept through the EOR)
+    STA far_pv.c+1 : STA far_pv.e+1 : STA far_pv.k+1 : STA far_pv.m+1
+    EOR #&FF
+    STA far_pv.d+1 : STA far_pv.f+1 : STA far_pv.l+1 : STA far_pv.n+1
+    RTS
+.t  SKIP 1                              ; (in the bank's own RAM)
+}
+
+\ far_pv: pq = 128 v / z, truncated towards zero, for v = rot_acc+X (x' or
+\ y') and z far_recip's: |v| R >> (17 + Y), as proj_x makes it.
+.far_pv
+{
+    ZA_AUTO1 vl, vh, u0, u1, w0, p1
+    LDA rot_acc+1,X : ZA_INDEXEDBY {0, 2}
+    STA far_sign
+    BPL pos
+    LDA #0 : SEC : SBC rot_acc,X : ZA_INDEXEDBY {0, 2}
+    STA vl
+    LDA #0 : SBC rot_acc+1,X : ZA_INDEXEDBY {0, 2}
+    STA vh
+    BRA magnitude
+.pos
+    STA vh : LDA rot_acc,X : ZA_INDEXEDBY {0, 2}
+    STA vl
+.magnitude
+    \ |v| R >> 8 into A:pq:p1, as proj_x has it
+    LDY vl
+    SEC
+.c  LDA sqr_lo,Y
+.d  SBC neg_lo,Y
+    STA p1
+.e  LDA sqr_hi,Y
+.f  SBC neg_hi,Y
+    STA pq
+.a  LDA sqr_hi,Y
+.b  SBC neg_hi,Y
+    CLC : ADC p1 : STA p1
+    BCC c1
+    INC pq
+.c1
+    LDY vh : BNE high
+    TYA
+    BRA shift
+.high
+    SEC
+.g  LDA sqr_lo,Y
+.h  SBC neg_lo,Y
+    STA u0
+.i  LDA sqr_hi,Y
+.j  SBC neg_hi,Y
+    STA u1
+.k  LDA sqr_lo,Y
+.l  SBC neg_lo,Y
+    STA w0
+.m  LDA sqr_hi,Y
+.n  SBC neg_hi,Y
+    TAX
+    CLC : LDA p1 : ADC u0
+    LDA pq : ADC u1
+    BCC c2
+    INX
+    CLC
+.c2
+    ADC w0 : STA pq
+    BCC c3
+    INX
+.c3
+    TXA
+    \ the high word, A:pq, >> (Y + 1)
+.shift
+    \ (patched by far_recip: each way in is on the way from right7, which
+    \ is all baron need follow, so the jump needs no ZA_CANJUMP, which in
+    \ this bank would lend its targets to another bank's jump at its
+    \ address: baron#29)
+    JMP right7
+.right7
+    LSR A : ROR pq
+.right6
+    LSR A : ROR pq
+.right5
+    LSR A : ROR pq
+.right4
+    LSR A : ROR pq
+.right3
+    LSR A : ROR pq
+.right2
+    LSR A : ROR pq
+    LSR A : ROR pq
+    STA pq+1
+    BIT far_sign : BPL done
+    LDA #0 : SEC : SBC pq : STA pq
+    LDA #0 : SBC pq+1 : STA pq+1
 .done
     RTS
+}
+\ far_pv's ways in by Y (1 to 6: Y + 1 bits)
+.far_shift_lo
+    EQUB LO(far_pv.right2), LO(far_pv.right3), LO(far_pv.right4), LO(far_pv.right5), LO(far_pv.right6), LO(far_pv.right7)
+.far_shift_hi
+    EQUB HI(far_pv.right2), HI(far_pv.right3), HI(far_pv.right4), HI(far_pv.right5), HI(far_pv.right6), HI(far_pv.right7)
+.far_sign SKIP 1                        ; v's high byte
+
+\ dot_put (&0976E): the dot at (line_x0, line_y0), rot_acc+4 deep, as the
+\ ST plots it: a column of a pixel, or 2 down when it's under &1000 deep,
+\ and a second column beside it when it's under &700, ORed into the screen
+\ draw_bank names. It goes onto the screen's list of its dots (dots_wipe's)
+\ rather than its erase list (a change to decision 14, Matt's call 7): the
+\ address of its top byte, bit 15 set if its second column is in the next
+\ byte. ACCCON's X is set to draw into shadow RAM: this runs from the
+\ loading area's bank, and reads only zero page, the bank and HAZEL while
+\ it's set.
+.dot_put
+{
+    \ the top byte: its character row's, its column's (8 a column of 4
+    \ pixels) and its line in the row (every row's and column's a multiple
+    \ of 8)
+    LDA line_y0 : LSR A : LSR A : LSR A : TAY
+    LDA line_x0 : AND #&FC : ASL A : STA line_scr   ; C = bit 7 of x
+    LDA line_x0+1 : ROL A : STA line_scr+1
+    LDA line_y0 : AND #7 : ORA line_scr
+    CLC : ADC screen_row_lo,Y : STA line_scr
+    LDA line_scr+1 : ADC screen_row_hi,Y : STA line_scr+1
+    \ its pixels: the second column's in this byte, or in the next
+    STZ across
+    LDA line_x0 : AND #3 : TAX
+    LDA dot_pix,X
+    LDY rot_acc+5 : CPY #HI(&700) : BCS narrow
+    CPX #3 : BEQ next_byte
+    ORA dot_pix+1,X
+    BRA narrow
+.next_byte
+    DEC across
+.narrow
+    AND dot_colour : STA mask
+    \ onto the list
+    LDY dpe_i
+    LDA line_scr : STA dpe_lo,Y
+    LDA across : AND #&80 : ORA line_scr+1 : STA dpe_hi,Y
+    INC dpe_i
+    \ its top line, and the one below if it's 2 down (the next character
+    \ row's first, after its last), each in the next byte too if it's there
+    LDA draw_bank : TSB acccon
+    LDY #0 : JSR lines
+    LDA rot_acc+5 : CMP #HI(&1000) : BCS drawn
+    LDY #1
+    LDA line_scr : AND #7 : CMP #7 : BNE below
+    LDA line_scr : CLC : ADC #LO(SCREEN_ROW - 7) : STA line_scr
+    LDA line_scr+1 : ADC #HI(SCREEN_ROW - 7) : STA line_scr+1
+    LDY #0
+.below
+    JSR lines
+.drawn
+    LDA draw_bank : TRB acccon
+    RTS
+\ lines: the dot's pixels ORed in at line_scr + Y, and Y + 8 if it's there.
+.lines
+    LDA mask : ORA (line_scr),Y : STA (line_scr),Y
+    BIT across : BPL line_done
+    TYA : ORA #8 : TAY
+    LDA dot_colour : AND #&88 : ORA (line_scr),Y : STA (line_scr),Y
+.line_done
+    RTS
 \ (in the bank's own RAM, which X leaves where it is)
-.dy   SKIP 1                            ; the column's rows less 1
-.cols SKIP 1                            ; the columns to go
-.mask SKIP 1                            ; the column's pixel in the colour
-.row  SKIP 1                            ; its lower end's row in its character row
+.across SKIP 1                          ; bit 7: the second column's in the next byte
+.mask   SKIP 1                          ; its pixels in this byte, in the colour
 }
 .dot_colour SKIP 1                      ; colour_map's byte for the ST's colour 2
 .dot_pix                                ; each pixel of a byte, from the left
     EQUB &88, &44, &22, &11
 ASSERT LO(&1000) = 0 AND LO(&700) = 0
+
+\ dots_wipe: the dots dot_put put on the screen draw_buffer names, as many
+\ as dot_wipes says, zeroed (each one's top byte, the one below, both in
+\ the window, and the next byte's too if its second column is there), and
+\ the list emptied (code.6502's dots_erase calls it). ACCCON's X is set for
+\ the shadow screen.
+.dots_wipe
+{
+    ZA_AUTO2 p, q
+    LDX draw_buffer
+    LDA dpe_base,X : STA stop
+    LDA dot_wipes,X : STZ dot_wipes,X
+    CLC : ADC stop : TAX
+    LDA draw_bank : TSB acccon
+.each
+    DEX
+    LDA dpe_lo,X : STA p
+    LDA dpe_hi,X : AND #&7F : STA p+1
+    \ the line below: the next, or the next character row's first
+    LDA p : AND #7 : CMP #7 : BEQ wrap
+    LDA p : INC A : STA q : LDA p+1 : STA q+1   ; (no carry: not a row's last)
+    BRA zero
+.wrap
+    LDA p : CLC : ADC #LO(SCREEN_ROW - 7) : STA q
+    LDA p+1 : ADC #HI(SCREEN_ROW - 7) : STA q+1
+.zero
+    LDA #0 : TAY
+    STA (p),Y : STA (q),Y
+    BIT dpe_hi,X : BPL next
+    LDY #8
+    STA (p),Y : STA (q),Y
+.next
+    CPX stop : BNE each
+    LDA draw_bank : TRB acccon
+    RTS
+.stop SKIP 1                            ; (in the bank's own RAM)
+}
+
+\ The dots' lists, by screen, the first from 0, the second from DPE_DOTS:
+\ each dot's top byte's address (dot_put's).
+DPE_DOTS = 40
+.dpe_base EQUB 0, DPE_DOTS
+.dpe_i    SKIP 1                        ; the next dot's place
+.dpe_lo   SKIP 2 * DPE_DOTS
+.dpe_hi   SKIP 2 * DPE_DOTS
 
 INCLUDE "../build/gen/ground.6502"

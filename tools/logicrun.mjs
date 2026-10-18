@@ -98,6 +98,9 @@ load("CODE2", where(need("CODE2")));
 load("SHAPES", bank(need("BANK_SHAPES")));
 load("WORLD", bank(need("BANK_WORLD")));
 load("LOGIC", bank(need("BANK_LOGIC")));
+// (ground_dots rotates by the drawing's ground rotation, in the loading
+// area's bank with the view's code)
+load("WINDOW", bank(need("BANK_PIC")) + need("WIN_PIC") - 0x8000);
 
 const STUB = 0x0140;
 const STUB_DONE = STUB + 6;

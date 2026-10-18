@@ -162,30 +162,50 @@ PROJ_SHIFT = 7
 \ the random numbers, so it is the ST's decision exactly, made as decision
 \ 11 makes the objects' rotation: approximately first, and exactly only for
 \ a dot within the approximation's bound of the cone's edges. The
-\ approximation is the dots' own (dot_approx). A dot found surely in view
+\ approximation is the drawing's (build/gen/ground.6502, within 4 of the
+\ ST's on each axis), made for the frame's camera here, so that what's
+\ rotated here the drawing needn't rotate again. A dot found surely in view
 \ keeps that decision, unrotated, until the camera has moved enough since
-\ to bring it to an edge (dot_setup's drift, dot_keep's margin). The ST
-\ plots each dot in view as it goes: the drawing (view.6502's dots_draw)
-\ is told which, in dot_seen.
+\ to bring it to an edge (dot_drift, dot_keep's margin). The ST plots
+\ each dot in view as it goes: the drawing (view_under.6502's dots_draw)
+\ is told which, in dot_seen, with the camera-space place of each rotated
+\ here (dot_cx and on).
 .ground_dots
 {
-    ZA_AUTO1 dot, sines
+    ZA_AUTO1 dot, sines, shift
     LDA #&FF : STA dots_ran
     JSR dot_setup
     STZ sines
+    STZ shift
     LDX #0
 .each
     \ (each dot's tests make these before they read them, on the paths
     \ the carry and A choose, which baron can't follow: without this it
     \ keeps them from one dot to the next, and so from step to step)
-    ZA_DISCARD rot_acc, dot_k, dot_ez, dot_mu, dot_esum
+    ZA_DISCARD rot_acc, dot_mu
+    \ still surely in view: kept, where it was kept, and its margin not yet
+    \ spent by the drift since
+    LDA dot_rem_hi,X : BMI unkept
+    LDY dot_cls,X
+    LDA dot_rem_lo,X : SEC : SBC dot_drift_lo,Y : STA dot_rem_lo,X
+    LDA dot_rem_hi,X : SBC dot_drift_hi,Y : STA dot_rem_hi,X : BMI spent
+    LDA dot_x_lo,X : CMP dot_at_xlo,X : BNE spent
+    LDA dot_x_hi,X : CMP dot_at_xhi,X : BNE spent
+    LDA dot_z_lo,X : CMP dot_at_zlo,X : BNE spent
+    LDA dot_z_hi,X : CMP dot_at_zhi,X : BNE spent
+    LDA #DOT_KEPT : STA dot_seen,X
+    STA shift                           ; (d0 the projection's shift, before it's read)
+    INX : CPX #40 : BNE each
+    JMP shifted
+.spent
+    LDA #&FF : STA dot_rem_hi,X         ; (no longer kept)
+.unkept
     STX dot
-    JSR dot_cached : BCC in_view
     LDA dot_x_lo,X : SEC : SBC pl_x : STA rot_d
     LDA dot_x_hi,X : SBC pl_x+1 : STA rot_d+1
     LDA dot_z_lo,X : SEC : SBC pl_z : STA rot_d+4
     LDA dot_z_hi,X : SBC pl_z+1 : STA rot_d+5
-    JSR dot_approx : BCS exactly
+    JSR dot_rotate : BCS exactly
     JSR dot_classify : BEQ keep
     CMP #1 : BEQ outside
 .exactly
@@ -193,14 +213,22 @@ PROJ_SHIFT = 7
     JSR rotate_exact
     LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
     JSR cone_exact : BCS outside
-    BRA in_view
+    LDA #DOT_EXACT
+    BRA rotated
 .keep
     LDX dot
     JSR dot_keep
-.in_view
-    \ projected: d0 takes the projection's shift (&0480A)
-    LDA #PROJ_SHIFT : STA rng_d0 : STZ rng_d0+1
-    LDX dot : LDA #&FF : STA dot_seen,X
+    LDA #DOT_GROUND
+.rotated
+    \ where it is in camera space, for the drawing
+    LDX dot
+    STA dot_seen,X
+    LDA rot_acc : STA dot_cx_lo,X : LDA rot_acc+1 : STA dot_cx_hi,X
+    LDA rot_acc+2 : STA dot_cy_lo,X : LDA rot_acc+3 : STA dot_cy_hi,X
+    LDA rot_acc+4 : STA dot_cz_lo,X : LDA rot_acc+5 : STA dot_cz_hi,X
+    \ projected: d0 takes the projection's shift (&0480A), made so before
+    \ it's next read
+    LDA #&FF : STA shift
     BRA next
 .outside
     LDX dot : STZ dot_seen,X
@@ -208,57 +236,62 @@ PROJ_SHIFT = 7
     INC sines
     JSR respawn_sines
 .placed
+    JSR shifted
     LDX dot
     JSR respawn
 .next
-    LDX dot : INX : CPX #40 : BNE each
+    LDX dot : INX : CPX #40 : BEQ ended
+    JMP each
+.ended
+\ shifted: d0 the projection's shift if a dot was projected since it was
+\ last made.
+.shifted
+    LDA shift : BEQ unshifted
+    LDA #PROJ_SHIFT : STA rng_d0 : STZ rng_d0+1
+    STZ shift
+.unshifted
     RTS
-}
-
-\ dot_cached: C clear if dot X is still surely in view: kept, where it was
-\ kept, and its margin not yet spent by the drift since. Otherwise it's no
-\ longer kept.
-.dot_cached
-{
-    LDA dot_rem_hi,X : BMI no
-    LDY dot_cls,X
-    LDA dot_rem_lo,X : SEC : SBC dot_drift_lo,Y : STA dot_rem_lo,X
-    LDA dot_rem_hi,X : SBC dot_drift_hi,Y : STA dot_rem_hi,X : BMI no
-    LDA dot_x_lo,X : CMP dot_at_xlo,X : BNE no
-    LDA dot_x_hi,X : CMP dot_at_xhi,X : BNE no
-    LDA dot_z_lo,X : CMP dot_at_zlo,X : BNE no
-    LDA dot_z_hi,X : CMP dot_at_zhi,X : BNE no
-    CLC : RTS
-.no
-    LDA #&FF : STA dot_rem_hi,X
-    SEC : RTS
 }
 
 \ dot_keep: dot X, surely in view with margin dot_mu (the least that z' -
 \ 3, 2z' - |x'|, 2z' - |y'| and 16383 - z' can be), is kept if |dx| + |dy|
-\ + |dz| is at most 16384: in the least class k with the sum at most 512
-\ << k. While its margin lasts the sum stays within twice that (a frame's
-\ move takes at least a third of the drift, and the margin is under twice
-\ the sum), which is what its class's drift is for. The sum is bounded by
-\ dot_approx's e: |d| is within 128 |e| + 64.
+\ + |dz| is at most 16384: in the class c that bounds the sum by 1024 c for
+\ as long as the margin lasts, which is what the class's drift is for. A
+\ step's move takes at least a third of its drift (dot_drift), so while
+\ the margin lasts the camera moves less than mu / 3 and the sum grows by
+\ less; mu / 2 stands in for that.
 .dot_keep
 {
     ZA_AUTO2 v
-    \ v = 128 (|ex| + |ez|) + 127 + |dy|, at least the sum less 1
-    LDA dot_esum : LSR A : STA v+1
-    LDA #0 : ROR A : ORA #127
-    CLC : ADC dot_dy : STA v
-    LDA v+1 : ADC dot_dy+1
-    \ v / 256 under 64, or not kept; the class from it
-    CMP #&40 : BCS far
-    LDY #0
-    LSR A
-.class
-    BEQ got
-    INY : LSR A
-    BRA class
-.got
-    TYA : STA dot_cls,X
+    \ v = |dx| + |dy| + |dz| (dx and dz each under 16128)
+    LDA rot_d+1 : BPL dx_pos
+    LDA #0 : SEC : SBC rot_d : STA v
+    LDA #0 : SBC rot_d+1 : STA v+1
+    BRA dz
+.dx_pos
+    STA v+1 : LDA rot_d : STA v
+.dz
+    LDA rot_d+5 : BPL dz_pos
+    LDA v : SEC : SBC rot_d+4 : STA v
+    LDA v+1 : SBC rot_d+5 : STA v+1
+    BRA dy
+.dz_pos
+    LDA v : CLC : ADC rot_d+4 : STA v
+    LDA v+1 : ADC rot_d+5 : STA v+1
+.dy
+    LDA v : CLC : ADC dot_dy : STA v
+    LDA v+1 : ADC dot_dy+1 : BCS far
+    STA v+1
+    \ at most 16384, or not kept
+    LDA v : CMP #LO(16385) : LDA v+1 : SBC #HI(16385) : BCS far
+    \ the class: (v + 1 + mu / 2, rounded up) / 1024, rounded up
+    LDA dot_mu+1 : LSR A : TAY
+    LDA dot_mu : ROR A                  ; (C: mu's bit 0, which rounds up)
+    ADC v : STA v
+    TYA : ADC v+1 : STA v+1
+    LDA v : CLC : ADC #LO(1 + 1023) : LDA v+1 : ADC #HI(1 + 1023)
+    LSR A : LSR A
+    STA dot_cls,X
     LDA dot_mu : STA dot_rem_lo,X : LDA dot_mu+1 : STA dot_rem_hi,X
     LDA dot_x_lo,X : STA dot_at_xlo,X : LDA dot_x_hi,X : STA dot_at_xhi,X
     LDA dot_z_lo,X : STA dot_at_zlo,X : LDA dot_z_hi,X : STA dot_at_zhi,X
@@ -267,156 +300,25 @@ PROJ_SHIFT = 7
 }
 
 \ dot_setup: what the dots take from the frame. The ground's offset from
-\ the camera, dy, is the same for every dot (and goes in rot_d for the
-\ exact rotation); the approximation takes its column's terms exactly, and
-\ the x and z columns' entries as q, m / 128 rounded. And the drift since
-\ the last frame's dots, by class.
-ZA_AUTO2 dot_ez                         ; the approximation's bound on z' ...
-ZA_AUTO 4, dot_k                        ; ... on 2z' - |x'| and 2z' - |y'|
+\ the camera, dy, is the same for every dot (and goes in rot_d for both
+\ rotations); the drift since the last frame's dots, by class; and the
+\ ground's rotation, made again for the frame's camera and dy unless
+\ they're the last frame's, whose bound holds only while the entries of
+\ its x and z columns are within 16384.
 ZA_AUTO2 dot_mu                         ; a dot's margin, from dot_classify
-ZA_AUTO1 dot_esum                       ; its |ex| + |ez|, from dot_approx
 ZA_AUTO2 dot_dy                         ; |dy|, the frame's
-ZA_AUTO 6, dot_c                        ; the ground's column, by row: floor(m dy / 16384)
-ZA_AUTO 6, dot_qy                       ; the x then the z column's q, + 128, by row
-ZA_AUTO1 dot_fz                         ; (|q_z0| + |q_z2| + 1) / 2, z's part of the bound ...
-ZA_AUTO 4, dot_fk                       ; ... and x's and y's: f_r + 2 f_z
-ZA_AUTO1 dot_scale                      ; the bound's scale on |e|: 1, 2 or 3 (by 1, 2 or 4), or 0: none
-ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointers
 .dot_setup
 {
-    ZA_AUTO1 amax
-    ZA_AUTO 3, f
     LDA #0 : SEC : SBC pl_y : STA rot_d+2 : STA dot_dy
     LDA #0 : SBC pl_y+1 : STA rot_d+3 : STA dot_dy+1
     BPL dy_pos
     LDA #0 : SEC : SBC dot_dy : STA dot_dy : LDA #0 : SBC dot_dy+1 : STA dot_dy+1
 .dy_pos
-    FMUL cam+2, rot_d+2 : MOVW dot_c, mul_r
-    FMUL cam+8, rot_d+2 : MOVW dot_c+2, mul_r
-    FMUL cam+14, rot_d+2 : MOVW dot_c+4, mul_r
-    \ the x column's entries, then the z column's, as q (the most any
-    \ leaves in its rounding, |m - 128 q|, into amax)
-    STZ amax
-    LDA cam : LDY cam+1 : JSR qbyte : STA dot_qy
-    LDA cam+6 : LDY cam+7 : JSR qbyte : STA dot_qy+1
-    LDA cam+12 : LDY cam+13 : JSR qbyte : STA dot_qy+2
-    LDA cam+4 : LDY cam+5 : JSR qbyte : STA dot_qy+3
-    LDA cam+10 : LDY cam+11 : JSR qbyte : STA dot_qy+4
-    LDA cam+16 : LDY cam+17 : JSR qbyte : STA dot_qy+5
-    LDX #2
-.rows
-    LDA dot_qy,X : ZA_INDEXEDBY 0..2
-    JSR qmag : STA f,X : ZA_INDEXEDBY 0..2
-    LDA dot_qy+3,X : ZA_INDEXEDBY 0..2
-    JSR qmag : CLC : ADC f,X : ZA_INDEXEDBY 0..2
-    ROR A : ADC #0                      ; (sum + 1) / 2, of up to 254
-    STA f,X : ZA_INDEXEDBY 0..2
-    DEX : BPL rows
-    \ dot_fz = f_z; dot_fk = f_x + 2 f_z, f_y + 2 f_z (2 f_z is at most 254)
-    LDA f+2 : STA dot_fz
-    ASL A : TAX
-    CLC : ADC f : STA dot_fk : LDA #0 : ROL A : STA dot_fk+1
-    TXA : CLC : ADC f+1 : STA dot_fk+2 : LDA #0 : ROL A : STA dot_fk+3
-    \ |m - 128 q| / 128 by |e| is a term's share of the bound from the
-    \ matrix's rounding: |e| / 2 while |m - 128 q| is 64 or less (the
-    \ rounding alone), |e| while 128 or less (an entry held at 127 for
-    \ 16384), 2|e| to 256; beyond, every dot is rotated exactly
-    LDY #1
-    LDA amax : CMP #65 : BCC scaled
-    LDY #2
-    CMP #129 : BCC scaled
-    LDY #3
-    CMP #&FF : BNE scaled
-    LDY #0
-.scaled
-    STY dot_scale
-    LDA #HI(neg_lo) : STA dot_p1lo+1 : STA dot_p2lo+1
-    LDA #HI(neg_hi) : STA dot_p1hi+1 : STA dot_p2hi+1
-    JMP dot_drift
-\ qbyte: A = 128 + q for the entry A (low), Y (high): q = m / 128
-\ rounded, held within -127 to 127; |m - 128 q| into amax if larger.
-.qbyte
-    ZA_AUTO2 t
-    ZA_AUTO1 q
-    STA t : STY t+1
-    CLC : ADC #64 : STA q : TYA : ADC #0
-    ASL q : ROL A : STA q               ; (m + 64) / 128, its sign in C
-    BCS negative
-    BPL rounded
-    LDA #127 : STA q
-    BRA rounded
-.negative
-    CMP #&81 : BCS rounded
-    LDA #&81 : STA q
-.rounded
-    \ the rest, m - 128 q, its magnitude into amax
-    LDA q : LSR A : TAY                 ; 128 q's high byte (but its sign) ...
-    LDA q : ROR A : AND #&80            ; ... and its low byte (q's bit 0)
-    EOR #&FF : SEC : ADC t : STA t      ; m - 128 q
-    LDA q : BPL q_pos
-    TYA : ORA #&80 : TAY
-.q_pos
-    TYA : EOR #&FF : ADC t+1
-    BPL a_pos
-    STA t+1 : LDA #0 : SEC : SBC t : STA t : LDA #0 : SBC t+1
-.a_pos
-    BNE a_big
-    LDA t : CMP amax : BCC a_kept
-    STA amax
-.a_kept
-    LDA q : EOR #&80
-    RTS
-.a_big
-    LDA #&FF : STA amax                 ; (&FF stands for 255 up)
-    LDA q : EOR #&80
-    RTS
-\ qmag: A = |q| for A = 128 + q.
-.qmag
-    EOR #&80 : BPL q_mag
-    EOR #&FF : INC A
-.q_mag
-    RTS
-}
-
-\ dot_drift: by class, the most a frame since the last frame's dots can
-\ have moved 2z' - x', 2z' + x', 2z' - y', 2z' + y', z' or -z' of a dot
-\ whose |dx| + |dy| + |dz| stays within L = 1024 << k: each row of the
-\ matrix moved by at most dm an entry, the camera by dp (|dx| + |dy| + |dz|),
-\ each term's floor by under 1, so 3 dp + 3 dm L / 16384 + 9 (and dp more
-\ when an entry is beyond 16384). Without a last frame in the same view,
-\ or with too much moved, nothing is kept. The frame's camera is kept for
-\ the next.
-.dot_drift
-{
-    ZA_AUTO2 dm, dp, t, base
-    ZA_AUTO1 wide
-    LDA dot_valid : BNE known
-.forget
-    LDX #39
-    LDA #&FF
-.forgot
-    STA dot_rem_hi,X
-    DEX : BPL forgot
-    JMP keep_camera
-.known
-    LDA mv_render : CMP dot_mv_was : BNE forget
-    \ dm, and whether any entry is beyond 16384
-    STZ dm : STZ dm+1 : STZ wide
+    \ beyond 16384: below &C000, or above &4000 (any entry for the drift,
+    \ the x and z columns' for the rotation)
+    STZ dot_wide : STZ dot_wide_any
     LDX #16
 .entries
-    LDA cam,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
-    SEC : SBC dot_cam_was,X : STA t
-    LDA cam+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
-    SBC dot_cam_was+1,X
-    BPL moved_pos
-    STA t+1 : LDA #0 : SEC : SBC t : STA t : LDA #0 : SBC t+1
-.moved_pos
-    CMP #&20 : BCS forget               ; 8192 up
-    STA t+1
-    LDA dm : CMP t : LDA dm+1 : SBC t+1 : BCS not_most
-    MOVW dm, t
-.not_most
-    \ beyond 16384: below &C000, or above &4000
     LDA cam+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
     BPL m_pos
     CMP #&C0 : BCS m_in
@@ -427,9 +329,122 @@ ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointe
     LDA cam,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
     BEQ m_in
 .m_wide
-    LDA #&FF : STA wide
+    LDA #&FF : STA dot_wide_any
+    CPX #2 : BEQ m_in
+    CPX #8 : BEQ m_in
+    CPX #14 : BEQ m_in
+    STA dot_wide
 .m_in
     DEX : DEX : BPL entries
+    JSR dot_drift
+    BIT dot_same : BMI made
+    JMP ground_make
+.made
+    RTS
+}
+
+\ dot_rotate: rot_acc = the dot's camera-space position by the ground's
+\ rotation, from rot_d, within DOT_B of the ST's on each axis (each term of
+\ the x and z columns within 2, as tools/groundcheck.py checks for every m
+\ and d, and the ground column's the ST's); C set if it can't be bounded
+\ (an offset of 16128 or more, or an entry beyond 16384).
+DOT_B = 4
+.dot_rotate
+{
+    BIT dot_wide : BMI far
+    LDA rot_d+1 : CLC : ADC #&3F : CMP #&7E : BCS far
+    LDA rot_d+5 : CLC : ADC #&3F : CMP #&7E : BCS far
+    JSR ground_rows
+    CLC : RTS
+.far
+    SEC : RTS
+}
+
+\ dot_drift: by class, the most a frame since the last frame's dots can
+\ have moved 2z' - x', 2z' + x', 2z' - y', 2z' + y', z' or -z' of a dot
+\ whose |dx| + |dy| + |dz| stays within L = 1024 c: the camera's move, dp
+\ (|dx| + |dy| + |dz|), by at most 3 dp (and dp more when an entry is
+\ beyond 16384); the matrix's change by at most r L / 16384, r the most
+\ that any column's 2 |dz'| and the larger of |dx'| and |dy'| make (no
+\ test's row combination changes by more in that column); and each term's
+\ floor by under 1: 3 dp + r L / 16384 + 9. Without a last frame in the
+\ same view, or with too much moved, nothing is kept. The frame's camera
+\ is kept for the next.
+DOT_CLASSES = 25                        ; (dot_keep's: 1 to 24, from v and mu under 16384)
+.dot_drift
+{
+    ZA_AUTO2 dp, t
+    ZA_AUTO 4, br                       ; base, then r
+    base = br
+    r = br + 2
+    ZA_AUTO1 still
+    STZ dot_same
+    STZ still
+    LDA dot_valid : BNE known
+.forget
+    LDX #39
+    LDA #&FF
+.forgot
+    STA dot_rem_hi,X
+    DEX : BPL forgot
+    STA dot_made+1                      ; (no base is that: the drift's made again)
+    JMP keep_camera
+.known
+    LDA mv_render : CMP dot_mv_was : BNE forget
+    \ the matrix the last frame's: no entry moved
+    LDX #17
+.holding
+    LDA cam,X : ZA_INDEXEDBY 0..17
+    CMP dot_cam_was,X : BNE turned
+    DEX : BPL holding
+    DEC still
+    STZ r : STZ r+1
+    LDA pl_y : CMP dot_p_was+2 : BNE climbed
+    LDA pl_y+1 : CMP dot_p_was+3 : BNE climbed
+    LDA #&FF : STA dot_same
+.climbed
+    JMP moves
+.turned
+    \ each entry's change
+    STZ dot_moved
+    LDX #16
+.entries
+    LDA cam,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    SEC : SBC dot_cam_was,X : STA t
+    LDA cam+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    SBC dot_cam_was+1,X
+    BPL moved_pos
+    STA t+1 : LDA #0 : SEC : SBC t : STA t : LDA #0 : SBC t+1
+.moved_pos
+    CMP #&20 : BCS forget               ; 8192 up
+    STA dot_dm+1,X
+    LDA t : STA dot_dm,X
+    ORA dot_dm+1,X : TSB dot_moved
+    DEX : DEX : BPL entries
+    \ the ground's rotation stands if no entry moved and dy is the same
+    LDA dot_moved : BNE rot_moved
+    LDA pl_y : CMP dot_p_was+2 : BNE rot_moved
+    LDA pl_y+1 : CMP dot_p_was+3 : BNE rot_moved
+    LDA #&FF : STA dot_same
+.rot_moved
+    \ r, under 24576, by column (X its entry in row x')
+    STZ r : STZ r+1
+    LDX #4
+.columns
+    LDA dot_dm+12,X : ASL A : STA t
+    LDA dot_dm+13,X : ROL A : STA t+1
+    LDA dot_dm,X : CMP dot_dm+6,X : LDA dot_dm+1,X : SBC dot_dm+7,X
+    TXA : BCS x_more
+    ADC #6                              ; (C clear) the entry in row y'
+.x_more
+    TAY
+    LDA t : CLC : ADC dot_dm,Y : STA t
+    LDA t+1 : ADC dot_dm+1,Y : STA t+1
+    LDA t : CMP r : LDA t+1 : SBC r+1 : BCC not_most
+    MOVW r, t
+.not_most
+    DEX : DEX : BPL columns
+.moves
     \ dp, each of its terms under 4096
     STZ dp : STZ dp+1
     LDX #4
@@ -448,36 +463,58 @@ ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointe
     \ base = 3 dp + 9 (+ dp if wide)
     LDA dp : ASL A : STA base : LDA dp+1 : ROL A : STA base+1
     ADDW base, dp
-    LDA wide : BEQ narrow
+    LDA dot_wide_any : BEQ narrow
     ADDW base, dp
 .narrow
     LDA base : CLC : ADC #9 : STA base
     BCC based
     INC base+1
 .based
-    \ t = 3 dm, under 24576; class 4 takes it whole, 5 twice, 3-0 halved
-    \ and rounded up again and again
-    LDA dm : ASL A : STA t : LDA dm+1 : ROL A : STA t+1
-    ADDW t, dm
-    LDX #4 : JSR class_drift
-    ASL t : ROL t+1
-    LDX #5 : JSR class_drift
-    LSR t+1 : ROR t
+    \ class c's, base + c r16, r16 = r / 16 rounded up (which is r 1024 /
+    \ 16384), each held at &7FFF
+    LDA r : CLC : ADC #15 : STA r
+    BCC r_up
+    INC r+1
+.r_up
+    LSR r+1 : ROR r : LSR r+1 : ROR r
+    LSR r+1 : ROR r : LSR r+1 : ROR r
+    \ the last frame's classes stand if base and r16 are the same (the
+    \ camera flying straight and steady)
     LDX #3
-.halves
-    LSR t+1 : ROR t
-    BCC exact_half
-    INC t : BNE exact_half
-    INC t+1
-.exact_half
-    JSR class_drift
-    DEX : BPL halves
+.same
+    LDA br,X : ZA_INDEXEDBY 0..3
+    CMP dot_made,X : BNE make
+    DEX : BPL same
+    BRA keep_camera
+.make
+    LDX #3
+.making
+    LDA br,X : ZA_INDEXEDBY 0..3
+    STA dot_made,X
+    DEX : BPL making
+    MOVW t, base
+    LDX #1
+.classes
+    LDA t+1 : BMI held                  ; (and so for every class past it)
+    LDA t : CLC : ADC r : STA t
+    LDA t+1 : ADC r+1 : STA t+1         ; (under &8600: no carry)
+    BMI held
+    STA dot_drift_hi,X
+    LDA t : STA dot_drift_lo,X
+    BRA classed
+.held
+    LDA #&FF : STA dot_drift_lo,X
+    LDA #&7F : STA dot_drift_hi,X
+.classed
+    INX : CPX #DOT_CLASSES : BNE classes
 .keep_camera
+    LDA still : BNE kept_camera         ; (the same already)
     LDX #17
 .cam_copy
     LDA cam,X : ZA_INDEXEDBY 0..17
     STA dot_cam_was,X
     DEX : BPL cam_copy
+.kept_camera
     LDX #5
 .place
     LDA pl_x,X : STA dot_p_was,X
@@ -485,115 +522,23 @@ ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointe
     LDA mv_render : STA dot_mv_was
     LDA #1 : STA dot_valid
     RTS
-\ class_drift: class X's drift, base + t, held at &7FFF.
-.class_drift
-    LDA base : CLC : ADC t : STA dot_drift_lo,X
-    LDA base+1 : ADC t+1 : BCS held
-    BPL kept
-.held
-    LDA #&FF : STA dot_drift_lo,X
-    LDA #&7F
-.kept
-    STA dot_drift_hi,X
-    RTS
 }
 
-\ dot_approx: rot_acc = the dot's camera-space position by the dots'
-\ approximation, from rot_d, and the bounds on its error (dot_ez, dot_k);
-\ C set if it can't (an offset of 16128 or more, or a matrix it can't
-\ bound). Each term of the x and z columns is q e, e = d / 128 rounded,
-\ out by under (|q| + |e|) / 2 + 2 (|e| / 2 scaled by dot_scale); the
-\ ground's column is exact.
-.dot_approx
-{
-    ZA_AUTO1 ex, ez, th, t, g
-    LDA dot_scale : BEQ far
-    LDA rot_d+1 : CLC : ADC #&3F : CMP #&7E : BCS far
-    LDA rot_d+5 : CLC : ADC #&3F : CMP #&7E : BCC near
-.far
-    SEC : RTS
-.near
-    LDA rot_d : CLC : ADC #64 : STA t
-    LDA rot_d+1 : ADC #0 : STA th
-    ASL t : ROL th
-    LDA rot_d+4 : CLC : ADC #64 : STA t
-    LDA rot_d+5 : ADC #0 : STA ez
-    ASL t : ROL ez
-    LDA th : STA ex
-    \ the x column's terms, onto the ground's: q e, a signed product, is
-    \ f(q + e) - f(q - e) with f(n) = n n / 4, read from neg (f(i - 255))
-    \ at 128 + q from 127 + e and from 127 - e
-    CLC : ADC #127 : STA dot_p1lo : STA dot_p1hi
-    LDA #127 : SEC : SBC ex : STA dot_p2lo : STA dot_p2hi
-FOR r = 0..2
-    LDY dot_qy + r
-    SEC
-    LDA (dot_p1lo),Y : SBC (dot_p2lo),Y : STA t
-    LDA (dot_p1hi),Y : SBC (dot_p2hi),Y : TAX
-    LDA t : CLC : ADC dot_c + 2 * r : STA rot_acc + 2 * r
-    TXA : ADC dot_c + 2 * r + 1 : STA rot_acc + 2 * r + 1
-NEXT
-    \ the z column's
-    LDA ez : CLC : ADC #127 : STA dot_p1lo : STA dot_p1hi
-    LDA #127 : SEC : SBC ez : STA dot_p2lo : STA dot_p2hi
-FOR r = 0..2
-    LDY dot_qy + 3 + r
-    SEC
-    LDA (dot_p1lo),Y : SBC (dot_p2lo),Y : STA t
-    LDA (dot_p1hi),Y : SBC (dot_p2hi),Y : TAX
-    LDA t : CLC : ADC rot_acc + 2 * r : STA rot_acc + 2 * r
-    TXA : ADC rot_acc + 2 * r + 1 : STA rot_acc + 2 * r + 1
-NEXT
-    \ the bounds: a row is out by under f_r + (|ex| + |ez|) / 2 (scaled)
-    \ + 4, f_r the frame's part; g = the larger of |ex| and |ez| (scaled)
-    \ + 6 is more than the dot's part
-    LDA ex : BPL ex_pos
-    EOR #&FF : INC A
-.ex_pos
-    STA t
-    LDA ez : BPL ez_pos
-    EOR #&FF : INC A
-.ez_pos
-    TAX : CLC : ADC t : STA dot_esum : TXA
-    CMP t : BCS larger
-    LDA t
-.larger
-    LDX dot_scale
-    STZ th
-.scale
-    DEX : BEQ scaled
-    ASL A : ROL th
-    BRA scale
-.scaled
-    CLC : ADC #6 : STA g
-    BCC g_done
-    INC th
-.g_done
-    \ dot_ez = f_z + g; dot_k = f_r + 2 f_z + 3 g
-    LDA g : CLC : ADC dot_fz : STA dot_ez
-    LDA th : ADC #0 : STA dot_ez+1
-    LDA g : ASL A : STA t : LDA th : ROL A : TAX                ; 2 g ...
-    LDA t : CLC : ADC g : STA t : TXA : ADC th : TAX            ; ... 3 g
-    LDA t : CLC : ADC dot_fk : STA dot_k
-    TXA : ADC dot_fk+1 : STA dot_k+1
-    LDA t : CLC : ADC dot_fk+2 : STA dot_k+2
-    TXA : ADC dot_fk+3 : STA dot_k+3
-    CLC : RTS
-}
-
-\ dot_classify: from dot_approx's rot_acc and bounds, A = 0 (and Z) if
-\ the dot is surely in view, with dot_mu its margin; 1 if surely outside;
-\ 2 if too near an edge to say. hi = z~ + ez bounds z' above, and with z'
-\ under 16384 neither 2z' nor x' and y' (within the bounds of the offsets
-\ dot_approx takes) can wrap.
+\ dot_classify: from dot_rotate's rot_acc, A = 0 (and Z) if the dot is
+\ surely in view, with dot_mu its margin; 1 if surely outside; 2 if too
+\ near an edge to say. z' is within DOT_B of z~, and 2z' - |x'| and 2z' -
+\ |y'| within DOT_K of 2z~ - |x~| and 2z~ - |y~|. hi = z~ + DOT_B bounds
+\ z' above, and with z' under 16384 neither 2z' nor x' and y' (within the
+\ bounds of the offsets dot_rotate takes, and the height's) can wrap.
+DOT_K = 3 * DOT_B
 .dot_classify
 {
     ZA_AUTO2 hi, t2, lo
     ZA_AUTO 4, u                        ; ux, uy
     ux = u
     uy = u + 2
-    LDA rot_acc+4 : CLC : ADC dot_ez : STA hi
-    LDA rot_acc+5 : ADC dot_ez+1 : STA hi+1
+    LDA rot_acc+4 : CLC : ADC #DOT_B : STA hi
+    LDA rot_acc+5 : ADC #0 : STA hi+1
     BMI outside                         ; z' below 0
     BNE z_pos
     LDA hi : CMP #3 : BCS z_pos         ; (z' 2 or less: outside)
@@ -604,16 +549,14 @@ NEXT
 .z_pos
     LDA hi+1 : CMP #&40 : BCS unsure
     LDA rot_acc+4 : ASL A : STA t2 : LDA rot_acc+5 : ROL A : STA t2+1
-    \ ux = 2z~ - kx - |x~|, uy the same for y: both 0 or more, in view
+    \ ux = 2z~ - DOT_K - |x~|, uy the same for y: both 0 or more, in view
     \ if z' is surely above 2
     ZA_DISCARD u
     LDX #0 : JSR margin
     LDX #2 : JSR margin
     LDA ux+1 : ORA uy+1 : BMI not_in
-    LDA rot_acc+4 : SEC : SBC dot_ez : TAX
-    LDA rot_acc+5 : SBC dot_ez+1 : TAY
-    TXA : SEC : SBC #3 : STA lo
-    TYA : SBC #0 : STA lo+1
+    LDA rot_acc+4 : SEC : SBC #DOT_B + 3 : STA lo
+    LDA rot_acc+5 : SBC #0 : STA lo+1
     BMI unsure
     \ the margin: the least of lo, ux, uy and 16383 - hi
     LDA #LO(16383) : SEC : SBC hi : STA dot_mu
@@ -629,46 +572,39 @@ NEXT
 .mu3
     LDA #0 : RTS
 .not_in
-    \ outside if |v~| > 2z~ + k, that is u + 2k < 0, for x or y
-    LDX #0 : LDA ux : LDY ux+1 : JSR beyond : BCS out
-    LDX #2 : LDA uy : LDY uy+1 : JSR beyond : BCS out
+    \ outside if |v~| > 2z~ + DOT_K, that is u + 2 DOT_K < 0, for x or y
+    \ (asked only of a u below 0)
+    LDA ux+1 : BPL x_near
+    LDA ux : CLC : ADC #2 * DOT_K : LDA ux+1 : ADC #0 : BMI out
+.x_near
+    LDA uy+1 : BPL y_near
+    LDA uy : CLC : ADC #2 * DOT_K : LDA uy+1 : ADC #0 : BMI out
+.y_near
     LDA #2 : RTS
 .out
     LDA #1 : RTS
-\ margin: u = t2 - k - |v~| for x~ (X = 0) or y~ (X = 2).
+\ margin: u = t2 - DOT_K - |v~| for x~ (X = 0) or y~ (X = 2).
 .margin
     LDA rot_acc+1,X : ZA_INDEXEDBY {0, 2}
     BMI v_neg
     LDA t2 : SEC : SBC rot_acc,X : ZA_INDEXEDBY {0, 2}
-    STA u,X : ZA_INDEXEDBY {0, 2}
+    TAY
     LDA t2+1 : SBC rot_acc+1,X : ZA_INDEXEDBY {0, 2}
     BRA less_k
 .v_neg
     LDA t2 : CLC : ADC rot_acc,X : ZA_INDEXEDBY {0, 2}
-    STA u,X : ZA_INDEXEDBY {0, 2}
+    TAY
     LDA t2+1 : ADC rot_acc+1,X : ZA_INDEXEDBY {0, 2}
 .less_k
-    TAY
-    LDA u,X : ZA_INDEXEDBY {0, 2}
-    SEC : SBC dot_k,X : ZA_INDEXEDBY {0, 2}
-    STA u,X : ZA_INDEXEDBY {0, 2}
-    TYA : SBC dot_k+1,X : ZA_INDEXEDBY {0, 2}
     STA u+1,X : ZA_INDEXEDBY {0, 2}
+    TYA : SEC : SBC #DOT_K
+    STA u,X : ZA_INDEXEDBY {0, 2}
+    BCS done
+    DEC u+1,X : ZA_INDEXEDBY {0, 2}
+.done
     RTS
-\ beyond: C set if u (A low, Y high) + 2 k (X = 0 for x, 2 for y) < 0,
-\ only asked when u < 0.
-.beyond
-    STA lo : STY lo+1
-    CPY #&80 : BCC not_beyond
-    LDA dot_k,X : ZA_INDEXEDBY {0, 2}
-    ASL A : STA t2 : LDA dot_k+1,X : ZA_INDEXEDBY {0, 2}
-    ROL A : STA t2+1
-    LDA lo : CLC : ADC t2 : LDA lo+1 : ADC t2+1
-    ASL A                               ; its sign into C
-    RTS
-.not_beyond
-    CLC : RTS
 }
+
 
 \ cone_exact (&047DC): the ST's test on the exact rot_acc, its words
 \ wrapping: C set if the dot is outside.
@@ -843,13 +779,20 @@ ENDIF
 \ ---------------------------------------------------------------------------
 \ The dots' cache (ground_dots), in the world bank's own RAM: the last
 \ dots' frame's camera, place and view; by dot its margin (negative: not
-\ kept), class and place when kept; and this frame's drift by class.
+\ kept), class and place when kept; and this frame's drift by class, from
+\ each entry's change in the matrix.
 .dot_valid    EQUB 0                    ; non-zero once dot_cam_was holds a frame's
 .dot_mv_was   EQUB 0
+.dot_same     SKIP 1                    ; bit 7: the camera and dy the last frame's
+.dot_moved    SKIP 1                    ; non-zero if an entry moved since the last frame
+.dot_wide     SKIP 1                    ; bit 7: an entry in the x or z column beyond 16384
+.dot_wide_any SKIP 1                    ; non-zero: any entry beyond 16384
 .dot_cam_was  SKIP 18
 .dot_p_was    SKIP 6
-.dot_drift_lo SKIP 6
-.dot_drift_hi SKIP 6
+.dot_dm       SKIP 18
+.dot_made     EQUW 0, &FFFF             ; the base and r16 the drift was made from (none yet)
+.dot_drift_lo SKIP DOT_CLASSES
+.dot_drift_hi SKIP DOT_CLASSES
 .dot_rem_lo   SKIP 40
 .dot_rem_hi   SKIP 40
 .dot_cls      SKIP 40
