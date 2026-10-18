@@ -59,8 +59,8 @@ NEXT
     LDA draw_bank : EOR #ACCCON_X : STA off+1 : STA on+1
     JSR line_erase
     LDA #ACCCON_X : TSB acccon
-.each
     LDX i : INX : BEQ done
+.each
     STX i
 .f_lo
     LDA ERASE_LIST,X : STA line_scr
@@ -79,7 +79,7 @@ NEXT
     JSR line_go
 .on
     LDA #ACCCON_X : TSB acccon              ; patched
-    BRA each
+    LDX i : INX : BNE each
 .done
     LDA #ACCCON_X : TRB acccon
     JMP line_draw
