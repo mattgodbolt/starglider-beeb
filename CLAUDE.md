@@ -156,6 +156,10 @@ says how):
   jumps' addresses clear of the other banks' code (the logic bank starts
   past the world bank's list phase), or route them through main RAM.
   Issue #1 lists the workarounds to undo once it's fixed: add to it.
+- A list symbol as a ZA_CANJUMP or ZA_CANCALL target resolves its labels
+  only in the annotation's own section (waitingforvsync/baron#30): name
+  targets in another section one by one (`tools/mkhandlers.py` writes
+  the handlers' dispatch so).
 - A patched `JSR` wants `ZA_CANCALL`, as a patched `JMP` wants
   `ZA_CANJUMP`. `ZA_DISCARD` takes a whole variable, not an alias for
   part of one.

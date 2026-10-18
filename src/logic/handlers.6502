@@ -17,7 +17,6 @@
 \ ***************************************************************************
 
 ZA_AUTO1 h_slot             ; the slot being handled
-ZA_AUTO2 h_vec              ; its handler
 ZA_AUTO2 h_bear             ; angle_to_player's bearing (the ST's d1)
 ZA_AUTO2 h_t                ; a word's working
 
@@ -51,7 +50,7 @@ ENDMACRO
     TAY
     LDA handler_lo,Y : STA h_vec
     LDA handler_hi,Y : STA h_vec+1
-    JSR dispatch
+    JSR handler_dispatch
     LDX h_slot
 .next
     STZ homing                  ; (a handler's request, for its own launch)
@@ -68,9 +67,6 @@ ENDMACRO
     TXA : LDY free_n : STA free_stack,Y
     INC free_n
     BRA next
-.dispatch
-    JMP (h_vec)
-    ZA_CANJUMP HANDLERS
 }
 
 \ The types that do nothing (and the loop's tail, on the ST).

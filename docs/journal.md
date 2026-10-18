@@ -676,3 +676,26 @@ branches off page boundaries, which the disc's layout wouldn't keep.
 Baron's zero page pool now peaks in the drawing, a few bytes short of
 the MOS's &FC.
 
+### Every routine on every capture
+
+With the level change and the new game in, every routine runs on every
+capture: 14 routines on 25 captures, each frame's state put from the ST's
+at the routine's entry and compared at its exit, all matching (checked
+2026-10-18). Getting there turned up three things.
+
+- **The scripts' writes go in at a known place.** The echo that marked a
+  `debug w` reached the log out of order with the points' own output, so
+  it placed a write only to the nearest frame. Once a capture is armed, a
+  `debug w` is now taken as the frame branch's `poke`: it runs from a
+  breakpoint at world_render's entry, just after `top`, and tags the
+  frame's order through the same channel as the points.
+- **The new game empties the draw loop's matrix cache**, which the level
+  branch hadn't seen. The ST writes &FFFF to the pitch's twice and the
+  roll's once, never the heading's, and the port does the same.
+- **The handlers' dispatch moved to main RAM**, so the logic bank's code
+  can pass its address (baron#29). Its targets are now generated one by
+  one: given as a list symbol, baron resolved their labels only in main
+  RAM's own section (waitingforvsync/baron#30), and every handler
+  seemed unreachable. A list assignment referring forward to a label
+  also failed to settle (waitingforvsync/baron#31).
+

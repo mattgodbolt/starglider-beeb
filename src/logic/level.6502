@@ -360,9 +360,14 @@ ENDMACRO
     MOVW pl_z, rng_d0
     LDA #&20 : STA pl_x : STA pl_z
     LDA #&80 : STA pl_x+1 : STA pl_z+1
+    \ the draw loop's matrix cache emptied, as the ST means to: it writes
+    \ the pitch's twice and never the heading's
+    LDA #&FF
+    STA obm_pitch : STA obm_pitch+1
+    STA obm_roll : STA obm_roll+1
     \ the dots again, round the start, d0 the last random32's
     JSR dots_scatter
-    LDA #1 : STA missiles
+    LDA #1 : STA missiles : STZ missiles+1
     STZ missile_view : STZ mv_render : STZ docked
     LDA #&FF : STA enemies_active
     STZ cheat_mode

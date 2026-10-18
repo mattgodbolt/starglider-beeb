@@ -194,16 +194,20 @@ for (const v of map.variables) {
             want: (r) => Array.from({ length: v.count }, (_, i) => long(r, i)),
         });
     } else if (v.kind === "index") {
+        // A pointer outside its array is one the ST hasn't set yet (0, until
+        // init_objects first sets the free stack's): the port, which keeps
+        // the entry's number, holds nothing for it, so it's neither put nor
+        // compared.
         const long = (r) => st(r).readUInt32BE(v.offset);
+        const entry = (r) => (long(r) - v.base) / v.stride;
+        const set = (r) => Number.isInteger(entry(r)) && entry(r) >= 0 && entry(r) <= 255;
         items.push({
             name: v.name,
             put: (r) => {
-                const i = (long(r) - v.base) / v.stride;
-                if (!Number.isInteger(i) || i < 0 || i > 255) throw new Error(`${v.name}: &${long(r).toString(16)} isn't in the array`);
-                ram[at] = i;
+                if (set(r)) ram[at] = entry(r);
             },
             get: () => [v.base + v.stride * ram[at]],
-            want: (r) => [long(r)],
+            want: (r) => (set(r) ? [long(r)] : [v.base + v.stride * ram[at]]),
         });
     } else if (v.kind === "list") {
         // the entries from the ST's pointer up, the first walked first,
@@ -327,6 +331,9 @@ for (let n = 0; n < steps.frames.length; n++) {
     const exitFrame = next ? steps.frames[n + 1] : fr;
     const exitPoint = next ? routine.to.slice(5) : routine.to;
     if (!exitFrame || (routine.unless && fr.points[routine.unless])) continue;
+    const entry = regionsAt(fr, routine.from);
+    const exit = regionsAt(exitFrame, exitPoint);
+    if (!entry || !exit) continue;
     // a write of the capture script's anywhere in the span is in the ST's
     // result, but no routine's
     const order = fr.order || [];
@@ -339,9 +346,6 @@ for (let n = 0; n < steps.frames.length; n++) {
         poked++;
         continue;
     }
-    const entry = regionsAt(fr, routine.from);
-    const exit = regionsAt(exitFrame, exitPoint);
-    if (!entry || !exit) continue;
     frames++;
     const given = (routine.inputs && regionsAt(fr, routine.inputs)) || entry;
     for (const it of items) it.put(it.input ? given : entry);

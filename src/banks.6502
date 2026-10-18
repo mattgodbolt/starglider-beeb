@@ -63,8 +63,5 @@ INCLUDE "logic/laser.6502"
 INCLUDE "logic/collide.6502"
 INCLUDE "logic/frame.6502"
 INCLUDE "logic/level.6502"
-    \ (baron#29 again) and short of the world bank's other annotated jump,
-    \ the handlers' dispatch
-    ASSERT P% <= object_handlers.dispatch
 ENDSECTION
 ENDIF

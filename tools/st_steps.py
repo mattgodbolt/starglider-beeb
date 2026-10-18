@@ -13,13 +13,14 @@ game is running. `run` takes --disk, --hatari and --tos as st_hatari.py
 does. Fly with the keys, not the mouse: random8 adds the mouse
 accumulator, which the keys change only inside read_keys.
 
-The ST's memory can be written two ways. A script line `poke COMMAND`
-(a Hatari debugger command, such as `w w $5c02e $1ec0` to move the
-player) runs COMMAND at the next frame's world_render entry (&04FE8),
-just after the `top` point; consecutive pokes run together. A `debug w`
-lands wherever the ST is when it's sent: `run` follows each with an
-echoed POKE. Either way the frame's "order" has a "poke" where the write
-landed, for the harness to leave out a routine whose span holds one.
+A script line `poke COMMAND` (a Hatari debugger command, such as `w w
+$5c02e $1ec0` to move the player) runs COMMAND at the next frame's
+world_render entry (&04FE8), just after the `top` point; consecutive
+pokes run together, and the frame's "order" has a "poke" there, for the
+harness to leave out a routine whose span holds one. A `debug w` once the
+capture is armed is taken as a poke: sent as it is, it would land
+wherever the ST happened to be, and an echo to mark it isn't ordered with
+the points' output.
 
 At each routine boundary of the frame loop (&01F10) the state the logic
 keeps is dumped (REGIONS: the variable block with the objects, the low RAM
@@ -144,10 +145,6 @@ def parse(path):
         if m := seg.match(line):
             segment = m.group(1)
             continue
-        if line == "POKE":
-            if cur is not None:
-                cur["order"].append("poke")
-            continue
         if m := dump.match(line):
             addr = int(m.group(1), 16)
             for i, b in enumerate(m.group(2).split()):
@@ -222,8 +219,9 @@ def run(script, outdir, rest):
     arm = setup(outdir)
     for f in outdir.glob("poke*.ini"):
         f.unlink()
-    text = pokes(Path(script).read_text().replace("{arm}", str(arm)), outdir)
-    text = re.sub(r"^(debug w .*)$", r"\1\ndebug echo \\nPOKE\\n", text, flags=re.M)
+    text = Path(script).read_text().replace("{arm}", str(arm))
+    head, armed, tail = text.partition(f"debug parse {arm}\n")
+    text = pokes(head + armed + re.sub(r"^debug (w .*)$", r"poke \1", tail, flags=re.M), outdir)
     (outdir / "script.txt").write_text(text)
     here = Path(__file__).resolve().parent
     subprocess.run([sys.executable, "-I", str(here / "st_hatari.py"), str(outdir / "script.txt"),
