@@ -805,3 +805,43 @@ next game until the front end is in. The model viewer is gone.
   decision 14's cap slows the game to 10.6 steps a second (measured
   2026-10-18, before decision 21's saving in the rotations).
 
+### The panel
+
+Everything the ST draws from the game's state besides the 3D, the
+gunsight and the missile view's window is now the port's
+(`src/panel.6502`): the top bar, gauges and bank ticks, scanner, bottom
+numbers, waveforms, the messages in the view, and colour 0's flash. The
+font, strings, positions, scanner colours and waveform frames come from
+STAR.PRG at build time (`tools/mkpanel.py`).
+
+- **Only changes are drawn.** The ST redraws all of it every frame. Here
+  each screen remembers in ANDY what its panel shows, so a frame in
+  flight costs about 11K cycles, and the panel takes the disc from 8.5
+  frames a second to 8.0 (measured 2026-10-18).
+- **Where the ST draws it.** The gauges, scanner and numbers are drawn
+  after the frame's 3D, from the state between the lists and the logic,
+  as the ST's waveforms routine draws them. The texts are drawn after the
+  step's logic, where the logic's texts exist (decision 16). The docked
+  menu's test is post_frame's, which comes after the frame is shown, so
+  the panel makes it itself.
+- **Texts and lines.** Texts the ST prints before its 3D are ORed in, as
+  its lines are ORed over them. Those it prints after are opaque, and
+  redrawn each frame they show. The game now starts with LEVEL 1 on
+  screen, so erasecheck learned which cells the panel keeps.
+- **From bank code.** The panel sets ACCCON's X from the logic's bank,
+  reading the objects and lists only with X clear. Its data lives below
+  `world_list_end`, where baron#29 forbids code but not data.
+
+It's checked two ways. `make panel` (now part of `make check`) puts each
+captured frame into the spike, draws it into alternate screens, and
+compares every pixel with a model of the ST's formulas: all 2,125 frames
+of the 25 captures match. That model was then checked against the ST
+itself. `tools/st_panel.py` captures in Hatari the panel's input and the
+screen the ST made, and the model, run in the ST's own colours and plane
+operations, matches all 257 frames over the panel's rows and the opaque
+texts' cells.
+
+The colours are each ST colour to the nearest of its band's four. The
+scanner's dots take their objects' lines' colours, so the white things
+are the only blue dots.
+

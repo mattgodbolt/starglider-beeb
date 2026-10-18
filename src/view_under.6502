@@ -1,0 +1,328 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - what the draw phase draws besides the
+\ objects
+\
+\ The gunsight, the ground dots and the missile view's window (docs/
+\ research/st-panel.md, sections 6 and 8; st.md), each where the ST draws
+\ it and in its colour, into the screen being drawn and onto its erase
+\ list, as the objects' lines are (decision 14); but the missile view's
+\ window, which the ST copies whole every frame, and which is drawn whole
+\ or put back (mview.6502).
+\
+\ In the loading area's bank with the window's picture, with ANDY paged,
+\ as the dots, the sight and what the logic records for the drawing are in
+\ ANDY: code.6502's view_under calls under_draw, between draw_begin and
+\ draw_objects (render.6502).
+\ ***************************************************************************
+
+\ under_draw: the gunsight and the ground dots, between draw_begin and
+\ draw_objects (render.6502); in the missile view (L_05248) the window, its
+\ bar when it's open, and the dots, which are run only then. A screen
+\ that showed the window shows the view's own again from a clear.
+.under_draw
+    LDA mv_render : BNE missile
+    LDX draw_buffer
+    LDA win_shown,X : BMI plain
+    LDA #&FF : STA win_shown,X
+    JSR window_clear
+.plain
+    JSR sight_draw
+    JMP dots_draw
+.missile
+    \ open, the bar's blocks: 17 less ((life - &F) asr 4) & &F, which bits
+    \ 4-7 of the low byte make
+    STZ win_blocks
+    LDA m_iris : BNE moving
+    LDA m_life : SEC : SBC #&0F
+    LSR A : LSR A : LSR A : LSR A
+    EOR #&FF : SEC : ADC #17 : STA win_blocks
+.moving
+    JSR win_draw
+    JMP dots_draw
+
+\ ---------------------------------------------------------------------------
+\ sight_draw (&05598): the gunsight's runs (build/gen/sight.6502) from the
+\ sight's place, if that's inside the window (the ST's test, on the N flag
+\ of each edge's word difference), in the ST's colour 15. The ST blits it
+\ unmasked onto the window just cleared, under everything else, so its
+\ set pixels are what it draws.
+.sight_draw
+{
+    ZA_AUTO1 i
+    LDA sight_x : SEC : SBC #LO(VIEW_XMIN) : LDA sight_x+1 : SBC #HI(VIEW_XMIN) : BMI done
+    LDA sight_x : SEC : SBC #LO(VIEW_XMAX) : LDA sight_x+1 : SBC #HI(VIEW_XMAX) : BPL done
+    LDA sight_y : SEC : SBC #LO(VIEW_YMIN) : LDA sight_y+1 : SBC #HI(VIEW_YMIN) : BMI done
+    LDA sight_y : SEC : SBC #LO(VIEW_YMAX) : LDA sight_y+1 : SBC #HI(VIEW_YMAX) : BPL done
+    LDA colour_map+15 : JSR set_colour
+    LDX #SIGHT_RUNS - 1
+.run
+    STX i
+    LDA sight_x0,X : JSR sight_dx : STA line_x0 : STY line_x0+1
+    LDA sight_x1,X : JSR sight_dx : STA line_x1 : STY line_x1+1
+    LDA sight_y0,X : CLC : ADC sight_y : STA line_y0
+    LDA sight_y1,X : CLC : ADC sight_y : STA line_y1
+    JSR line_plot
+    LDX i : DEX : BPL run
+.done
+    RTS
+\ sight_dx: A (low), Y (high) = sight_x + the signed byte A.
+.sight_dx
+    LDY #0
+    ORA #0 : BPL right
+    DEY
+.right
+    CLC : ADC sight_x : PHA
+    TYA : ADC sight_x+1 : TAY
+    PLA
+    RTS
+}
+INCLUDE "../build/gen/sight.6502"
+
+\ ---------------------------------------------------------------------------
+\ dots_draw (&047AA): the dots this step's ground_dots kept in view (as it
+\ records in dot_seen), each rotated into camera space, projected by the
+\ drawing's projection (proj_z, proj_x) and plotted if that's inside the
+\ window (strictly, as the ST tests it), as the ST plots it (dot_put), in
+\ the ST's colour 2. A dot whose offset from the camera is under NEAR_D on
+\ both x and z is rotated exactly (rotate_exact, as the logic does), the
+\ rest by ground_x, ground_y and ground_z (build/gen/ground.6502), within a
+\ pixel, a row at a time, depth first, so that one outside the window in x
+\ needs no y. In the missile view the camera is the missile, and the
+\ window its own (L_05248), its bottom where the window's opening leaves
+\ it: the dots are only drawn when it's open.
+NEAR_D = 1024
+ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
+.dots_draw
+{
+    LDA dots_ran : BNE ran
+    RTS
+.ran
+    LDX #5
+    LDA mv_render : BNE missile
+.player
+    LDA pl_x,X : STA at,X
+    DEX : BPL player
+    LDX #3
+    BRA placed
+.missile
+    LDA m_x,X : STA at,X
+    DEX : BPL missile
+    LDX #WIN_MISSILE + 3
+.placed
+    \ the window's tests (dot_win's)
+    LDA dot_win,X : STA dot_y.n_hi+1 : DEX
+    LDA dot_win,X : STA dot_y.n_lo+1 : DEX
+    LDA dot_win,X : STA dot_y.o_hi+1 : DEX
+    LDA dot_win,X : STA dot_y.o_lo+1
+    LDA dot_win+4,X : STA dot_x.o_lo+1
+    LDA dot_win+5,X : STA dot_x.o_hi+1
+    LDA dot_win+6,X : STA dot_x.n_lo+1
+    LDA dot_win+7,X : STA dot_x.n_hi+1
+    \ the ground's dy, the same for every dot
+    LDA #0 : SEC : SBC at+2 : STA rot_d+2
+    LDA #0 : SBC at+3 : STA rot_d+3
+    JSR ground_start
+    JSR ground_setup
+    \ dot_put's stores onto this screen's erase list, and its colour
+    LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
+    ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
+    STA dot_put.f_lo+2 : ADC #2
+    STA dot_put.f_hi+2 : ADC #2
+    STA dot_put.f_row+2 : ADC #2
+    STA dot_put.f_dx+2 : ADC #2
+    STA dot_put.f_dy+2 : ADC #2
+    STA dot_put.f_code+2
+    LDA colour_map+2 : STA dot_colour
+    LDA #39 : STA dot
+.each
+    LDX dot
+    LDA dot_seen,X : BEQ next
+    LDA dot_x_lo,X : SEC : SBC at : STA rot_d
+    LDA dot_x_hi,X : SBC at+1 : STA rot_d+1
+    LDA dot_z_lo,X : SEC : SBC at+4 : STA rot_d+4
+    LDA dot_z_hi,X : SBC at+5 : STA rot_d+5
+    LDA rot_d+1 : CLC : ADC #HI(NEAR_D) : CMP #2 * HI(NEAR_D) : BCS far
+    LDA rot_d+5 : CLC : ADC #HI(NEAR_D) : CMP #2 * HI(NEAR_D) : BCS far
+    JSR dot_exact
+    JSR dot_x : BCS next
+    JSR dot_y : BCS next
+    BRA put
+.far
+    JSR ground_z
+    JSR ground_x
+    JSR dot_x : BCS next
+    JSR ground_y
+    JSR dot_y : BCS next
+.put
+    JSR dot_put
+.next
+    DEC dot : BPL each
+    RTS
+\ (in the bank's own RAM, as the draw phase leaves zero page little room)
+.dot  SKIP 1                            ; the dot drawn
+.at   SKIP 6                            ; the camera's place
+}
+
+\ The windows a dot must be strictly inside, as tests on its projection
+\ (128 x / z, 128 y / z): an offset that puts the inside from 0, and the
+\ inside's width, for y then x. The view's ($146-$14C), and the missile
+\ view's ($2A0-$2A6, its bottom where the window's opening leaves it when
+\ it's open).
+FUNCTION win_test(lo, hi, centre) = centre - lo - 1
+WIN_MISSILE = 8
+.dot_win
+    EQUW win_test(VIEW_YMIN, VIEW_YMAX, VIEW_CY), VIEW_YMAX - VIEW_YMIN - 1
+    EQUW win_test(VIEW_XMIN, VIEW_XMAX, VIEW_CX), VIEW_XMAX - VIEW_XMIN - 1
+    EQUW win_test(&10, &70, VIEW_CY), &70 - &10 - 1
+    EQUW win_test(&50, &EF, VIEW_CX), &EF - &50 - 1
+
+\ dot_x, dot_y: the dot's x and y (rot_acc, rot_acc+2) projected into
+\ line_x0 and line_y0, each C set if that's outside the window (dot_win's
+\ test, patched). The depth is first made ready for both, unless the dot
+\ is surely outside the window in x (|x| 1.25 z or more), or deeper than 2
+\ (in view it is, so only the approximation could make it otherwise).
+.dot_x
+{
+    LDA rot_acc+5 : BMI out
+    STA pz+1 : LDA rot_acc+4 : STA pz
+    \ |x| against 1.25 z, which fits a word
+    LDA pz+1 : LSR A : STA px+1
+    LDA pz : ROR A : LSR px+1 : ROR A
+    CLC : ADC pz : STA px
+    LDA px+1 : ADC pz+1 : STA px+1
+    LDA rot_acc+1 : BPL x_pos
+    LDA rot_acc : CLC : ADC px : LDA rot_acc+1 : ADC px+1 : BCC out   ; -x >= 1.25 z
+    BRA narrow
+.x_pos
+    LDA rot_acc : CMP px : LDA rot_acc+1 : SBC px+1 : BCS out         ; x >= 1.25 z
+.narrow
+    LDA pz+1 : BNE deep
+    LDA pz : CMP #NEAR_Z : BCC out
+.deep
+    JSR proj_z
+    MOVW px, rot_acc
+    JSR proj_x
+    LDA pq : CLC : ADC #LO(VIEW_CX) : STA line_x0
+    LDA pq+1 : ADC #HI(VIEW_CX) : STA line_x0+1
+    LDA pq
+    CLC
+.o_lo
+    ADC #0                                  ; patched: the window's test
+    TAX : LDA pq+1
+.o_hi
+    ADC #0
+    TAY : TXA
+.n_lo
+    CMP #0
+    TYA
+.n_hi
+    SBC #0
+    RTS                                     ; (C: at or past the inside's width)
+.out
+    SEC : RTS
+}
+.dot_y
+{
+    MOVW px, rot_acc+2
+    JSR proj_x
+    LDA pq : CLC : ADC #LO(VIEW_CY) : STA line_y0
+    LDA pq
+    CLC
+.o_lo
+    ADC #0                                  ; patched: the window's test
+    TAX : LDA pq+1
+.o_hi
+    ADC #0
+    TAY : TXA
+.n_lo
+    CMP #0
+    TYA
+.n_hi
+    SBC #0
+    RTS
+}
+
+\ dot_put (&0976E): the dot at (line_x0, line_y0), rot_acc+4 deep, as the
+\ ST plots it: a column of a pixel, or 2 down when it's under &1000 deep,
+\ and a second column beside it when it's under &700. Each column goes onto
+\ the erase list as the line drawer sets a column up (line_go's kind 0,
+\ dx 0: tools/mkline.py), and is ORed into the screen draw_bank names.
+\ ACCCON's X is set for the erase list, and stays set to draw into shadow
+\ RAM: this runs from the logic's bank, and reads only zero page, the bank
+\ and HAZEL while it's set.
+.dot_put
+{
+    STZ dy : LDA #1 : STA cols
+    LDA rot_acc+5 : CMP #HI(&1000) : BCS sized
+    INC dy
+    CMP #HI(&700) : BCS sized
+    INC cols
+.sized
+.column
+    \ the column's lower end, from which the line drawer draws: its byte
+    \ (its character row's, 8 a column of 4 pixels) and its row in that
+    LDA line_y0 : CLC : ADC dy : TAY
+    AND #7 : STA row
+    TYA : LSR A : LSR A : LSR A : TAY
+    LDA line_x0 : AND #&FC : ASL A : STA line_scr   ; C = bit 7 of x
+    LDA line_x0+1 : ROL A : STA line_scr+1
+    LDA line_scr : CLC : ADC screen_row_lo,Y : STA line_scr
+    LDA line_scr+1 : ADC screen_row_hi,Y : STA line_scr+1
+    LDA line_x0 : AND #3 : TAX
+    LDA dot_pix,X : AND dot_colour : STA mask
+    LDA #ACCCON_X : TSB acccon
+    LDY erase_i
+    LDA line_scr
+.f_lo
+    STA ERASE_LIST + EF_LO * 512,Y          ; (each patched to this screen's page)
+    LDA line_scr+1
+.f_hi
+    STA ERASE_LIST + EF_HI * 512,Y
+    LDA row
+.f_row
+    STA ERASE_LIST + EF_ROW * 512,Y
+    LDA #0
+.f_dx
+    STA ERASE_LIST + EF_DX * 512,Y
+    LDA dy
+.f_dy
+    STA ERASE_LIST + EF_DY * 512,Y
+    TXA : ASL A                             ; kind 0, its pixel's block * 2
+.f_code
+    STA ERASE_LIST + EF_CODE * 512,Y
+    TYA : BEQ logged                        ; full: the overflow stays on index 0
+    DEC erase_i
+.logged
+    LDA draw_bank : BNE drawn_x
+    LDA #ACCCON_X : TRB acccon
+.drawn_x
+    LDY row
+    LDA mask : ORA (line_scr),Y : STA (line_scr),Y
+    LDA dy : BEQ shown
+    DEY : BPL up
+    LDA line_scr : SEC : SBC #LO(SCREEN_ROW) : STA line_scr
+    LDA line_scr+1 : SBC #HI(SCREEN_ROW) : STA line_scr+1
+    LDY #7
+.up
+    LDA mask : ORA (line_scr),Y : STA (line_scr),Y
+.shown
+    LDA #ACCCON_X : TRB acccon
+    DEC cols : BEQ done
+    INC line_x0 : BNE again
+    INC line_x0+1
+.again
+    JMP column
+.done
+    RTS
+\ (in the bank's own RAM, which X leaves where it is)
+.dy   SKIP 1                            ; the column's rows less 1
+.cols SKIP 1                            ; the columns to go
+.mask SKIP 1                            ; the column's pixel in the colour
+.row  SKIP 1                            ; its lower end's row in its character row
+}
+.dot_colour SKIP 1                      ; colour_map's byte for the ST's colour 2
+.dot_pix                                ; each pixel of a byte, from the left
+    EQUB &88, &44, &22, &11
+ASSERT LO(&1000) = 0 AND LO(&700) = 0
+
+INCLUDE "../build/gen/ground.6502"

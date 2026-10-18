@@ -1,0 +1,16 @@
+# The panel docked (tools/st_panel.py): teleported into a silo's box, as
+# tests/st/steps_world_docked.txt, down the tunnel to its end (DOCKING,
+# then the docked menu), then launched (LAUNCHING FROM SILO).
+wait 38
+key 57
+wait 4
+debug w w $5c02e $1c30 $ffd0 $dc60
+debug w w $5c03c $0c10
+wait 1
+debug w w $5c032 $dac0
+debug w w $5c18a $f000
+debug parse {arm}
+wait 30
+key 57 1.5
+wait 16
+quit

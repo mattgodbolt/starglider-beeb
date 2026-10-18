@@ -10,29 +10,18 @@ INCLUDE "logic/random.6502"
 INCLUDE "logic/arith.6502"
 INCLUDE "step.6502"
 
-\ view_under: the draw phase's drawing besides the objects (view.6502), in
-\ the logic's bank, with ANDY paged for what it reads.
+\ view_under: the draw phase's drawing besides the objects (view_under.6502),
+\ in the loading area's bank, with ANDY paged for what it reads.
 .view_under
-    BANK_ANDY BANK_LOGIC
+    BANK_ANDY BANK_PIC
     JMP under_draw
 
-\ win_show: mview.6502's win_draw, in the loading area's bank with the
-\ picture, once the disc has read it there (and while it reads nothing
-\ else), for view.6502's under_draw, and back.
-.win_show
-    LDA fdc_state : BNE unread
-    BANK BANK_PIC
-    JSR win_draw
-.unread
-    BANK_ANDY BANK_LOGIC
-    RTS
-
-\ dot_exact: rotate_exact for view.6502's dots_draw, from the world's
+\ dot_exact: rotate_exact for view_under.6502's dots_draw, from the world's
 \ bank, below ANDY's top, and back.
 .dot_exact
     BANK BANK_WORLD
     JSR rotate_exact
-    BANK_ANDY BANK_LOGIC
+    BANK_ANDY BANK_PIC
     RTS
 INCLUDE "sound.6502"
 

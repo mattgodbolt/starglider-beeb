@@ -64,10 +64,11 @@ SECTION Main, org = &0E00, filename = "SG", guard = MAIN_TOP, cmos = TRUE
     JSR mul_init
     JSR line_draw
     JSR screen_mode
-    \ the cockpit on both screens, their windows empty
+    \ the cockpit on both screens, their windows empty, their panels to draw
     JSR screen_copy
     STZ draw_bank : JSR window_clear
     LDA #ACCCON_X : STA draw_bank : JSR window_clear
+    JSR panel_reset
 IF DEFINED(SPLIT_SWEEP)
     JSR split_test
 ENDIF
@@ -113,13 +114,13 @@ INCLUDE "disc.6502"
 \ The files start loads (disc_load: the file, where, its bank), the last
 \ first.
 .disc_load_file
-    EQUB DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
+    EQUB DF_WINDOW, DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
 .disc_load_lo
-    EQUB LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
+    EQUB LO(WIN_PIC), LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
 .disc_load_hi
-    EQUB HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
+    EQUB HI(WIN_PIC), HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
 .disc_load_bank
-    EQUB BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
+    EQUB BANK_PIC, BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
 DISC_LOADS = P% - disc_load_bank
 
 \ ---------------------------------------------------------------------------
@@ -162,10 +163,13 @@ SIGHT_CY = 68
     \ main RAM's screen shown, and both cleared before they're drawn
     JSR erase_init
     STZ draw_buffer : STZ frame_drawn : STZ frame_ready
-    \ The disc reader at work (decision 12): the missile view's window into
-    \ the loading area as the game starts (tools/disccheck.mjs checks it).
-    LDX #DF_WINDOW : LDY #BANK_PIC
-    LDA #LO(WIN_PIC) : STA fe_dst : LDA #HI(WIN_PIC) : STA fe_dst+1
+    \ The disc reader at work (decision 12): until the game has a file of
+    \ its own to load as it plays, TABLES read again into the loading area,
+    \ below WINDOW's code and picture there, as the game starts
+    \ (tools/disccheck.mjs checks it).
+    LDX #DF_TABLES : LDY #BANK_PIC
+    STZ fe_dst : LDA #&80 : STA fe_dst+1
+    ASSERT CODE2 - TABLES <= WIN_PIC - &8000    ; (TABLES' guard is CODE2)
     JSR disc_load
     JSR input_init
     JSR install_irq

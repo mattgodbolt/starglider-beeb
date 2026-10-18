@@ -12,8 +12,8 @@
 \ only what an erase can take from it put back: the inner window's set
 \ bytes (the missile's view is drawn there) and the bar's rows (which are
 \ ORed over the picture). The code is in the picture's bank, the loading
-\ area's, with it (code.6502's win_show pages it): it sets ACCCON's X,
-\ which leaves sideways RAM where it is.
+\ area's, with it (view_under.6502's under_draw calls it): it sets
+\ ACCCON's X, which leaves sideways RAM where it is.
 \ ***************************************************************************
 
 \ win_draw: the window as the ST has it this frame, on the screen draw_bank

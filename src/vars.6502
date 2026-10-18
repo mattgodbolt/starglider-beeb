@@ -63,6 +63,8 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
     \ drawing show
 .score        SKIP 4        ; {ST P&0150C long} BCD, eight digits
 .last_kill    SKIP 2        ; {ST $286(a6) word} BCD, the last kill's score
+.kill_shown   SKIP 2        ; the port's own: last_kill before this step's kill, which the ST prints
+.world_text   SKIP 1        ; the port's own: what world_render printed this step (TX_*)
 .frame_count  SKIP 2        ; {ST $1E2(a6) word} frame_end's (logic/frame.6502): every frame_end call, wrapping
 .bolt_timer   SKIP 1        ; {ST $284(a6) word8} the laser bolt's steps to go, 4-0
 .bolt_target_x SKIP 2       ; {ST $24C(a6) word} the sight as it was when the bolt was fired
@@ -82,6 +84,16 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .sample_left  SKIP 4        ; {ST P&01E56 long in} bytes still to play, which the player counts down
 .logic_work_end
 ENDSECTION
+
+\ world_text's bits: DOCKING, PRESS I FOR INTERROGATE (&05002), LAUNCHING
+\ FROM SILO (&0562E) and the missile view's countdown (&052A6), each when
+\ world_render prints it (src/panel.6502 draws them).
+TX_DOCKING = 1
+TX_LAUNCH  = 2
+TX_COUNT   = 8
+\ mine_text's
+MINE_DETECTED = 1                   ; 'WARNING:  MINE DETECTED'
+MINE_EXPLODED = 2                   ; 'MINE HAS JUST EXPLODED!'
 
 \ The lists (world.6502's, in memory.6502), as the ST's pointers and counts
 \ hold them.
@@ -198,4 +210,5 @@ SHOTS = 4                   ; the enemies' laser shots a step kept: no more are 
 .shot_z_lo    SKIP SHOTS
 .shot_z_hi    SKIP SHOTS
 .shot_end     SKIP SHOTS    ; ... to this x on the window's bottom edge
+.logic_andy_end             ; (the panel's follow: src/panel.6502)
 ENDSECTION
