@@ -41,9 +41,18 @@ IF DEFINED(SPIKE)
 ENDIF
 
 \ erase_init: both screens' windows to be cleared before they're first
-\ drawn, as if their erase lists had overflowed.
+\ drawn, as if their erase lists had overflowed; and the marks wiped, as
+\ until the first frame their pages hold other things (disc.6502's
+\ catalogue, screen_copy's pages).
 .erase_init
     STZ erase_stop : STZ erase_stop+1
+\ marks_wipe: every edge's and vertex's mark 0, and stamp, so the next
+\ stamp is on none of them.
+.marks_wipe
+    LDX #0 : STX stamp
+.wipe
+    STZ edge_mark,X : STZ vert_mark,X
+    INX : BNE wipe
     RTS
 
 \ draw_phase: the draw list's objects into the screen draw_buffer names
@@ -141,6 +150,7 @@ ZA_AUTO 5, ksign            ; ... and signs
     MOVW ground_h, ang_h
     LDA #&FF : STA ground_valid
     STZ mat_valid               ; mat isn't build_matrix's now
+    STZ mat_scaled              ; nor xf_amag's
     \ Kept since the camera last pitched or rolled? The matrix is the
     \ heading's and kconst's, and kconst is the camera's pitch and roll.
     LDX gm_n : BEQ build
@@ -238,11 +248,13 @@ OM_SIZE = 6 + 18
     DEX : BPL angles
     LDA #&FF : STA mat_valid
     STZ ground_valid
+    STZ mat_scaled
     RTS
 .not_this
     LDX at : BNE find
 .build
     JSR build_matrix
+    STZ mat_scaled                      ; (xf_amag isn't mat's)
     \ kept, over the oldest
     LDA om_next : CLC : ADC #5 : TAX
     LDY #5
@@ -374,6 +386,7 @@ ZA_AUTO 10, kp
 .draw_objects
 {
     ZA_AUTO1 list_i
+    STZ mat_scaled                      ; (zero page isn't kept from frame to frame)
     \ the ground matrices kept hold while the camera neither pitches nor rolls
     LDA pl_pitch : CMP gm_pitch : BNE flush
     LDA pl_pitch+1 : CMP gm_pitch+1 : BNE flush
@@ -546,13 +559,21 @@ NEXT
     \ The matrix scaled to the shape, for the vertices: A = m g / 256, so
     \ A k / 1024 is in world units (g = 32 x scale): (|m| scale + 4) / 8,
     \ which is (2 |m| x 16 scale + 128) / 256, the bytes falling where
-    \ they're wanted. (16 scale is a byte: mkshapes.py.)
-    LDA sh_scale : ASL A : ASL A : ASL A : ASL A : MUL_SET
+    \ they're wanted. (16 scale is a byte: mkshapes.py.) Kept from the
+    \ last object if mat and the scale are the same.
+    LDA mat_scaled : BEQ scale
+    LDA sh_scale : CMP scaled_for : BNE scale
+    JMP kept
+.scale
+    LDA sh_scale : STA scaled_for
+    ASL A : ASL A : ASL A : ASL A : MUL_SET
     LDX #0
     ZA_DISCARD xf_amag
 .scale_term
     LDA mat,X : ZA_INDEXEDBY 0..16
     STA u_lo
+    ORA mat+1,X : ZA_INDEXEDBY 0..16
+    BEQ scale_zero
     LDA mat+1,X : ZA_INDEXEDBY 0..16
     BPL scale_pos
     LDA #0 : SEC : SBC u_lo : STA u_lo
@@ -567,16 +588,22 @@ NEXT
     INC xf_amag+1,X : ZA_INDEXEDBY 0..16
 .scale_next
     INX : INX : CPX #18 : BNE scale_term
-    \ and the signs, &00 or &80 (the transforms' setups widen them in place)
+    BRA scaled
+.scale_zero                                     ; (as the products would make it)
+    STZ xf_amag,X : ZA_INDEXEDBY 0..16
+    STZ xf_amag+1,X : ZA_INDEXEDBY 0..16
+    BRA scale_next
+.scaled
+    \ and the signs, &00 or &80 (the transforms' setups widen them in
+    \ place, which leaves them as good for the next object)
 FOR e = 0..8
     LDA mat + 2 * e + 1 : AND #&80 : STA xf_asign + e
 NEXT
+    LDA #&FF : STA mat_scaled
+.kept
     \ A new stamp marks this object's edges and vertices.
     INC stamp : BNE stamped
-    LDX #0
-.wipe
-    STZ edge_mark,X : STZ vert_mark,X
-    INX : BNE wipe
+    JSR marks_wipe
     INC stamp
 .stamped
     JSR faces
@@ -590,7 +617,27 @@ NEXT
     JSR far_setup
     JMP edges_far
 .near
-    JSR xform_setup
+    JSR xform_setup                     ; (and the position folded in where it can be)
+    \ Folded, and wholly in front of the near plane (tz - the radius >=
+    \ NEAR_Z + FOLD_SLACK): no vertex is behind it, nor any edge clipped at
+    \ it, so vertex.in_front skips the tests and the camera-space position,
+    \ and each edge goes straight to the window's clip.
+    ASSERT LO(vertex.folded) <> LO(vertex.back)
+    LDA xform_back+1 : CMP #LO(vertex.folded) : BNE straddling
+    LDA tz+1 : BMI straddling
+    LDA tz : SEC : SBC sh_radius : TAX
+    LDA tz+1 : SBC sh_radius+1 : BMI straddling
+    BNE in_front
+    CPX #NEAR_Z + FOLD_SLACK : BCC straddling
+.in_front
+    LDA #LO(vertex.in_front) : STA xform_back+1
+    LDA #HI(vertex.in_front) : STA xform_back+2
+    LDA #LO(clip_line.ends) : LDX #HI(clip_line.ends)
+    BRA patched
+.straddling
+    LDA #LO(edge) : LDX #HI(edge)
+.patched
+    STA edges.call+1 : STX edges.call+2
     JMP edges
 }
 
@@ -600,8 +647,12 @@ NEXT
 \ object's offsets, its x on the screen is X0 + (128 / tz)(A_x - (tx /
 \ tz) A_z) k / 1024, and tx / tz is X0 / 128: so B_x = 128 (A_x - X0 A_z
 \ / 128) / tz, which is proj_x's, and the same for y.
-ZA_AUTO2 sc_x0, sc_y0
-ZA_AUTO2 sc_x0q, sc_y0q         ; ... and in quarters of a pixel
+ZA_AUTO 4, sc_0                 ; x, y
+sc_x0 = sc_0
+sc_y0 = sc_0 + 2
+ZA_AUTO 4, sc_0q                ; ... and in quarters of a pixel
+sc_x0q = sc_0q
+sc_y0q = sc_0q + 2
 ZA_AUTO1 far_inside             ; bit 7: no edge needs the window clip
 ZA_AUTO 12, sc_bmag             ; B: |B| words, two rows of x, y, z ...
 ZA_AUTO 6, sc_bsign             ; ... and signs
@@ -627,29 +678,48 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     CLC : RTS
 }
 
-\ CENTRE t, q, p: q = 512 t / pz (quarters) and p = 128 t / pz as proj_x
-\ has it. When 4 t fitted, p is q / 4 truncated, as proj_x truncates: but
-\ not below a depth of 256, where proj_x's overflow can come into q and
-\ not p.
-MACRO CENTRE t, q, p
-    MOVW px, t : JSR quarters : MOVW q, pq
+\ centre: the centre on the screen on axis X (0 x, 2 y): sc_0q,X = 512 t /
+\ pz (quarters) and sc_0,X = 128 t / pz as proj_x has it, t = tpos,X. When
+\ 4 t fitted, sc_0 is sc_0q / 4 truncated, as proj_x truncates: but not
+\ below a depth of 256, where proj_x's overflow can come into sc_0q and
+\ not sc_0.
+.centre
+{
+    ZA_AUTO1 axis
+    STX axis
+    LDA tpos,X : ZA_INDEXEDBY {0, 2}
+    STA px
+    LDA tpos+1,X : ZA_INDEXEDBY {0, 2}
+    STA px+1
+    JSR quarters
+    LDX axis
+    LDA pq : STA sc_0q,X : ZA_INDEXEDBY {0, 2}
+    LDA pq+1 : STA sc_0q+1,X : ZA_INDEXEDBY {0, 2}
     BCC by_proj
     LDA pz+1 : BEQ by_proj
     LDA pq+1 : BPL positive
-    LDA pq : CLC : ADC #3 : STA p
+    LDA pq : CLC : ADC #3 : STA sc_0,X : ZA_INDEXEDBY {0, 2}
     LDA pq+1 : ADC #0
-    CMP #&80 : ROR A : ROR p
-    CMP #&80 : ROR A : ROR p
-    STA p+1
-    BRA done
+    CMP #&80 : ROR A : ROR sc_0,X : ZA_INDEXEDBY {0, 2}
+    CMP #&80 : ROR A : ROR sc_0,X : ZA_INDEXEDBY {0, 2}
+    STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    RTS
 .positive
     LSR A : ROR pq : LSR A : ROR pq
-    STA p+1 : LDA pq : STA p
-    BRA done
+    STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    LDA pq : STA sc_0,X : ZA_INDEXEDBY {0, 2}
+    RTS
 .by_proj
-    MOVW px, t : JSR proj_x : MOVW p, pq
-.done
-ENDMACRO
+    LDA tpos,X : ZA_INDEXEDBY {0, 2}
+    STA px
+    LDA tpos+1,X : ZA_INDEXEDBY {0, 2}
+    STA px+1
+    JSR proj_x
+    LDX axis
+    LDA pq : STA sc_0,X : ZA_INDEXEDBY {0, 2}
+    LDA pq+1 : STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    RTS
+}
 
 .far_setup
 {
@@ -657,8 +727,8 @@ ENDMACRO
     ZA_AUTO2 xs, d
     ZA_AUTO 3, d24
     MOVW pz, tz : JSR proj_z
-    CENTRE tx, sc_x0q, sc_x0
-    CENTRE ty, sc_y0q, sc_y0
+    LDX #0 : JSR centre
+    LDX #2 : JSR centre
     \ B by term (3 row + j): d = A_row - X0 A_z / 128 (X0 or Y0), the
     \ product rounded down as the 68000's shifts would, then 128 d / tz
     ZA_DISCARD sc_bmag, sc_bsign
@@ -683,9 +753,12 @@ ENDMACRO
     MUL_SET
 .same_row
     LDX term : LDY a_z,X
+    TYA : ASL A : TAX
+    LDA xf_amag,X : ZA_INDEXEDBY {12, 14, 16}
+    ORA xf_amag+1,X : ZA_INDEXEDBY {12, 14, 16}
+    BEQ no_z
     LDA xf_asign,Y : ZA_INDEXEDBY 6..8
     EOR xneg : STA pneg
-    TYA : ASL A : TAX
     LDA xs+1 : BNE wide
     LDY xf_amag,X : ZA_INDEXEDBY {12, 14, 16}
     MUL8 mul_p : STA mul_p+1
@@ -705,6 +778,20 @@ ENDMACRO
     INC mul_p+1 : BNE rounded
     INC mul_p+2
     BRA rounded
+.no_z
+    \ A_z = 0: no product, so d = A_row, and if that's 0 too, so is B
+    LDA term : ASL A : TAX
+    LDA xf_amag,X : ZA_INDEXEDBY 0..10
+    ORA xf_amag+1,X : ZA_INDEXEDBY 0..10
+    BEQ b_zero
+    STZ mul_p+1 : STZ mul_p+2 : STZ mul_p+3
+    BRA rounded
+.b_zero
+    STZ sc_bmag,X : ZA_INDEXEDBY 0..10
+    STZ sc_bmag+1,X : ZA_INDEXEDBY 0..10
+    LDX term
+    STZ sc_bsign,X : ZA_INDEXEDBY 0..5
+    JMP next_term
 .wide
     MOVW mul_x, xs
     LDA xf_amag,X : ZA_INDEXEDBY {12, 14, 16}
@@ -767,6 +854,7 @@ ENDMACRO
 .b_pos
     LDA pq : STA sc_bmag,X : ZA_INDEXEDBY 0..10
     LDA pq+1 : STA sc_bmag+1,X : ZA_INDEXEDBY 0..10
+.next_term
     INC term : LDA term : CMP #6 : BEQ terms_done
     JMP each_term
 .terms_done
@@ -800,6 +888,12 @@ ENDMACRO
 .edges_far
 {
     LDA sh_nedges : STA edge_i
+    \ each edge to the window's clip, or past it if the object's inside
+    LDA #LO(clip_line.ends) : LDX #HI(clip_line.ends)
+    BIT far_inside : BPL patch
+    LDA #LO(clip_line.ends_in) : LDX #HI(clip_line.ends_in)
+.patch
+    STA call+1 : STX call+2
 .each
     LDY edge_i : BNE test
     RTS
@@ -807,18 +901,18 @@ ENDMACRO
     DEY : STY edge_i
     LDA edge_mark,Y : CMP stamp : BNE each
     LDA (sh_ev1),Y : STA vb
-    LDA (sh_ev0),Y : STA va : JSR vertex_far
-    LDA vb : JSR vertex_far
+    LDA (sh_ev0),Y : STA va
+    \ each end onto the screen if it isn't yet
+    TAY : LDA vert_mark,Y : CMP stamp : BEQ a_done
+    JSR vertex_far
+.a_done
+    LDY vb : LDA vert_mark,Y : CMP stamp : BEQ b_done
+    JSR vertex_far
+.b_done
     LDX va : LDY vb
-    LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
-    LDA v_sylo,X : STA cy0 : LDA v_syhi,X : STA cy0+1
-    LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
-    LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
-    BIT far_inside : BPL clip
-    JSR clip_line.accept
-    BRA each
-.clip
-    JSR clip_line
+.call
+    JSR clip_line.ends                      ; patched: or clip_line.ends_in
+    ZA_CANCALL clip_line.ends, clip_line.ends_in
     BRA each
 }
 
@@ -840,14 +934,43 @@ MACRO TO_PIXELS q, centre, lo, hi
     TXA : ADC #HI(centre) : STA hi,Y
 ENDMACRO
 
-\ vertex_far: vertex A of a far object onto the screen; once an object.
+\ VERTEX_CODE: A = the window's outcode of vertex Y on the screen (v_sx,
+\ v_sy), as OUTCODE makes it; X is lost.
+ASSERT VIEW_XMIN < 256 AND HI(VIEW_XMAX + 1) = 1
+ASSERT VIEW_YMIN < 256 AND VIEW_YMAX < 255
+MACRO VERTEX_CODE
+    LDA v_sxhi,Y : BNE x_high
+    LDA v_sxlo,Y : CMP #VIEW_XMIN
+    LDA #0 : BCS x_done
+    BCC x_left
+.x_high
+    BMI x_left
+    CMP #HI(VIEW_XMAX + 1) : BNE x_right
+    LDA v_sxlo,Y : CMP #LO(VIEW_XMAX + 1)
+    LDA #0 : BCC x_done
+.x_right
+    LDA #8 : BRA x_done
+.x_left
+    LDA #2
+.x_done
+    LDX v_syhi,Y : BNE y_high
+    LDX v_sylo,Y : CPX #VIEW_YMIN : BCC y_above
+    CPX #VIEW_YMAX + 1 : BCC y_done
+.y_below
+    ORA #4 : BRA y_done
+.y_high
+    BPL y_below
+.y_above
+    ORA #1
+.y_done
+ENDMACRO
+
+\ vertex_far: vertex Y of a far object onto the screen, and its outcode
+\ unless the object is inside the window; the caller makes it once an
+\ object, by its mark.
 .vertex_far
 {
     ZA_AUTO1 vtx
-    TAY
-    LDA vert_mark,Y : CMP stamp : BNE new
-    RTS
-.new
     LDA stamp : STA vert_mark,Y
     STY vtx
     CPY sh_nstill : BCS moving
@@ -867,24 +990,56 @@ ENDMACRO
     LDY vtx                                 ; from the centre's quarters
     TO_PIXELS sc_acc, VIEW_CX, v_sxlo, v_sxhi
     TO_PIXELS sc_acc+2, VIEW_CY, v_sylo, v_syhi
+    BIT far_inside : BMI inside
+    VERTEX_CODE : STA v_code,Y
+.inside
     RTS
 }
 
 \ faces: each face's edges marked if it's visible: always-visible, or the
 \ camera on its outer side, n.c > 4K.
+\
+\ dot = 4K - n.c is made in two passes, by |c|'s high bytes then its low.
+\ The low pass changes dot by at most 127 (l_x + l_y + l_z), l being
+\ |c|'s low bytes, which is under 256 E (E = (l_x + l_y + l_z + 1) / 2):
+\ so with the high pass's top two bytes D, D >= E is a face not visible,
+\ and D + E < 0 one visible, without the low pass. That's tested only
+\ when D can't pass a word (|c| < 16384 on every axis) and |c| isn't
+\ under 512 on every axis, where it seldom settles a face.
 .faces
 {
     ZA_AUTO1 face_i, last
-    ZA_AUTO 3, nrm              ; the face's normal, x y z
-    ZA_AUTO 3, dot, pp
+    ZA_AUTO 3, nrm              ; the face's normal, x y z ...
+    ZA_AUTO 3, nmag             ; ... and its magnitudes
+    ZA_AUTO 3, dot
+    ZA_AUTO2 pp
+    ZA_AUTO2 epos, eneg         ; E, -E
     LDA sh_elists : STA mark_edge+1 : LDA sh_elists+1 : STA mark_edge+2
-    \ each axis's products by its |c| (faceterm.6502)
-    LDA objc_mag : STA fx.lo_a+1 : STA fx.lo_c+1 : EOR #&FF : STA fx.lo_b+1 : STA fx.lo_d+1
-    LDA objc_mag+1 : STA fx.hi_a+1 : STA fx.hi_c+1 : EOR #&FF : STA fx.hi_b+1 : STA fx.hi_d+1
-    LDA objc_mag+2 : STA fy.lo_a+1 : STA fy.lo_c+1 : EOR #&FF : STA fy.lo_b+1 : STA fy.lo_d+1
-    LDA objc_mag+3 : STA fy.hi_a+1 : STA fy.hi_c+1 : EOR #&FF : STA fy.hi_b+1 : STA fy.hi_d+1
-    LDA objc_mag+4 : STA fz.lo_a+1 : STA fz.lo_c+1 : EOR #&FF : STA fz.lo_b+1 : STA fz.lo_d+1
-    LDA objc_mag+5 : STA fz.hi_a+1 : STA fz.hi_c+1 : EOR #&FF : STA fz.hi_b+1 : STA fz.hi_d+1
+    \ each axis's products by its |c|'s bytes (faceterm.6502)
+    LDA objc_mag : STA fxl.lo_a+1 : STA fxl.lo_c+1 : EOR #&FF : STA fxl.lo_b+1 : STA fxl.lo_d+1
+    LDA objc_mag+1 : STA fxh.hi_a+1 : STA fxh.hi_c+1 : EOR #&FF : STA fxh.hi_b+1 : STA fxh.hi_d+1
+    LDA objc_mag+2 : STA fyl.lo_a+1 : STA fyl.lo_c+1 : EOR #&FF : STA fyl.lo_b+1 : STA fyl.lo_d+1
+    LDA objc_mag+3 : STA fyh.hi_a+1 : STA fyh.hi_c+1 : EOR #&FF : STA fyh.hi_b+1 : STA fyh.hi_d+1
+    LDA objc_mag+4 : STA fzl.lo_a+1 : STA fzl.lo_c+1 : EOR #&FF : STA fzl.lo_b+1 : STA fzl.lo_d+1
+    LDA objc_mag+5 : STA fzh.hi_a+1 : STA fzh.hi_c+1 : EOR #&FF : STA fzh.hi_b+1 : STA fzh.hi_d+1
+    \ the high pass to settle faces, or not
+    LDX #BRA_OP
+    LDA objc_mag+1 : ORA objc_mag+3 : ORA objc_mag+5
+    CMP #64 : BCS settling              ; some |c| >= 16384
+    CMP #2 : BCC settling               ; every |c| < 512
+    LDX #LDA_IMM
+    \ E = (l_x + l_y + l_z + 1) / 2
+    LDA objc_mag : SEC : ADC objc_mag+2 : STA epos
+    LDA #0 : ROL A : STA epos+1
+    LDA epos : CLC : ADC objc_mag+4 : STA epos
+    BCC e_sum
+    INC epos+1
+.e_sum
+    LSR epos+1 : ROR epos
+    LDA #0 : SEC : SBC epos : STA eneg
+    LDA #0 : SBC epos+1 : STA eneg+1
+.settling
+    STX settle_k
     LDA sh_nfaces : STA face_i
 .next
     LDY face_i : BNE test               ; the last first
@@ -918,20 +1073,50 @@ ENDMACRO
     ASL A : ROL dot+1 : ROL dot+2
     ASL A : ROL dot+1 : ROL dot+2
     STA dot
-    \ each component's |n| |c| taken away, or added if n c is negative
-.fx
+    \ each component's |n| |c| taken away, or added if n c is negative:
+    \ by |c|'s high bytes ...
+.fxh
 {
-    AXIS = 0
+    AXIS = 0 : HIGH = TRUE
     INCLUDE "faceterm.6502"
 }
-.fy
+.fyh
 {
-    AXIS = 1
+    AXIS = 1 : HIGH = TRUE
     INCLUDE "faceterm.6502"
 }
-.fz
+.fzh
 {
-    AXIS = 2
+    AXIS = 2 : HIGH = TRUE
+    INCLUDE "faceterm.6502"
+}
+    \ ... settled by them, if they can (settle_k: LDA # to try, BRA not to)
+.settle_k
+    BRA low
+    ZA_CANJUMP low, settle
+.settle
+    LDA dot+1 : CLC : ADC eneg
+    LDA dot+2 : ADC eneg+1 : BMI not_out
+    JMP next                            ; D >= E
+.not_out
+    LDA dot+1 : CLC : ADC epos
+    LDA dot+2 : ADC epos+1 : BPL low
+    JMP visible                         ; D + E < 0
+.low
+    \ ... and by the low
+.fxl
+{
+    AXIS = 0 : HIGH = FALSE
+    INCLUDE "faceterm.6502"
+}
+.fyl
+{
+    AXIS = 1 : HIGH = FALSE
+    INCLUDE "faceterm.6502"
+}
+.fzl
+{
+    AXIS = 2 : HIGH = FALSE
     INCLUDE "faceterm.6502"
 }
     LDA dot+2 : BMI visible
@@ -963,22 +1148,27 @@ ENDMACRO
     DEY : STY edge_i
     LDA edge_mark,Y : CMP stamp : BNE each
     LDA (sh_ev1),Y : STA vb
-    LDA (sh_ev0),Y : STA va : JSR vertex
-    LDA vb : JSR vertex
-    JSR edge
+    LDA (sh_ev0),Y : STA va
+    \ each end transformed if it isn't yet
+    TAY : LDA vert_mark,Y : CMP stamp : BEQ a_done
+    JSR vertex
+.a_done
+    LDY vb : LDA vert_mark,Y : CMP stamp : BEQ b_done
+    JSR vertex
+.b_done
+    LDX va : LDY vb
+.call
+    JSR edge                                ; patched (draw_shape): or clip_line.ends
+    ZA_CANCALL edge, clip_line.ends
     BRA each
 }
 
-\ vertex: vertex A of the shape into camera space (&03FFE) and, in front
-\ of the near plane, projected; once an object.
+\ vertex: vertex Y of the shape into camera space (&03FFE) and, in front
+\ of the near plane, projected, with its outcode; the caller makes it
+\ once an object, by its mark.
 .vertex
 {
     ZA_AUTO1 vtx
-    ZA_AUTO2 cvy
-    TAY
-    LDA vert_mark,Y : CMP stamp : BNE new
-    RTS
-.new
     LDA stamp : STA vert_mark,Y
     STY vtx
     CPY sh_nstill : BCS moving
@@ -991,28 +1181,61 @@ ENDMACRO
     LDA (fr_vy),Y : EOR #&80 : STA xf_u+1
     LDA (fr_vz),Y : EOR #&80 : STA xf_u+2
 .got
-    JMP xform_vertex                        ; which comes back to back
+    JMP xform_vertex                        ; back to back, folded or in_front (xform_back)
 .back
+    \ the sums px, xf_y, pz into world units, the object's position added
+    \ (only where it can't be folded in, seldom: so in a loop)
+    LDX #4
+.add_t
+    LDA xf_sum+1,X : ZA_INDEXEDBY {0, 2, 4}
+    CMP #&80 : ROR A
+    ROR xf_sum,X : ZA_INDEXEDBY {0, 2, 4}
+    CMP #&80 : ROR A
+    ROR xf_sum,X : ZA_INDEXEDBY {0, 2, 4}
+    TAY
+    LDA xf_sum,X : ZA_INDEXEDBY {0, 2, 4}
+    CLC : ADC tpos,X : ZA_INDEXEDBY {0, 2, 4}
+    STA xf_sum,X : ZA_INDEXEDBY {0, 2, 4}
+    TYA : ADC tpos+1,X : ZA_INDEXEDBY {0, 2, 4}
+    STA xf_sum+1,X : ZA_INDEXEDBY {0, 2, 4}
+    DEX : DEX : BPL add_t
     LDY vtx
-    WORLD xf_acc, tx, px, v_xlo, v_xhi
-    WORLD xf_acc+2, ty, cvy, v_ylo, v_yhi
-    WORLD xf_acc+4, tz, pz, v_zlo, v_zhi
+    LDA px : STA v_xlo,Y : LDA px+1 : STA v_xhi,Y
+    LDA xf_y : STA v_ylo,Y : LDA xf_y+1 : STA v_yhi,Y
+    LDA pz : STA v_zlo,Y : LDA pz+1 : STA v_zhi,Y
+    BRA tested
+.folded
+    \ the same, the object's position in them from the start
+    LDY vtx
+    WORLD_FOLDED px, v_xlo, v_xhi
+    WORLD_FOLDED xf_y, v_ylo, v_yhi
+    WORLD_FOLDED pz, v_zlo, v_zhi
+    LDA pz+1
+.tested
     \ behind the near plane if z < NEAR_Z (a byte), from z's high byte
     ASSERT NEAR_Z < 256
     BMI behind
     BNE front
-    LDA pz : CMP #NEAR_Z : BCC behind
+    LDA pz : CMP #NEAR_Z : BCS front
+.behind
+    RTS
+.in_front
+    \ the same for an object wholly in front of the near plane: no z to
+    \ test, and no position for edge to keep
+    WORLD_SHIFT px
+    WORLD_SHIFT xf_y
+    WORLD_SHIFT pz
 .front
     JSR proj_z
     JSR proj_x
     LDY vtx
     LDA pq : CLC : ADC #LO(VIEW_CX) : STA v_sxlo,Y
     LDA pq+1 : ADC #HI(VIEW_CX) : STA v_sxhi,Y
-    MOVW px, cvy : JSR proj_x
+    MOVW px, xf_y : JSR proj_x
     LDY vtx
     LDA pq : CLC : ADC #LO(VIEW_CY) : STA v_sylo,Y
     LDA pq+1 : ADC #HI(VIEW_CY) : STA v_syhi,Y
-.behind
+    VERTEX_CODE : STA v_code,Y
     RTS
 }
 
@@ -1201,8 +1424,8 @@ ENDMACRO
 ASSERT NEAR_Z > 0 AND NEAR_Z < 256
 .edge
 {
-    \ each end in front if z >= NEAR_Z, which its high byte mostly settles
-    LDX va : LDY vb
+    \ each end (X, Y: va, vb) in front if z >= NEAR_Z, which its high byte
+    \ mostly settles
     LDA v_zhi,X : BMI p_behind : BNE p_front
     LDA v_zlo,X : CMP #NEAR_Z : BCC p_behind
 .p_front
@@ -1215,11 +1438,7 @@ ASSERT NEAR_Z > 0 AND NEAR_Z < 256
 .both_behind
     RTS
 .in_front
-    LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
-    LDA v_sylo,X : STA cy0 : LDA v_syhi,X : STA cy0+1
-    LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
-    LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
-    JMP clip_line
+    JMP clip_line.ends
 .crosses
     LDA v_zlo,X : STA ep+4 : LDA v_zhi,X : STA ep+5
     LDA v_zlo,Y : STA eq+4 : LDA v_zhi,Y : STA eq+5
@@ -1368,6 +1587,27 @@ ENDMACRO
 .outside
     LDA code0 : AND code1 : BEQ crossing
     RTS
+\ ends: the edge from vertex X to vertex Y, both on the screen, by their
+\ outcodes (v_code): nothing if both are beyond one of the window's edges,
+\ drawn as it is if both are inside (ends_in), and otherwise clipped. Only
+\ a line clipped needs its ends' y high bytes.
+.ends
+    LDA v_code,X : AND v_code,Y : BNE ends_out
+    LDA v_code,X : ORA v_code,Y : BNE ends_clip
+.ends_in
+    LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
+    LDA v_sylo,X : STA cy0
+    LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
+    LDA v_sylo,Y : STA cy1
+    JMP accept
+.ends_out
+    RTS
+.ends_clip
+    LDA v_code,X : STA code0 : LDA v_code,Y : STA code1
+    LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
+    LDA v_sylo,X : STA cy0 : LDA v_syhi,X : STA cy0+1
+    LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
+    LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
 .crossing
     LDA cx1 : CMP cx0 : BNE not_vertical
     LDA cx1+1 : CMP cx0+1 : BNE not_vertical
@@ -1528,7 +1768,5 @@ IF DEFINED(SPIKE)
 .counted
 ENDIF
 .draw
-    MOVW line_x0, cx0 : LDA cy0 : STA line_y0
-    MOVW line_x1, cx1 : LDA cy1 : STA line_y1
-    JMP line_plot
+    JMP line_plot                       ; (its ends are cx0, cy0, cx1, cy1)
 }

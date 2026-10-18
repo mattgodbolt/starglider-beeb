@@ -31,6 +31,9 @@ SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
 .draw_bank  SKIP 1          ; the screen drawn into: 0 main RAM's, ACCCON_X shadow's
 .log_base   SKIP 2          ; where render logs its lines (in BANK_LOG)
 .fields     SKIP 1          ; fields shown, counted by the interrupt (engine.6502)
+    \ the renderer's: the last object's stamp on its edges and vertices,
+    \ which lasts from frame to frame as the marks do
+.stamp      SKIP 1
 ENDSECTION
 
 \ The pool stops short of &FC, where the MOS's IRQ entry keeps A.
@@ -54,7 +57,10 @@ ang_p = ang
 ang_h = ang + 2
 ang_r = ang + 4
 ZA_AUTO1 slot, otype
-ZA_AUTO2 tx, ty, tz         ; the object's camera-space position
+ZA_AUTO 6, tpos             ; the object's camera-space position, x y z words
+tx = tpos
+ty = tpos + 2
+tz = tpos + 4
 \ the shape's header, as it lies: HDR_BYTES, then HDR_WORDS pointers
 HDR_BYTES = 10
 HDR_WORDS = 12
@@ -90,17 +96,43 @@ cx0 = clip_pts
 cy0 = clip_pts + 2
 cx1 = clip_pts + 4
 cy1 = clip_pts + 6
-ZA_AUTO2 px, pz, pq         ; project's operands
+\ project's operands, px and pz, are two of the vertex transform's sums
+\ (xform.6502), x', y' and z' in turn
+ZA_AUTO 6, xf_sum
+px = xf_sum
+xf_y = xf_sum + 2
+pz = xf_sum + 4
+ZA_AUTO2 pq
 
-\ The line drawer (line.6502)
-ZA_AUTO2 line_x0, line_x1, line_scr
-ZA_AUTO1 line_y0, line_y1
+\ The line drawer (line.6502). Its ends are the clip's points (y's low
+\ bytes), so a line the clip accepts is already where the drawer reads it.
+line_x0 = cx0
+line_y0 = cy0
+line_x1 = cx1
+line_y1 = cy1
+ZA_AUTO2 line_scr
 ZA_AUTO1 line_dx, line_dy, line_cnt, line_ls, line_errs, line_err
 
 \ The workspace, in the OS's pages, up to the disc reader's NMI page.
 WORK = &0400
 NMI_PAGE = &0D00
 SECTION Work, org = WORK, guard = NMI_PAGE, virtual = TRUE
+    \ the vertices and marks, by vertex and edge number, first, so that no
+    \ index into one crosses a page
+.edge_mark  SKIP 256
+.vert_mark  SKIP 256
+.v_xlo      SKIP 128
+.v_xhi      SKIP 128
+.v_ylo      SKIP 128
+.v_yhi      SKIP 128
+.v_zlo      SKIP 128
+.v_zhi      SKIP 128
+.v_sxlo     SKIP 128
+.v_sxhi     SKIP 128
+.v_sylo     SKIP 128
+.v_syhi     SKIP 128
+.v_code     SKIP 128        ; the window's outcode of each vertex on the screen
+ASSERT LO(edge_mark) = 0 AND LO(v_xlo) = 0
     \ the lists' lengths (the lists: memory.6502)
 .coarse_n   SKIP 1
 .near_n     SKIP 1          ; {ST $240(a6) word8}
@@ -110,7 +142,8 @@ SECTION Work, org = WORK, guard = NMI_PAGE, virtual = TRUE
 .mat_angles SKIP 6
 .ground_valid SKIP 1        ; non-zero: mat is ground_matrix's for ground_h
 .ground_h   SKIP 2
-.stamp      SKIP 1          ; the object's stamp on its edges and vertices
+.mat_scaled SKIP 1          ; non-zero: xf_amag and xf_asign are mat's, for scaled_for
+.scaled_for SKIP 1          ; the shape's scale they're for
     \ the frame (engine.6502): the screen being drawn, 0 main RAM's or 1
     \ shadow's, whether it's ready to show, and each screen's erase list
 .draw_buffer SKIP 1
@@ -140,19 +173,6 @@ DISC_MAX = 8
     \ by shape and colour
 .anim_frame SKIP 32         ; each shape's animation frame, as its list numbers them
 .colour_map SKIP 16         ; the ST's colours to the screen's bytes (&00, &0F, &F0, &FF)
-    \ the vertices and marks, by vertex and edge number
-.edge_mark  SKIP 256
-.vert_mark  SKIP 256
-.v_xlo      SKIP 128
-.v_xhi      SKIP 128
-.v_ylo      SKIP 128
-.v_yhi      SKIP 128
-.v_zlo      SKIP 128
-.v_zhi      SKIP 128
-.v_sxlo     SKIP 128
-.v_sxhi     SKIP 128
-.v_sylo     SKIP 128
-.v_syhi     SKIP 128
 .work_end                   ; (a build's own workspace can follow)
 ENDSECTION
 

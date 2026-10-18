@@ -642,3 +642,37 @@ test already settled, a count that never gets so high).
 
 The ram's cost reads a table by level, and from level 16 on the ST reads
 past it; for now the port takes level 15's, which needs a decision.
+
+### The renderer's second round
+
+A second pass over the objects phase, with nothing a decision covers
+changed: each scene's lines, lists and exact positions are the same on
+every frame as before it. The objects phase's mean fell 8.2% in flight,
+9.8% at the towers and 6.2% docked (99,226, 163,400 and 128,303 cycles,
+measured 2026-10-18). What paid:
+
+- each vertex's outcode made once (`v_code`), so an edge is rejected
+  before its ends are copied, and one wholly inside goes straight to
+  accept; the line drawer's ends aliased to the clipper's;
+- the vertex transforms folding 4t into their start when every axis has
+  room, so the general case only shifts; a near object wholly in front of
+  the near plane takes a path with no z tests;
+- faces settled first by the products of |c|'s high bytes, with a bound
+  from the low bytes; a zero matrix entry scaled without its products;
+  the scaled matrix kept while an object's matrix and scale are the last
+  one's; `far_setup` skipping a term whose A_z is 0;
+- `sdiv32` a byte at a time (checked against the 68000's divs on 20,308
+  divisions, overflows included);
+- the workspace's vertex arrays and marks first, page-aligned, so no
+  indexed read crosses a page; `stamp` in fixed zero page, as it lasts
+  from frame to frame, and `erase_init` wiping the marks, which hold the
+  disc's catalogue and the cockpit's pages before the first frame.
+
+What didn't: skipping zero terms in the general vertex (worth a few
+hundred cycles a frame for about a hundred bytes HAZEL hasn't got);
+stopping the division early (the docked scene's quotients are nearly all
+14-15 bits); kmul shortcuts (81 of 2,160 calls in flight); placing hot
+branches off page boundaries, which the disc's layout wouldn't keep.
+Baron's zero page pool now peaks in the drawing, a few bytes short of
+the MOS's &FC.
+

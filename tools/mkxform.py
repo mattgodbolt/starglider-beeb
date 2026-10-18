@@ -10,7 +10,9 @@ code:
 
 - xform: into camera space, x' = (A k) / 1024 + t, where A is the object's
   matrix scaled to its shape (A = m x g / 256, xf_amag and xf_asign,
-  render.6502), three rows;
+  render.6502), three rows, summed into px, xf_y and pz; render.6502's
+  vertex adds t, unless the setup folded 4t into the starting values,
+  where no sum can then pass a word, and patched xform_back to say so;
 - screen: straight onto the screen, for an object far enough away that
   its perspective is linear across it (render.6502, decision 10): two rows
   of B, the first-order change in x' and y' on the screen, sc_bmag and
@@ -119,17 +121,64 @@ def signs(t, e, sign):
     emit(f"    LDA {sign}+{e} : STA {t}_m0+1 : STA {t}_m1+1 : AND #CARRY_BIT : ORA #CLC_OP : STA {t}_c0")
 
 
-def setup_skipping(name, prefix, rows, mag, sign, start):
+def fold(name, start, pos, back, folded):
+    """The end of name_setup: the object's position pos (three words) into
+    the starting values, in quarters, where no sum can then pass a word,
+    and name_back patched to say which."""
+    emit(f"""    \\ The object's position into the starting values, in quarters, where
+    \\ no sum can then pass a word: when on every axis |t| + the radius +
+    \\ FOLD_SLACK <= FOLD_MAX. A vertex is within the radius of the centre
+    \\ (mkshapes.py), and the sums are within FOLD_SLACK of the exact
+    \\ rotation's. Then they need only the shift ({name}_back to {folded}),
+    \\ and otherwise t added ({back}). |t| < 256 (h + 1), h its high byte
+    \\ if it's positive and that EORed with &FF if not, so h <
+    \\ HI(FOLD_MAX - FOLD_SLACK - the radius) will do.
+    LDA #LO(FOLD_MAX - FOLD_SLACK) : SEC : SBC sh_radius
+    LDA #HI(FOLD_MAX - FOLD_SLACK) : SBC sh_radius+1 : BMI unfolded
+    STA lim
+    LDX #4
+.fits
+    LDA {pos}+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    BPL positive
+    EOR #&FF
+.positive
+    CMP lim : BCS unfolded
+    DEX : DEX : BPL fits
+    LDX #4
+.into
+    \\ the start += 4 t
+    LDA {pos},X : ZA_INDEXEDBY {{0, 2, 4}}
+    ASL A : STA sum
+    LDA {pos}+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    ROL A : ASL sum : ROL A : TAY
+    LDA sum : CLC : ADC {start},X : ZA_INDEXEDBY {{0, 2, 4}}
+    STA {start},X : ZA_INDEXEDBY {{0, 2, 4}}
+    TYA : ADC {start}+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    STA {start}+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    DEX : DEX : BPL into
+    LDA #LO({folded}) : STA {name}_back+1
+    LDA #HI({folded}) : STA {name}_back+2
+    RTS
+.unfolded
+    LDA #LO({back}) : STA {name}_back+1
+    LDA #HI({back}) : STA {name}_back+2
+    RTS""")
+
+
+def setup_skipping(name, prefix, rows, mag, sign, start, folding=None):
     """name_setup for name_vertex with each term's skip: a term whose
     magnitude is zero adds nothing, and is skipped (and if it's the first
-    of its row, the row's starting value is copied instead)."""
+    of its row, the row's starting value is copied instead). With folding,
+    fold's arguments, it ends by folding the position in."""
     n = 3 * rows
     emit(f"""\\ {name}_setup: specialise {name}_vertex to the object's {mag} and
-\\ {sign} (by term: {rows} rows of x, y, z), skipping the terms that are zero.
+\\ {sign} (by term: {rows} rows of x, y, z), skipping the terms that are zero{", and fold the object's position in" if folding else ""}.
 .{name}_setup
-{{
-    ZA_AUTO 3, sum
-    ZA_AUTO1 ones                       ; the ones the row's terms add, negated""")
+{{""")
+    emit("    ZA_AUTO 3, sum")
+    emit("    ZA_AUTO1 ones                       ; the ones the row's terms add, negated")
+    if folding:
+        emit("    ZA_AUTO1 lim")
     sums_loop(rows, mag, sign, start, None, True)
     for e in range(n):
         t = f"{prefix}{e}"
@@ -147,7 +196,10 @@ def setup_skipping(name, prefix, rows, mag, sign, start):
         if j == 0:
             emit(f"    LDA #LDA_IMM : STA {prefix}row{i}_k")
         emit(f".done{e}")
-    emit("    RTS")
+    if folding:
+        fold(name, start, *folding)
+    else:
+        emit("    RTS")
     emit("}")
     emit()
 
@@ -196,8 +248,17 @@ def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
     emit()
 
 
-def vertex(name, prefix, rows, acc, start, back, skipping=False):
-    emit(f"\\ {name}_vertex: {acc} = the matrix by (xf_u - 128), / 256. A term is the")
+def row_sum(acc, i):
+    """Row i's sum: acc, a word a row, or a name for each row."""
+    return acc[i] if isinstance(acc, (list, tuple)) else f"{acc}+{2 * i}"
+
+
+def vertex(name, prefix, rows, acc, start, back, skipping=False, backs=None, whole=None):
+    """With backs, the jump back is patched (name_back), to back or one of
+    backs. acc names the sums: a variable of a word a row, or each row's,
+    which are then parts of the variable whole."""
+    sums_named = ", ".join(row_sum(acc, i) for i in range(rows))
+    emit(f"\\ {name}_vertex: {sums_named} = the matrix by (xf_u - 128), / 256. A term is the")
     emit("\\ high byte by u (X:xf_plo) and the low byte by u, its high byte, added in")
     if skipping:
         emit("\\ A with the carry the SBC leaves, one (the setup takes them off the")
@@ -206,26 +267,31 @@ def vertex(name, prefix, rows, acc, start, back, skipping=False):
         emit("\\ the first of its row, the row's starting value copied (the row's _k).")
     else:
         emit("\\ A; the first column's terms add to the starting values.")
-    emit(f"\\ Its one caller jumps here, and it jumps back to {back}.")
+    if backs:
+        emit(f"\\ Its one caller jumps here, and it jumps back to {back} or {', '.join(backs)}")
+        emit(f"\\ ({name}_back, patched).")
+    else:
+        emit(f"\\ Its one caller jumps here, and it jumps back to {back}.")
     emit(f".{name}_vertex")
     if skipping:
         # Every row's first term that's done writes the row, so the sums'
         # old values are dead here, whatever skips Baron can see.
-        emit(f"    ZA_DISCARD {acc}")
+        emit(f"    ZA_DISCARD {acc if isinstance(acc, str) else whole}")
         for i in range(rows):
             r = f"{prefix}row{i}"
+            a = row_sum(acc, i)
             emit(f".{r}_k")
             emit(f"    BRA {r}_go                            ; patched: BRA, or LDA # to copy")
             emit(f"    ZA_CANJUMP {r}_go, {r}_copy")
             emit(f".{r}_copy")
-            emit(f"    LDA {start}+{2 * i} : STA {acc}+{2 * i} : LDA {start}+{2 * i + 1} : STA {acc}+{2 * i + 1}")
+            emit(f"    LDA {start}+{2 * i} : STA {a} : LDA {start}+{2 * i + 1} : STA {a}+1")
             emit(f".{r}_go")
     for j in range(3):
         emit(f"    LDY xf_u+{j}")
         for i in range(rows):
             e = 3 * i + j
             t = f"{prefix}{e}"
-            a = f"{acc}+{2 * i}"
+            a = row_sum(acc, i)
             src = f"{start}+{2 * i}" if j == 0 else a
             emit(f"    \\ term {e}: row {i} on {'xyz'[j]}")
             if skipping:
@@ -261,7 +327,12 @@ def vertex(name, prefix, rows, acc, start, back, skipping=False):
             emit(f"    ADC {src}+1 : STA {a}+1")
             if skipping:
                 emit(f".{t}_end")
-    emit(f"    JMP {back}")
+    if backs:
+        emit(f".{name}_back")
+        emit(f"    JMP {back}                            ; patched")
+        emit(f"    ZA_CANJUMP {', '.join([back] + backs)}")
+    else:
+        emit(f"    JMP {back}")
     emit()
 
 
@@ -309,9 +380,16 @@ def sums(rows, acc, start, what):
     emit()
 
 
-sums(3, "xf_acc", "xf_start", "x', y', z' in world units")
-setup_skipping("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start")
-vertex("xform", "xf", 3, "xf_acc", "xf_start", "vertex.back", skipping=True)
+# The xform's sums are x', y' and z' in quarters of a world unit: px, xf_y
+# and pz (zp.6502), which vertex shifts in place into world units.
+emit("ZA_AUTO 6, xf_start           ; the sums' starting values")
+emit()
+emit("FOLD_MAX = &7FFF DIV 4             ; (fold's)")
+emit("FOLD_SLACK = 16")
+setup_skipping("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start",
+               folding=("tpos", "vertex.back", "vertex.folded"))
+vertex("xform", "xf", 3, ["px", "xf_y", "pz"], "xf_start", "vertex.back", skipping=True,
+       backs=["vertex.folded", "vertex.in_front"], whole="xf_sum")
 sums(2, "sc_acc", "sc_start", "the screen's x and y")
 setup_choosing("screen", "sc", "s8", 2, "sc_bmag", "sc_bsign", "sc_start", ["sc_x0q", "sc_y0q"],
                "vertex_far.screen")
