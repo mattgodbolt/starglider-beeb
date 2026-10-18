@@ -16,14 +16,32 @@
 
 \ ---------------------------------------------------------------------------
 \ camera (&050A2, &04258): the matrix from the player's angles, the roll
-\ negated.
+\ negated. Most steps have the last one's angles (the player isn't
+\ turning), and then everything made from them is too: the rotations'
+\ patched code stands as it is, and the matrix and ground_matrix's
+\ constants, which zero page doesn't keep from one step to the next, come
+\ back from the copies kept below.
 .camera
+{
     MOVW ang_p, pl_pitch
     MOVW ang_h, pl_heading
     LDA #0 : SEC : SBC pl_roll : STA ang_r
     LDA #0 : SBC pl_roll+1 : STA ang_r+1
-    STZ mat_valid                       ; a full build: its sines are wanted below
-    JSR build_matrix                    ; (which invalidates ground_matrix's mat)
+    STZ mat_valid                       ; mat holds no object's, nor (as the
+    STZ ground_valid                    ; build would leave it) ground_matrix's
+    LDA cam_valid : BEQ build
+FOR i = 0..5
+    LDA ang+i : CMP cam_angles+i : BNE build
+NEXT
+    JMP same
+.build
+    LDX #5
+.angles
+    LDA ang,X : ZA_INDEXEDBY 0..5
+    STA cam_angles,X
+    DEX : BPL angles
+    LDA #&FF : STA cam_valid
+    JSR build_matrix                    ; a full build: its sines are wanted below
     \ The ground objects' constants (ground_matrix): their pitch and roll
     \ are the camera's.
     FMUL build_matrix.m_s1, build_matrix.m_c3
@@ -38,6 +56,7 @@
     LDA kconst+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
     STA kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
     AND #&80 : STA ksign,Y : ZA_INDEXEDBY 0..4
+    STA ksign_kept,Y
     LDA kconst,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
     STA kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
     LDA ksign,Y : ZA_INDEXEDBY 0..4
@@ -47,24 +66,50 @@
     LDA #0 : SBC kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
     STA kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
 .kconst_pos
+    LDA kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kmag_kept,X
+    LDA kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kmag_kept+1,X
     DEX : DEX : BPL kconst_mag
     LDX #17
     ZA_DISCARD cam
 .camera_copy
     LDA mat,X : ZA_INDEXEDBY 0..17
     STA cam,X : ZA_INDEXEDBY 0..17
+    STA cam_kept,X
     DEX : BPL camera_copy
     STZ mat_valid                       ; mat no longer holds an object's
     JMP rotate_setup
+.same
+FOR i = 0..17
+    LDA cam_kept+i : STA cam+i
+NEXT
+FOR i = 0..9
+    LDA kmag_kept+i : STA kmag+i
+NEXT
+FOR i = 0..4
+    LDA ksign_kept+i : STA ksign+i
+NEXT
+    RTS
+}
+\ the angles the camera was last built for (once cam_valid is set), and
+\ what was made from them that zero page doesn't keep
+.cam_valid  EQUB 0
+.cam_angles SKIP 6
+.cam_kept   SKIP 18
+.kmag_kept  SKIP 10
+.ksign_kept SKIP 5
 
 \ ---------------------------------------------------------------------------
 \ coarse_list (&05750): every object within &2020 of the player in z, or
 \ further behind and within &2020 in x (the test as the ST has it, which
 \ keeps the whole band in z). Docked, the tunnel and the silo's missile.
-\ Each slot's list flags are cleared, as the ST clears them.
+\ Each slot's list flags are cleared, as the ST clears them. (In a page of
+\ its own: no branch of its loop crosses a page.)
+ALIGN &100
 .coarse_list
 {
-    ZA_AUTO1 dx, dz             ; their low bytes
+    ZA_AUTO1 pz_hi, px_hi       ; the player's high bytes, less &20
     STZ coarse_n
     LDA docked : BEQ open
     LDA #SLOT_TUNNEL : STA coarse_slots
@@ -75,164 +120,208 @@
 .done
     RTS
 .open
+    LDX n_slots : BEQ done
+    \ Each offset is read plus &2000, from the player's position less
+    \ &2000: the high byte is then below &40 for -&2000 to &1FFF, and the
+    \ low byte, the same, decides the edges.
+    LDA pl_z+1 : SEC : SBC #&20 : STA pz_hi
+    LDA pl_x+1 : SEC : SBC #&20 : STA px_hi
     LDX #0
+    LDY #0                      ; the list's length
 .slot
     STZ ob_drawn,X : STZ ob_near,X
     LDA ob_type,X : BEQ next
-    \ dz = z - the player's, within (-&2020, &2020]: the high byte
-    \ decides all but its two edges
-    LDA ob_z_lo,X : SEC : SBC pl_z : STA dz
-    LDA ob_z_hi,X : SBC pl_z+1
-    CMP #&20 : BCC keep                 ; 0 to &1FFF
-    BEQ z_top
-    CMP #&80 : BCC next                 ; more than &2020 ahead
-    CMP #&DF : BCC behind
-    BNE keep                            ; -&2000 to -1
-    LDA dz : CMP #&E1 : BCS keep        ; -&201F up
-    BRA behind
-.z_top
-    LDA dz : CMP #&21 : BCC keep        ; up to &2020
-    BRA next
+    \ dz = z - the player's, within (-&2020, &2020]
+    LDA ob_z_lo,X : CMP pl_z
+    LDA ob_z_hi,X : SBC pz_hi
+    CMP #&40 : BCS z_out                ; outside -&2000 to &1FFF
+.keep
+    TXA : STA coarse_slots,Y
+    INY
+.next
+    INX : CPX n_slots : BNE slot
+    STY coarse_n
+    RTS
+.z_out
+    BEQ z_top                           ; &2000 to &20FF
+    CMP #&A0 : BCC next                 ; &2100 to &7FFF: ahead
+    CMP #&FF : BNE behind               ; -&8000 to -&2101
+    LDA ob_z_lo,X : SEC : SBC pl_z      ; -&2100 to -&2001: -&201F up kept
+    CMP #&E1 : BCS keep
 .behind
     \ further behind: kept if within &2020 in x, [-&2020, &2020]
-    LDA ob_x_lo,X : SEC : SBC pl_x : STA dx
-    LDA ob_x_hi,X : SBC pl_x+1
-    CMP #&20 : BCC keep
+    LDA ob_x_lo,X : CMP pl_x
+    LDA ob_x_hi,X : SBC px_hi
+    CMP #&40 : BCC keep
     BEQ x_top
-    CMP #&DF : BCC next
-    BNE keep
-    LDA dx : CMP #&E0 : BCS keep
+    CMP #&FF : BNE next
+    LDA ob_x_lo,X : SEC : SBC pl_x : CMP #&E0 : BCS keep
+    BRA next
+.z_top
+    LDA ob_z_lo,X : SEC : SBC pl_z : CMP #&21 : BCC keep     ; up to &2020
     BRA next
 .x_top
-    LDA dx : CMP #&21 : BCS next
-.keep
-    TXA : LDY coarse_n : STA coarse_slots,Y
-    INC coarse_n
-.next
-    INX : CPX n_slots : BEQ done2
-    JMP slot
-.done2
-    RTS
+    LDA ob_x_lo,X : SEC : SBC pl_x : CMP #&21 : BCC keep
+    BRA next
 }
 
+
 \ ---------------------------------------------------------------------------
+\ WITHIN c, h, out: on to out unless -h <= c <= h, for a signed word c and
+\ a word h (or the constant #h) from 0 to 32767, where neither c + h (c
+\ negative) nor h - c (c not) can overflow.
+MACRO WITHIN c, h, out
+    LDA c+1 : BPL pos
+    LDA c : CLC : ADC h : LDA c+1 : ADC h+1 : BMI out
+    BRA in
+.pos
+    LDA h : SEC : SBC c : LDA h+1 : SBC c+1 : BMI out
+.in
+ENDMACRO
+MACRO WITHIN c, "#" h, out
+    LDA c+1 : BPL pos
+    LDA c : CLC : ADC #LO(h) : LDA c+1 : ADC #HI(h) : BMI out
+    BRA in
+.pos
+    LDA #LO(h) : SEC : SBC c : LDA #HI(h) : SBC c+1 : BMI out
+.in
+ENDMACRO
+
+\ RELEVANT yes (decision 11): on to yes if an object at rot_acc, rotated
+\ approximately (within ROT_SLACK), could be drawn or meet the player:
+\ in front, short of &2000 and within the view's pyramid, or within
+\ NEAR_BOX on every axis (the largest collision box is 2000). Only those
+\ need the exact rotation: nothing else the game decides reads the rest.
+\ (rotate_lists' z2 and t16 are its workings.)
+ROT_SLACK = 512
+NEAR_BOX = 2000 + ROT_SLACK
+MACRO RELEVANT yes
+    LDA rot_acc+5 : BPL ahead
+    \ behind the player: below -3 slack / 2 the pyramid is empty, and only
+    \ NEAR_BOX can catch it; above, so it is if it's wholly behind the view,
+    \ z <= -(size + slack)
+    CMP #HI(-3 * ROT_SLACK / 2) : BCS just_behind
+    ASSERT LO(-3 * ROT_SLACK / 2) = 0 AND -3 * ROT_SLACK / 2 > -NEAR_BOX
+    JMP near_test
+.just_behind
+    LDX slot : LDY ob_type,X
+    LDA rot_acc+4 : CLC : ADC size_z_lo,Y : STA t16
+    LDA rot_acc+5 : ADC size_z_hi,Y : STA t16+1
+    CMPS16 t16, #1 - ROT_SLACK : BPL pyramid
+    BRA near_test
+.not
+    JMP no
+.ahead
+    \ ahead of &2000 (with the slack), it's neither drawn nor near
+    CMP #HI(&2000 + ROT_SLACK) : BCC pyramid
+    BNE not
+    LDA rot_acc+4 : BNE not
+    ASSERT LO(&2000 + ROT_SLACK) = 0
+.pyramid
+    \ in the view's pyramid, with the slack: |x|, |y| <= 2z + 3 slack,
+    \ which is no pyramid if that's negative
+    LDA rot_acc+4 : ASL A : STA z2 : LDA rot_acc+5 : ROL A : STA z2+1
+    LDA z2 : CLC : ADC #LO(3 * ROT_SLACK) : STA z2
+    LDA z2+1 : ADC #HI(3 * ROT_SLACK) : STA z2+1
+    BMI near_test
+    WITHIN rot_acc, z2, near_test
+    WITHIN rot_acc+2, z2, near_test
+    JMP yes
+.near_test
+    \ within NEAR_BOX on every axis? (z first: most behind are far behind)
+    WITHIN rot_acc+4, #NEAR_BOX, no
+    WITHIN rot_acc, #NEAR_BOX, no
+    WITHIN rot_acc+2, #NEAR_BOX, no
+    JMP yes
+.no
+ENDMACRO
+
 \ rotate_lists (&057B8): the coarse list read from its top, each object
 \ rotated into camera space (&04092) and stored; the near list (all but
 \ the exploding) and the draw list (in front, within the view's pyramid),
 \ pushed in that order.
 .rotate_lists
 {
-    ZA_AUTO1 list_i
-    ZA_AUTO2 z2, nz2, t16
-    STZ near_n : STZ draw_n
+    ZA_AUTO1 list_i, as_is, nears, draws
+    ZA_AUTO2 z2, t16
+    STZ nears : STZ draws
+    LDA rot_identity : STA as_is
     LDX coarse_n : BNE each
+    STZ near_n : STZ draw_n
     RTS
 .each
     DEX : STX list_i
     LDA coarse_slots,X : STA slot : TAX
-    LDA ob_type,X : STA otype : BNE live
+    LDA ob_type,X : BNE live
     JMP next
+.unrotated
+    \ the identity: camera space is the offset itself
+    LDA ob_x_lo,X : SEC : SBC pl_x : STA rot_acc : STA ob_cx_lo,X
+    LDA ob_x_hi,X : SBC pl_x+1 : STA rot_acc+1 : STA ob_cx_hi,X
+    LDA ob_y_lo,X : SEC : SBC pl_y : STA rot_acc+2 : STA ob_cy_lo,X
+    LDA ob_y_hi,X : SBC pl_y+1 : STA rot_acc+3 : STA ob_cy_hi,X
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA rot_acc+4 : STA ob_cz_lo,X
+    LDA ob_z_hi,X : SBC pl_z+1 : STA rot_acc+5 : STA ob_cz_hi,X
+    LDA #1 : STA ob_exact,X
+    JMP stored
 .live
+    BIT as_is : BMI unrotated
     LDA ob_x_lo,X : SEC : SBC pl_x : STA rot_d
     LDA ob_x_hi,X : SBC pl_x+1 : STA rot_d+1
     LDA ob_y_lo,X : SEC : SBC pl_y : STA rot_d+2
     LDA ob_y_hi,X : SBC pl_y+1 : STA rot_d+3
     LDA ob_z_lo,X : SEC : SBC pl_z : STA rot_d+4
     LDA ob_z_hi,X : SBC pl_z+1 : STA rot_d+5
-    JSR rotate_abs
     JSR rotate_approx
-    JSR relevant : BCS exactly
-    \ Approximately: kept for the scanner, never drawn (decision 11).
-    LDX slot : STZ ob_exact,X
-    JSR store_rel
-    JMP next
+    BIT rot_exactly : BMI exact             ; the matrix has no products
+    JMP relevance
 .exactly
     JSR rotate_exact
-    LDX slot : LDA #1 : STA ob_exact,X
-    JSR store_rel
-    CMPS16 rot_acc+4, #&2001 : BMI ahead    ; more than &2000 away: not drawn
-    JMP next
+.exact
+    LDX slot
+    LDA #1 : STA ob_exact,X
+.store
+    \ the camera-space position, and the near list unless it's exploding
+    LDA rot_acc : STA ob_cx_lo,X : LDA rot_acc+1 : STA ob_cx_hi,X
+    LDA rot_acc+2 : STA ob_cy_lo,X : LDA rot_acc+3 : STA ob_cy_hi,X
+    LDA rot_acc+4 : STA ob_cz_lo,X : LDA rot_acc+5 : STA ob_cz_hi,X
+.stored
+    LDA ob_exploding,X : BNE far_off
+    LDA #&FF : STA ob_near,X
+    TXA : LDY nears : STA near_slots,Y
+    INC nears
+.far_off
+    LDA ob_exact,X : BEQ next
+    \ The draw list: z up to &2000, not wholly behind (z > -size) and
+    \ |x|, |y| <= 2z. A negative z leaves nothing between -2z and 2z, and
+    \ no size is negative, so only z = 0 needs the size.
+    LDA rot_acc+5 : BMI next
+    CMP #HI(&2000) : BCC ahead
+    BNE next
+    LDA rot_acc+4 : BNE next
 .ahead
-    LDX otype
-    LDA #0 : SEC : SBC size_z_lo,X : STA t16
-    LDA #0 : SBC size_z_hi,X : STA t16+1
-    CMPS16 t16, rot_acc+4 : BPL next        ; wholly behind: z <= -size
-    LDA rot_acc+4 : ASL A : STA z2 : LDA rot_acc+5 : ROL A : STA z2+1
-    LDA #0 : SEC : SBC z2 : STA nz2 : LDA #0 : SBC z2+1 : STA nz2+1
-    CMPS16 rot_acc, nz2 : BMI next
-    CMPS16 z2, rot_acc : BMI next
-    CMPS16 rot_acc+2, nz2 : BMI next
-    CMPS16 z2, rot_acc+2 : BMI next
-    LDX slot : LDA #&FF : STA ob_drawn,X
-    TXA : LDY draw_n : STA draw_slots,Y
-    INC draw_n
+    LDA rot_acc+4 : ASL A : STA z2
+    LDA rot_acc+5 : ROL A : STA z2+1
+    ORA z2 : BNE in_front
+    LDY ob_type,X
+    LDA size_z_lo,Y : ORA size_z_hi,Y : BEQ next
+.in_front
+    WITHIN rot_acc, z2, next
+    WITHIN rot_acc+2, z2, next
+    LDA #&FF : STA ob_drawn,X
+    TXA : LDY draws : STA draw_slots,Y
+    INC draws
 .next
     LDX list_i : BEQ done
     JMP each
 .done
+    LDA nears : STA near_n
+    LDA draws : STA draw_n
     RTS
-\ store_rel: rot_acc into slot X's camera-space position, and the
-\ object onto the near list unless it's exploding.
-.store_rel
-    LDA rot_acc : STA ob_cx_lo,X : LDA rot_acc+1 : STA ob_cx_hi,X
-    LDA rot_acc+2 : STA ob_cy_lo,X : LDA rot_acc+3 : STA ob_cy_hi,X
-    LDA rot_acc+4 : STA ob_cz_lo,X : LDA rot_acc+5 : STA ob_cz_hi,X
-    LDA ob_exploding,X : BNE far_off
-    LDA #&FF : STA ob_near,X
-    TXA : LDY near_n : STA near_slots,Y
-    INC near_n
-.far_off
-    RTS
+.relevance
+    RELEVANT exactly
+    \ Approximately: kept for the scanner, never drawn (decision 11).
+    LDX slot
+    STZ ob_exact,X
+    JMP store
 }
-
-\ relevant (decision 11): C set if an object at rot_acc, rotated
-\ approximately (within ROT_SLACK), could be drawn or meet the player:
-\ in front, short of &2000 and within the view's pyramid, or within
-\ NEAR_BOX on every axis (the largest collision box is 2000). Only those
-\ need the exact rotation: nothing else the game decides reads the rest.
-ROT_SLACK = 512
-NEAR_BOX = 2000 + ROT_SLACK
-.relevant
-{
-    ZA_AUTO2 z2, nz2, size, mag
-    \ ahead of &2000 (with the slack), it's neither drawn nor near
-    CMPS16 rot_acc+4, #&2001 + ROT_SLACK : BMI not_far
-.no
-    CLC : RTS
-.not_far
-    LDX otype
-    LDA #0 : SEC : SBC size_z_lo,X : STA size : LDA #0 : SBC size_z_hi,X : STA size+1
-    LDA size : SEC : SBC #LO(ROT_SLACK) : STA size : LDA size+1 : SBC #HI(ROT_SLACK) : STA size+1
-    CMPS16 size, rot_acc+4 : BPL behind     ; z <= -(size + slack): not drawn
-    \ in the view's pyramid, with the slack?
-    LDA rot_acc+4 : ASL A : STA z2 : LDA rot_acc+5 : ROL A : STA z2+1
-    LDA z2 : CLC : ADC #LO(3 * ROT_SLACK) : STA z2 : LDA z2+1 : ADC #HI(3 * ROT_SLACK) : STA z2+1
-    LDA #0 : SEC : SBC z2 : STA nz2 : LDA #0 : SBC z2+1 : STA nz2+1
-    CMPS16 rot_acc, nz2 : BMI near_test
-    CMPS16 z2, rot_acc : BMI near_test
-    CMPS16 rot_acc+2, nz2 : BMI near_test
-    CMPS16 z2, rot_acc+2 : BMI near_test
-    SEC : RTS
-.behind
-    CMPS16 rot_acc+4, #-NEAR_BOX : BMI none
-.near_test
-    \ within NEAR_BOX on every axis?
-    LDX #4
-.axis
-    LDA rot_acc+1,X : ZA_INDEXEDBY {0, 2, 4}
-    BPL pos
-    LDA #0 : SEC : SBC rot_acc,X : ZA_INDEXEDBY {0, 2, 4}
-    STA mag : LDA #0 : SBC rot_acc+1,X : ZA_INDEXEDBY {0, 2, 4}
-    STA mag+1
-    BRA got
-.pos
-    STA mag+1 : LDA rot_acc,X : ZA_INDEXEDBY {0, 2, 4}
-    STA mag
-.got
-    CMPS16 mag, #NEAR_BOX + 1 : BPL none
-    DEX : DEX : BPL axis
-    SEC : RTS
-.none
-    CLC : RTS
-}
-

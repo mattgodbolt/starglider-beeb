@@ -36,6 +36,7 @@ IF P% < ANDY_TOP
     SKIP ANDY_TOP - P%
 ENDIF
 INCLUDE "sine.6502"
+ASSERT sine_qlo >= ANDY_TOP AND sincos >= ANDY_TOP  ; the logic reads them with ANDY paged
 INCLUDE "logic/animate.6502"
 IF DEFINED(SPIKE)                   ; (on the disc with the flight layer)
 INCLUDE "logic/flight.6502"
