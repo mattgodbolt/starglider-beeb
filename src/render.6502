@@ -959,14 +959,22 @@ ASSERT NEAR_Z > 0 AND NEAR_Z < 256
     LDA #HI(NEAR_Z) : SBC ep+5 : STA mul_p+3
     LDA eq+4 : SEC : SBC ep+4 : STA div_d
     LDA eq+5 : SBC ep+5 : STA div_d+1
+    \ When both are positive (all but where a depth is too far off for a
+    \ word), divs overflows just when 2 (2 - z) >= dz: a fraction of 0,
+    \ which leaves x and y as they are, so neither divs nor muls is needed.
+    \ An overflow is a fraction of 0 too.
+    ORA mul_p+3 : BMI divide
+    LDA mul_p+2 : ASL A : TAX
+    LDA mul_p+3 : ROL A : TAY
+    TXA : CMP div_d : TYA : SBC div_d+1 : BCS cut
+.divide
     JSR sdiv32
-    BCC fits
-    STZ div_q : STZ div_q+1
-.fits
+    BCS cut
     LDX #0
     JSR cut_axis
     LDX #2
     JSR cut_axis
+.cut
     LDA #LO(NEAR_Z) : STA ep+4 : LDA #HI(NEAR_Z) : STA ep+5
     BRA again
 .cut_axis
