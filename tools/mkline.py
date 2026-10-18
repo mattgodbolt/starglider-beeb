@@ -247,7 +247,7 @@ emit("""    LDY #7 : BRA tv_m
     ZA_CANJUMP sr_row, sr_row_erase
 .sr_row
     TXA : LSR A : AND #3 : TAX              ; the first pixel's position, C = 0
-    ADC line_dx : STA line_err              ; the last's from the first byte's left, C its bit 8
+    ADC line_dx : STA line_err              ; the last pixel, from the first byte's left; C its bit 8
     ROR A : LSR A : STA line_cnt            ; the bytes after the first
     LDA line_rf,X : AND set_colour+1        ; the first byte: pixels p..3
     LDX line_cnt : BEQ sr_one
