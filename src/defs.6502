@@ -40,6 +40,7 @@ BANK_SHAPES  = 4
 BANK_WORLD   = 5                    ; the list phase, the sine table and the logic that reads it
 BANK_LOGIC   = 6                    ; the rest of the logic
 BANK_LOG     = 7                    ; the spike's line log
+BANK_PIC     = 7                    ; the loading area (docs/plan.md, section 3): the missile view's window
 
 \ --- Objects --------------------------------------------------------------
 \ The ST's 140 slots, then the silo's tunnel (the ST's &1218) and its

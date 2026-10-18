@@ -10,14 +10,22 @@
 //
 // - the gunsight and the ground dots: from `top`, spike_under runs
 //   world_lists (whose ground_dots tells the drawing which dots it kept in
-//   view) and draws them into main RAM's screen, which is read back. The
-//   sight's pixels must be the ST's bitmap (STAR.PRG's D_0732A) at the
-//   sight; the dots' must be where the ST's &047AA plots them, run here on
-//   the captured state (top's dots, the camera matrix at `lists`, the
-//   68000's arithmetic), within a pixel. A dot this model finds in view
-//   must be where it was at `lists` and one it finds outside must have
-//   moved (been put back ahead), which checks the model itself. Then the
-//   frame is erased from its erase list, and the screen must be empty.
+//   view) and draws them onto the cockpit in main RAM's screen, which is
+//   read back. The sight's pixels must be the ST's bitmap (STAR.PRG's
+//   D_0732A) at the sight; the dots' must be where the ST's &047AA plots
+//   them, run here on the captured state (top's dots, the camera matrix at
+//   `lists`, the 68000's arithmetic), within a pixel. A dot this model
+//   finds in view must be where it was at `lists` and one it finds outside
+//   must have moved (been put back ahead), which checks the model itself.
+//   Then the frame is erased from its erase list, and the cockpit must be
+//   all that's left.
+// - in the missile view (whose frames have no `lists`: `render` stands in)
+//   the window: the whole screen must be the cockpit with the picture's
+//   window rows slid by m_iris, cleared below, and the bar on it when it's
+//   open (&06B7E, L_052EC: tools/mkcockpit.py's picture); and again, the
+//   same, once erased and put back as an open window is. The dots over it
+//   are checked where they change the picture. A frame after the missile
+//   view, drawn over the open window, must clear it.
 // - the bolt: from `lists`, world_after, then spike_over: the bolt's lines
 //   (slot VIEW_BOLT in the line log) must be the ST's (&087FA) for the
 //   state at `render`, cut to the window by &0A170's arithmetic.
@@ -346,6 +354,11 @@ load("CODE2", where(need("CODE2")));
 load("SHAPES", bank(need("BANK_SHAPES")));
 load("WORLD", bank(need("BANK_WORLD")));
 load("LOGIC", bank(need("BANK_LOGIC")));
+load("WINDOW", bank(need("BANK_PIC")) + need("WIN_PIC") - 0x8000);
+// the cockpit's screen (its window empty), and the picture's window rows
+// as the screen holds them (tools/mkcockpit.py's --window)
+const cockpit = fs.readFileSync("build/gen/cockpit.bin");
+const winRaw = fs.readFileSync("build/gen/window.raw");
 
 const STUB = 0x0140;
 const STUB_DONE = STUB + 6;
@@ -452,21 +465,54 @@ for (let c = 0; c < 16; c++) ram[colourMap + c] = c === 2 ? 0x0f : c === 15 ? 0x
 const SCREEN = need("SCREEN");
 const clearScreen = () => ram.fill(0, SCREEN, 0x8000);
 // the logical colour's bit (1 or 2) at each pixel of the screen that has it
+// (in the view, rows 10 to 128 and x 16 to 303, where its drawing is)
+const at = (x, y) => (y >> 3) * 640 + (x >> 2) * 8 + (y & 7);
 function screenPixels(bit) {
     const out = new Set();
-    for (let y = 0; y < 200; y++)
-        for (let x = 0; x < 320; x++) {
-            const b = ram[SCREEN + (y >> 3) * 640 + (x >> 2) * 8 + (y & 7)];
+    for (let y = VIEW.ymin; y <= VIEW.ymax; y++)
+        for (let x = VIEW.xmin; x <= VIEW.xmax; x++) {
+            const b = ram[SCREEN + at(x, y)];
             const p = x & 3;
             const c = (((b >> (7 - p)) & 1) << 1) | ((b >> (3 - p)) & 1);
             if (c & bit) out.add(`${x},${y}`);
         }
     return out;
 }
-const screenEmpty = () => {
-    for (let a = SCREEN; a < 0x8000; a++) if (ram[a]) return false;
-    return true;
+// The screen as the ST's &06B7E leaves it in the missile view: the
+// cockpit's, its window's rows 10 to 130 the picture's from 10 + m_iris on,
+// cleared below 130 - m_iris; and when it's open, the bar's blocks ORed on
+// (L_052EC: 17 - ((life - &F) asr 4 & &F) of them, 4 by 4, from x 209,
+// each 6 left of the last and 2 more before the 9th and the 10th, in the
+// ST's colour 7).
+const PIX = [0x88, 0x44, 0x22, 0x11];
+function stWindow(iris, life) {
+    const s = Buffer.from(cockpit);
+    for (let y = 10; y <= 130; y++)
+        for (let x = VIEW.xmin; x <= VIEW.xmax; x += 4) {
+            const r = y + iris;
+            const cell = (x - VIEW.xmin) >> 2;
+            s[at(x, y)] = r <= 130 ? winRaw[((r >> 3) - 1) * 576 + cell * 8 + (r & 7)] : 0;
+        }
+    if (iris === 0) {
+        const blocks = 17 - ((w16(life - 0xf) >> 4) & 0xf);
+        let x = 0xd3;
+        for (let b = 0; b < blocks; b++) {
+            for (let px = x - 2; px <= x + 1; px++)
+                for (let y = 0x76; y < 0x76 + 4; y++) s[at(px, y)] |= PIX[px & 3] & ram[colourMap + 7];
+            x -= 6;
+            if (b + 1 === 8 || b + 1 === 9) x -= 2;
+        }
+    }
+    return s;
+}
+const windowBad = (iris, life) => {
+    const want = stWindow(iris, life);
+    let bad = 0;
+    for (let a = 0; a < want.length; a++) if (ram[SCREEN + a] !== want[a]) bad++;
+    return bad;
 };
+// the screen with the open window on it, as the missile view leaves it
+const cockpitPic = stWindow(0, 0x10f);
 // the line log's entries since spike_over cleared it
 function loggedLines(slot) {
     const n = ram[need("log_n")] | (ram[need("log_n") + 1] << 8);
@@ -499,8 +545,8 @@ const BOLT = need("VIEW_BOLT"),
 // spike_under's drawing, timed from its start to its end, and the dots
 // from theirs
 const marksUnder = [need("spike_under_draw"), need("dots_draw")];
-const cyc = { under: [], dots: [], erase: [], bolt: [], shots: [] };
-const tally = { frames: 0, dotFrames: 0, stDots: 0, exact: 0, near: 0, edge: 0, missed: 0, extra: 0, model: 0, pixWant: 0, pixExact: 0, pixNear: 0, pixEdge: 0, sight: 0, sightBad: 0, erased: 0, unerased: 0, bolts: 0, boltBad: 0, boltNear: 0, shots: 0, shotBad: 0, replayBad: 0 };
+const cyc = { under: [], dots: [], erase: [], bolt: [], shots: [], window: [], windowOpen: [] };
+const tally = { frames: 0, mvFrames: 0, mvBad: 0, mvLeft: 0, dotFrames: 0, stDots: 0, exact: 0, near: 0, edge: 0, missed: 0, extra: 0, model: 0, pixWant: 0, pixExact: 0, pixNear: 0, pixEdge: 0, sight: 0, sightBad: 0, erased: 0, unerased: 0, bolts: 0, boltBad: 0, boltNear: 0, shots: 0, shotBad: 0, replayBad: 0 };
 const bad = [];
 const note = (s) => {
     if (bad.length < show * 6) bad.push(s);
@@ -515,21 +561,72 @@ for (const stepsPath of args) {
         const poked = (from, to) => order.slice(order.lastIndexOf(from) + 1, order.lastIndexOf(to)).includes("poke");
         const top = regionsAt(fr, "top"),
             lists = regionsAt(fr, "lists");
-        // -- the gunsight and the dots
-        if (top && lists && !poked("top", "lists")) {
+        // -- the gunsight and the dots, or the missile view's window (whose
+        // frames have no lists point: render's state, as world_after leaves
+        // what the drawing reads, stands in)
+        const drawn = lists ? "lists" : "render";
+        if (top && fr.points[drawn] && !poked("top", drawn)) {
             tally.frames++;
             const topMem = stMemory(steps.regions, fr.points.top);
-            const listsMem = stMemory(steps.regions, fr.points.lists);
-            putState(steps, top);
-            setD0(fr, "top");
-            callIn("world_lists", "BANK_WORLD");
-            clearScreen();
-            const t = await run(need("spike_under"), 0, marksUnder);
-            cyc.under.push(t[2] - t[0]);
-            cyc.dots.push(t[2] - t[1]);
-            // the dots
+            const listsMem = stMemory(steps.regions, fr.points[drawn]);
+            const missile = topMem.u8(A6 + 0x2c9) !== 0;
+            const under = async (fill) => {
+                putState(steps, top);
+                setD0(fr, "top");
+                callIn("world_lists", "BANK_WORLD");
+                fill();
+                return run(need("spike_under"), 0, marksUnder);
+            };
             const model = stDots(topMem, listsMem);
-            const got = screenPixels(1);
+            let got, ignore = new Set();
+            if (missile) {
+                // the window and its bar, alone (the dots in colour 0),
+                // drawn whole from the cockpit's screen, as the ST copies it
+                tally.mvFrames++;
+                ram[colourMap + 2] = 0;
+                const iris = v16(listsMem, 0x27c);
+                const life = v16(listsMem, 0x276);
+                const fresh = () => {
+                    ram.set(cockpit, SCREEN);
+                    ram[need("win_shown")] = 0xff;
+                };
+                const t = await under(fresh);
+                cyc.window.push(t[1] - t[0]);
+                const bad = windowBad(iris, life);
+                if (bad) {
+                    tally.mvBad++;
+                    note(`${name} frame ${n}: the missile view's window at m_iris ${iris}: ${bad} bytes not the ST's`);
+                }
+                const picture = screenPixels(1);
+                if (iris === 0) {
+                    // erased and drawn again, as the next frame on the
+                    // screen is: what the erase took put back
+                    await run(need("spike_erase"));
+                    const t2 = await under(() => {});
+                    cyc.windowOpen.push(t2[1] - t2[0]);
+                    const bad2 = windowBad(iris, life);
+                    if (bad2) {
+                        tally.mvBad++;
+                        note(`${name} frame ${n}: the open window put back: ${bad2} bytes not the ST's`);
+                    }
+                }
+                // with the dots: those that change the picture's bit plane
+                ram[colourMap + 2] = 0x0f;
+                await under(fresh);
+                got = new Set([...screenPixels(1)].filter((p) => !picture.has(p)));
+                ignore = picture;
+            } else {
+                // after the missile view, its window shown still: cleared
+                const after = ram[need("win_shown")] !== 0xff;
+                const t = await under(() => ram.set(after ? cockpitPic : cockpit, SCREEN));
+                if (after) tally.mvLeft++;
+                else {
+                    cyc.under.push(t[2] - t[0]);
+                    cyc.dots.push(t[2] - t[1]);
+                }
+                got = screenPixels(1);
+            }
+            // the dots
             if (model) {
                 tally.dotFrames++;
                 for (const d of model.dots) {
@@ -541,18 +638,19 @@ for (const stepsPath of args) {
                 }
                 // each of the ST's dots, by its first pixel, drawn or within
                 // a pixel of one drawn (two dots may share a pixel); each
-                // pixel drawn one of the ST's, or within a pixel of one
-                const want = model.pixels;
+                // pixel drawn one of the ST's, or within a pixel of one; but
+                // not where the missile view's picture has the pixel already
+                const want = new Set([...model.pixels].filter((p) => !ignore.has(p)));
                 const near = (set, x, y) => [-1, 0, 1].some((dx) => [-1, 0, 1].some((dy) => set.has(`${x + dx},${y + dy}`)));
                 // (a dot a pixel off can fall just outside the window, or
                 // just inside it, its second column and row with it)
                 const win = model.win;
                 const edge = (x, y) => x <= win.xmin + 2 || x >= win.xmax - 1 || y <= win.ymin + 2 || y >= win.ymax - 1;
-                for (const d of model.dots.filter((dd) => dd.plotted)) {
+                for (const d of model.dots.filter((dd) => dd.plotted && !ignore.has(`${dd.sx},${dd.sy}`))) {
                     tally.stDots++;
                     if (got.has(`${d.sx},${d.sy}`)) tally.exact++;
                     else if (near(got, d.sx, d.sy)) tally.near++;
-                    else if (edge(d.sx, d.sy)) tally.edge++;
+                    else if (edge(d.sx, d.sy) || near(ignore, d.sx, d.sy)) tally.edge++;
                     else {
                         tally.missed++;
                         note(`${name} frame ${n}: the ST's dot ${d.i} at (${d.sx}, ${d.sy}) z ${d.z} not drawn`);
@@ -561,7 +659,7 @@ for (const stepsPath of args) {
                 for (const p of got) {
                     const [x, y] = p.split(",").map(Number);
                     if (want.has(p)) tally.pixExact++;
-                    else if (near(want, x, y)) tally.pixNear++;
+                    else if (near(model.pixels, x, y)) tally.pixNear++;
                     else if (edge(x, y)) tally.pixEdge++;
                     else {
                         tally.extra++;
@@ -573,24 +671,26 @@ for (const stepsPath of args) {
                 tally.extra += got.size;
                 note(`${name} frame ${n}: ${got.size} dots' pixels where the ST runs no dots`);
             }
-            // the sight
-            const sx = topMem.s16(A6 + 0x244),
-                sy = topMem.s16(A6 + 0x246);
-            const shown = !(topMem.u8(A6 + 0x2c9)) && sx >= 16 && sx < 303 && sy >= 10 && sy < 128;
-            const wantSight = new Set(shown ? sight.map(([dx, dy]) => `${sx + dx},${sy + dy}`) : []);
-            const gotSight = screenPixels(2);
-            if (shown) tally.sight++;
-            if ([...wantSight].sort().join() !== [...gotSight].sort().join()) {
-                tally.sightBad++;
-                note(`${name} frame ${n}: the sight at (${sx}, ${sy}): ${gotSight.size} pixels, the ST ${wantSight.size}`);
-            }
-            // erased, it's gone
-            const te = await run(need("spike_erase"));
-            cyc.erase.push(te[0]);
-            if (screenEmpty()) tally.erased++;
-            else {
-                tally.unerased++;
-                note(`${name} frame ${n}: something left after the erase`);
+            if (!missile) {
+                // the sight
+                const sx = topMem.s16(A6 + 0x244),
+                    sy = topMem.s16(A6 + 0x246);
+                const shown = sx >= 16 && sx < 303 && sy >= 10 && sy < 128;
+                const wantSight = new Set(shown ? sight.map(([dx, dy]) => `${sx + dx},${sy + dy}`) : []);
+                const gotSight = screenPixels(2);
+                if (shown) tally.sight++;
+                if ([...wantSight].sort().join() !== [...gotSight].sort().join()) {
+                    tally.sightBad++;
+                    note(`${name} frame ${n}: the sight at (${sx}, ${sy}): ${gotSight.size} pixels, the ST ${wantSight.size}`);
+                }
+                // erased, it's gone: the cockpit as it was
+                const te = await run(need("spike_erase"));
+                cyc.erase.push(te[0]);
+                if (Buffer.from(ram.subarray(SCREEN, 0x8000)).equals(cockpit)) tally.erased++;
+                else {
+                    tally.unerased++;
+                    note(`${name} frame ${n}: something left after the erase`);
+                }
             }
         }
         // -- the bolt
@@ -684,10 +784,12 @@ console.log(`  sight: shown in ${tally.sight}, ${tally.sightBad} frames' pixels 
 console.log(`  erase: ${tally.erased} frames emptied, ${tally.unerased} not`);
 console.log(`  bolt: drawn in ${tally.bolts} frames, ${tally.boltNear} within a pixel, ${tally.boltBad} wrong`);
 console.log(`  shots: ${tally.shots} the ST's, ${tally.shotBad} frames wrong; the numbers' replay wrong ${tally.replayBad} times`);
+console.log(`  missile view: ${tally.mvFrames} frames, ${tally.mvBad} windows not the ST's; ${tally.mvLeft} frames after it cleared`);
 if (wantCycles) {
     console.log(`  cycles: the sight and the dots mean ${mean(cyc.under)}, most ${most(cyc.under)}; the dots alone mean ${mean(cyc.dots)}, most ${most(cyc.dots)}`);
     console.log(`          erasing them mean ${mean(cyc.erase)}, most ${most(cyc.erase)}; the bolt mean ${mean(cyc.bolt)}, most ${most(cyc.bolt)}; frames with shots mean ${mean(cyc.shots)}, most ${most(cyc.shots)}`);
+    console.log(`          the missile view's window drawn whole mean ${mean(cyc.window)}, most ${most(cyc.window)}; open and put back mean ${mean(cyc.windowOpen)}, most ${most(cyc.windowOpen)}`);
 }
 for (const b of bad) console.log("  " + b);
-const failed = tally.missed + tally.extra + tally.model + tally.sightBad + tally.unerased + tally.boltBad + tally.shotBad + tally.replayBad;
+const failed = tally.missed + tally.extra + tally.model + tally.sightBad + tally.unerased + tally.boltBad + tally.shotBad + tally.replayBad + tally.mvBad;
 process.exit(failed ? 1 : 0);

@@ -1,28 +1,46 @@
 \ ***************************************************************************
 \ STARGLIDER for the BBC Master - what the view shows besides the objects
 \
-\ The gunsight, the ground dots, the player's laser bolt and the enemies'
-\ laser lines (docs/research/st-panel.md, section 6; st.md; st-logic.md),
-\ each where the ST draws it and in its colour, into the screen being
-\ drawn and onto that screen's erase list, as the objects' lines are
-\ (decision 14).
+\ The gunsight, the ground dots, the player's laser bolt, the enemies'
+\ laser lines and the missile view's window (docs/research/st-panel.md,
+\ sections 6 and 8; st.md; st-logic.md), each where the ST draws it and in
+\ its colour, into the screen being drawn and onto that screen's erase
+\ list, as the objects' lines are (decision 14); but the missile view's
+\ window, which the ST copies whole every frame, and which is drawn whole
+\ or put back (mview.6502).
 \
 \ In the logic's bank, with ANDY paged, as the dots, the sight and what
 \ the logic records for the drawing are in ANDY. under_draw is
-\ world_render's drawing before the objects (the gunsight, the dots), for
-\ the draw phase; over_draw is what the ST draws after them from the
-\ step's logic (the bolt, the shots), drawn after the step's logic onto
-\ the same frame, before it's shown (call 2's option B). code.6502's
-\ view_under and view_overlays page the bank and call them.
+\ world_render's drawing before the objects (the window, the gunsight,
+\ the dots), for the draw phase; over_draw is what the ST draws after them
+\ from the step's logic (the bolt, the shots), drawn after the step's
+\ logic onto the same frame, before it's shown (call 2's option B).
+\ code.6502's view_under and overlays.6502's view_overlays call them.
 \ ***************************************************************************
 
 \ under_draw: the gunsight and the ground dots, between draw_begin and
-\ draw_objects (render.6502). The missile view has neither the sight nor,
-\ while its window moves, the dots.
+\ draw_objects (render.6502); in the missile view (L_05248) the window, its
+\ bar when it's open, and the dots, which are run only then. A screen
+\ that showed the window shows the view's own again from a clear.
 .under_draw
-    LDA mv_render : BNE dots
+    LDA mv_render : BNE missile
+    LDX draw_buffer
+    LDA win_shown,X : BMI plain
+    LDA #&FF : STA win_shown,X
+    JSR window_clear
+.plain
     JSR sight_draw
-.dots
+    JMP dots_draw
+.missile
+    \ open, the bar's blocks: 17 less ((life - &F) asr 4) & &F, which bits
+    \ 4-7 of the low byte make
+    STZ win_blocks
+    LDA m_iris : BNE moving
+    LDA m_life : SEC : SBC #&0F
+    LSR A : LSR A : LSR A : LSR A
+    EOR #&FF : SEC : ADC #17 : STA win_blocks
+.moving
+    JSR win_show
     JMP dots_draw
 
 \ over_draw: the bolt and the shots onto the frame draw_phase drew, its

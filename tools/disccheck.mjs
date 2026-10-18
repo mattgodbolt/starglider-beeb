@@ -1,8 +1,8 @@
 // The game's own disc reader (src/disc.6502), on jsbeeb's Master with the
 // disc in the drive: SG loads the game's files with it at start (HAZEL's,
-// the banks, the cockpit), and then, as the game plays, SHAPES again into
-// bank 7, while the logic runs with ANDY paged; each must come out the
-// same as the file.
+// the banks, the cockpit), and then, as the game plays, the missile view's
+// window into the loading area's bank, while the logic runs with ANDY
+// paged; each must come out the same as the file.
 //
 //   node tools/disccheck.mjs
 import fs from "node:fs";
@@ -46,7 +46,7 @@ const checks = [
     ["WORLD", bank(sym.BANK_WORLD), snapshot],
     ["LOGIC", bank(sym.BANK_LOGIC), snapshot],
     ["COCKPIT", sym.SCREEN, snapshot],
-    ["SHAPES", bank(sym.BANK_SPARE), ram],              // the background read
+    ["WINDOW", bank(sym.BANK_PIC) + (sym.WIN_PIC - 0x8000), ram],      // the background read
 ];
 let bad = 0;
 const report = [];

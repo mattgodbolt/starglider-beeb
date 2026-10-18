@@ -34,8 +34,6 @@ ELSE
     build_stamp = "DEV"
 ENDIF
 
-BANK_SPARE = 7                      ; the loading area (docs/plan.md, section 3)
-
 SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*| STARGLIDER for the BBC Master ", build_stamp, 13
     EQUS "MODE 1", 13
@@ -164,11 +162,10 @@ SIGHT_CY = 68
     \ main RAM's screen shown, and both cleared before they're drawn
     JSR erase_init
     STZ draw_buffer : STZ frame_drawn : STZ frame_ready
-    \ The disc reader at work (decision 12): until the game has a file of
-    \ its own to load, SHAPES read again into the loading area as the game
-    \ starts (tools/disccheck.mjs checks it).
-    LDX #DF_SHAPES : LDY #BANK_SPARE
-    STZ fe_dst : LDA #&80 : STA fe_dst+1
+    \ The disc reader at work (decision 12): the missile view's window into
+    \ the loading area as the game starts (tools/disccheck.mjs checks it).
+    LDX #DF_WINDOW : LDY #BANK_PIC
+    LDA #LO(WIN_PIC) : STA fe_dst : LDA #HI(WIN_PIC) : STA fe_dst+1
     JSR disc_load
     JSR input_init
     JSR install_irq
