@@ -173,8 +173,18 @@ def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
     for e in range(n):
         t = f"{prefix8}{e}"
         emit(f"    \\ term {e}")
-        emit(f"    LDA {mag}+{2 * e} : STA {t}_a+1 : EOR #&FF : STA {t}_b+1")
-        signs(t, e)
+        if e % 3:
+            emit(f"    LDA {mag}+{2 * e} : BEQ zero{e}")
+            emit(f"    STA {t}_a+1 : EOR #&FF : STA {t}_b+1")
+            signs(t, e)
+            emit(f"    LDA #LDA_IMM : STA {t}_k")
+            emit(f"    BRA done{e}")
+            emit(f".zero{e}")
+            emit(f"    LDA #BRA_OP : STA {t}_k")
+            emit(f".done{e}")
+        else:
+            emit(f"    LDA {mag}+{2 * e} : STA {t}_a+1 : EOR #&FF : STA {t}_b+1")
+            signs(t, e)
     emit("    RTS")
     emit(".words")
     emit(f"    LDA #LO({name}_vertex) : STA {call}+1 : LDA #HI({name}_vertex) : STA {call}+2")
@@ -257,6 +267,7 @@ def vertex(name, prefix, rows, acc, start, back, skipping=False):
 def vertex8(name, prefix, rows, acc, start, back):
     emit(f"\\ {name}8_vertex: {name}_vertex for a matrix whose high bytes are zero, so")
     emit(f"\\ a term is the low byte by u, its high byte, alone; back to {back}.")
+    emit("\\ Past the first column, a term that's zero is skipped (its _k a BRA).")
     emit(f".{name}8_vertex")
     for j in range(3):
         emit(f"    LDY xf_u+{j}")
@@ -266,6 +277,11 @@ def vertex8(name, prefix, rows, acc, start, back):
             a = f"{acc}+{2 * i}"
             src = f"{start}+{2 * i}" if j == 0 else a
             emit(f"    \\ term {e}: row {i} on {'xyz'[j]}")
+            if j:
+                emit(f".{t}_k")
+                emit(f"    BRA {t}_end                           ; patched: BRA if it's zero, or LDA #")
+                emit(f"    ZA_CANJUMP {t}_end, {t}_go")
+                emit(f".{t}_go")
             emit("    SEC")
             emit(f".{t}_a")
             emit("    LDA sqr_hi,Y")
@@ -280,6 +296,8 @@ def vertex8(name, prefix, rows, acc, start, back):
             emit(f".{t}_m1")
             emit("    ADC #0                                ; patched: the sign")
             emit(f"    STA {a}+1")
+            if j:
+                emit(f".{t}_end")
     emit(f"    JMP {back}")
     emit()
 
