@@ -41,9 +41,10 @@ constant's rounding and the ST's floors within 418 of the ST's (decision
 the row's other entries under 1024 (M8s under 17): within 404. Each
 product's -128 M8 and M8 / 2 go into its row's constant.
 
-Column y's D_hi is mostly 0 or -1 (the ground is flat and the player near
-it), and then its products are the same for every object: the constants
-take them, one set for each, and the column is skipped. So that a unit
+dy's high byte is mostly 0 or -1 (D_hi 128 or 127: the ground is flat and
+the player near it), and then column y's products are the same for every
+object: the constants take them, one set for each, and the column is
+skipped. So that a unit
 there needn't be added in those, the approximation takes a unit in column
 y as a product of 255 (within the bound above: the row's other entries
 are then 0). A matrix of only 0s and units has no products, and then
@@ -69,7 +70,7 @@ EXACT_SITES = [("a", "ml"), ("b", "~ml"), ("c", "ml"), ("d", "~ml"),
 # - f(Y - a)) or subtracting it (the tables read the other way round)
 APPROX_SITES = [("a", "m8"), ("b", "~m8"), ("c", "m8"), ("d", "~m8")]
 APPROX_NEG_SITES = [("na", "~m8"), ("nb", "m8"), ("nc", "~m8"), ("nd", "m8")]
-SKIP_COLUMN = 1                 # column y: its products in the constants while D_hi is 0 or -1
+SKIP_COLUMN = 1                 # column y: its products in the constants while dy's high byte is 0 or -1
 APPROX_ROWS = (0, 2)            # rotate_approx's rows, x' and z' (decision 21)
 APPROX_TERMS = [e for e in range(9) if e // 3 in APPROX_ROWS]
 SKIP_TERMS = [e for e in APPROX_TERMS if e % 3 == SKIP_COLUMN]
@@ -179,7 +180,8 @@ for i in range(3):
 assert APPROX_ROWS == (0, 2) and SKIP_COLUMN == 1
 emit("""    \\ the approximation's rows' (x and z): S, the sum of their s M8, makes
     \\ the constant (S + 1) >> 1 - 128 S; with column y's Sy, the constants
-    \\ while D_hi is 0 or -1 are 128 Sy and 127 Sy more
+    \\ while dy's high byte is 0 or -1 (D_hi 128 or 127) are 128 Sy and
+    \\ 127 Sy more
     LDX #0
 .approx_k
     LDA rap_sm8_lo,X : CLC : ADC rap_sm8_lo+1,X : STA s
@@ -307,8 +309,8 @@ emit("""    LDA #0 : SEC : SBC mm : STA rap_sm8_lo,X
 \\ link: both chains from rot_shape, in their orders: the exact one column
 \\ by column, each column's D (its stub) before its first product; the
 \\ approximation's column y first, from the general path (Y is its D_hi on
-\\ the way in), the D_hi 0 and -1 paths joining after it, then columns x
-\\ and z, each with its stub before its first product.
+\\ the way in), the paths for dy's high byte 0 and -1 joining after it,
+\\ then columns x and z, each with its stub before its first product.
 .link
     LDA #LO(rot_go + 1) : STA esite : LDA #HI(rot_go + 1) : STA esite+1
     LDA #LO(rap_go + 1) : STA asite : LDA #HI(rap_go + 1) : STA asite+1
@@ -382,8 +384,8 @@ emit("""    \\ the chains' ends
     \\ (on into alink)
 
 \\ alink, elink: the approximate or the exact chain on to the code at t + A,
-\\ whose own jump is at t + Y; the D_hi 0 and -1 paths' jumps, while they
-\\ wait, to the same
+\\ whose own jump is at t + Y; the jumps of the paths for dy's high byte 0
+\\ and -1, while they wait, to the same
 .alink
     CLC : ADC t : STA (asite)
     PHA
@@ -407,8 +409,8 @@ emit("""    \\ the chains' ends
     LDA t+1 : ADC #0 : STA esite+1
     RTS
 \\ the links' own: whether a column's stub is in each chain yet, and
-\\ whether the D_hi 0 and -1 paths wait for theirs (out of zero page, as
-\\ only linking reads them)
+\\ whether the paths for dy's high byte 0 and -1 wait for theirs (out of
+\\ zero page, as only linking reads them)
 .eseen  EQUB 0
 .aseen  EQUB 0
 .ywait  EQUB 0
@@ -560,14 +562,14 @@ emit()
 
 emit("""\\ rotate_approx: rot_acc's x' and z' = cam rot_d approximately, from D's
 \\ high bytes, each column's in Y; y' as it was (decision 21). Column y's
-\\ products are in the rows' constants while its D_hi is 0 or -1. Jumped
-\\ to by rotate_lists, and on to its relevance test at the end.
+\\ products are in the rows' constants while dy's high byte is 0 or -1.
+\\ Jumped to by rotate_lists, and on to its relevance test at the end.
 .rotate_approx
     LDA rot_d+3 : BEQ rap_y0
     CMP #&FF : BEQ rap_y1
     EOR #&80 : TAY""")
-for name, what in [("kg", "the rows' constants"), ("k0_", "the rows' constants with column y's for D_hi 0"),
-                   ("k1_", "the rows' constants with column y's for D_hi -1")]:
+for name, what in [("kg", "the rows' constants"), ("k0_", "the rows' constants with column y's for dy's high byte 0"),
+                   ("k1_", "the rows' constants with column y's for dy's high byte -1")]:
     if name == "k0_":
         emit(".rap_y0")
     if name == "k1_":
