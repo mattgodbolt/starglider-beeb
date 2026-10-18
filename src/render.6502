@@ -813,18 +813,20 @@ ENDMACRO
     DEY : STY edge_i
     LDA edge_mark,Y : CMP stamp : BNE each
     LDA (sh_ev1),Y : STA vb
-    LDA (sh_ev0),Y : STA va : JSR vertex_far
-    LDA vb : JSR vertex_far
+    LDA (sh_ev0),Y : STA va
+    \ each end onto the screen if it isn't yet
+    TAY : LDA vert_mark,Y : CMP stamp : BEQ a_done
+    JSR vertex_far
+.a_done
+    LDY vb : LDA vert_mark,Y : CMP stamp : BEQ b_done
+    JSR vertex_far
+.b_done
     LDX va : LDY vb
-    LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
-    LDA v_sylo,X : STA cy0 : LDA v_syhi,X : STA cy0+1
-    LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
-    LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
     BIT far_inside : BPL clip
-    JSR clip_line.accept
+    JSR clip_line.ends_in
     BRA each
 .clip
-    JSR clip_line
+    JSR clip_line.ends
     BRA each
 }
 
@@ -846,14 +848,43 @@ MACRO TO_PIXELS q, centre, lo, hi
     TXA : ADC #HI(centre) : STA hi,Y
 ENDMACRO
 
-\ vertex_far: vertex A of a far object onto the screen; once an object.
+\ VERTEX_CODE: A = the window's outcode of vertex Y on the screen (v_sx,
+\ v_sy), as OUTCODE makes it; X is lost.
+ASSERT VIEW_XMIN < 256 AND HI(VIEW_XMAX + 1) = 1
+ASSERT VIEW_YMIN < 256 AND VIEW_YMAX < 255
+MACRO VERTEX_CODE
+    LDA v_sxhi,Y : BNE x_high
+    LDA v_sxlo,Y : CMP #VIEW_XMIN
+    LDA #0 : BCS x_done
+    BCC x_left
+.x_high
+    BMI x_left
+    CMP #HI(VIEW_XMAX + 1) : BNE x_right
+    LDA v_sxlo,Y : CMP #LO(VIEW_XMAX + 1)
+    LDA #0 : BCC x_done
+.x_right
+    LDA #8 : BRA x_done
+.x_left
+    LDA #2
+.x_done
+    LDX v_syhi,Y : BNE y_high
+    LDX v_sylo,Y : CPX #VIEW_YMIN : BCC y_above
+    CPX #VIEW_YMAX + 1 : BCC y_done
+.y_below
+    ORA #4 : BRA y_done
+.y_high
+    BPL y_below
+.y_above
+    ORA #1
+.y_done
+ENDMACRO
+
+\ vertex_far: vertex Y of a far object onto the screen, and its outcode
+\ unless the object is inside the window; the caller makes it once an
+\ object, by its mark.
 .vertex_far
 {
     ZA_AUTO1 vtx
-    TAY
-    LDA vert_mark,Y : CMP stamp : BNE new
-    RTS
-.new
     LDA stamp : STA vert_mark,Y
     STY vtx
     CPY sh_nstill : BCS moving
@@ -873,6 +904,9 @@ ENDMACRO
     LDY vtx                                 ; from the centre's quarters
     TO_PIXELS sc_acc, VIEW_CX, v_sxlo, v_sxhi
     TO_PIXELS sc_acc+2, VIEW_CY, v_sylo, v_syhi
+    BIT far_inside : BMI inside
+    VERTEX_CODE : STA v_code,Y
+.inside
     RTS
 }
 
@@ -969,22 +1003,25 @@ ENDMACRO
     DEY : STY edge_i
     LDA edge_mark,Y : CMP stamp : BNE each
     LDA (sh_ev1),Y : STA vb
-    LDA (sh_ev0),Y : STA va : JSR vertex
-    LDA vb : JSR vertex
+    LDA (sh_ev0),Y : STA va
+    \ each end transformed if it isn't yet
+    TAY : LDA vert_mark,Y : CMP stamp : BEQ a_done
+    JSR vertex
+.a_done
+    LDY vb : LDA vert_mark,Y : CMP stamp : BEQ b_done
+    JSR vertex
+.b_done
     JSR edge
     BRA each
 }
 
-\ vertex: vertex A of the shape into camera space (&03FFE) and, in front
-\ of the near plane, projected; once an object.
+\ vertex: vertex Y of the shape into camera space (&03FFE) and, in front
+\ of the near plane, projected, with its outcode; the caller makes it
+\ once an object, by its mark.
 .vertex
 {
     ZA_AUTO1 vtx
     ZA_AUTO2 cvy
-    TAY
-    LDA vert_mark,Y : CMP stamp : BNE new
-    RTS
-.new
     LDA stamp : STA vert_mark,Y
     STY vtx
     CPY sh_nstill : BCS moving
@@ -1018,6 +1055,7 @@ ENDMACRO
     LDY vtx
     LDA pq : CLC : ADC #LO(VIEW_CY) : STA v_sylo,Y
     LDA pq+1 : ADC #HI(VIEW_CY) : STA v_syhi,Y
+    VERTEX_CODE : STA v_code,Y
 .behind
     RTS
 }
@@ -1221,11 +1259,7 @@ ASSERT NEAR_Z > 0 AND NEAR_Z < 256
 .both_behind
     RTS
 .in_front
-    LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
-    LDA v_sylo,X : STA cy0 : LDA v_syhi,X : STA cy0+1
-    LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
-    LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
-    JMP clip_line
+    JMP clip_line.ends
 .crosses
     LDA v_zlo,X : STA ep+4 : LDA v_zhi,X : STA ep+5
     LDA v_zlo,Y : STA eq+4 : LDA v_zhi,Y : STA eq+5
@@ -1374,6 +1408,27 @@ ENDMACRO
 .outside
     LDA code0 : AND code1 : BEQ crossing
     RTS
+\ ends: the edge from vertex X to vertex Y, both on the screen, by their
+\ outcodes (v_code): nothing if both are beyond one of the window's edges,
+\ drawn as it is if both are inside (ends_in), and otherwise clipped. Only
+\ a line clipped needs its ends' y high bytes.
+.ends
+    LDA v_code,X : AND v_code,Y : BNE ends_out
+    LDA v_code,X : ORA v_code,Y : BNE ends_clip
+.ends_in
+    LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
+    LDA v_sylo,X : STA cy0
+    LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
+    LDA v_sylo,Y : STA cy1
+    JMP accept
+.ends_out
+    RTS
+.ends_clip
+    LDA v_code,X : STA code0 : LDA v_code,Y : STA code1
+    LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
+    LDA v_sylo,X : STA cy0 : LDA v_syhi,X : STA cy0+1
+    LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
+    LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
 .crossing
     LDA cx1 : CMP cx0 : BNE not_vertical
     LDA cx1+1 : CMP cx0+1 : BNE not_vertical

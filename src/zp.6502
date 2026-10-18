@@ -159,6 +159,7 @@ DISC_MAX = 8
 .v_sxhi     SKIP 128
 .v_sylo     SKIP 128
 .v_syhi     SKIP 128
+.v_code     SKIP 128        ; the window's outcode of each vertex on the screen
 .work_end                   ; (a build's own workspace can follow)
 ENDSECTION
 
