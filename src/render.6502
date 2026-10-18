@@ -366,7 +366,15 @@ OM_SIZE = 6 + 18
     LDA ob_heading_hi,X : ADC pl_heading+1 : STA ang_h+1
     LDA #0 : SEC : SBC pl_roll : STA ang_r
     LDA #0 : SBC pl_roll+1 : STA ang_r+1
+    \ its box, from none, for box_end (box.6502, in the loading area's
+    \ bank, as view_objects leaves it for the first object: each pages
+    \ what it reads)
+    LDA erase_i : STA box_start
+    LDA #&FF : STA box_c0 : STA box_y0
+    STZ box_c1 : STZ box_y1 : STZ box_codes
     JSR draw_shape
+    BANK_ANDY BANK_PIC
+    JSR box_end
 .next
     LDX list_i : BEQ done
     JMP each
@@ -585,14 +593,23 @@ NEXT
 .in_front
     LDA #LO(vertex.in_front) : STA xform_back+1
     LDA #HI(vertex.in_front) : STA xform_back+2
+    LDA #TAX_OP : STA vertex.track          ; (its vertices into its box)
     LDA #LO(clip_line.ends) : LDX #HI(clip_line.ends)
     BRA patched
 .straddling
+    \ No box (decision 20) for an object that may be cut at the near plane,
+    \ where its vertices can't bound what it draws, and that reaches so
+    \ near it's seldom small on the screen (nor for the few left unfolded):
+    \ its vertices aren't taken.
+    STZ box_start
+    LDA #RTS_OP : STA vertex.track
     LDA #LO(edge) : LDX #HI(edge)
 .patched
     STA edges.call+1 : STX edges.call+2
     JMP edges
 }
+TAX_OP = &AA
+RTS_OP = &60
 
 \ far_setup: the object's centre on the screen (sc_x0, sc_y0, from the
 \ view's centre), the first-order matrix B onto the screen, and whether
@@ -1019,9 +1036,53 @@ ENDMACRO
 VC_XMIN = 9 : VC_LOW = 13 : VC_XHI = 19 : VC_XLO = 26 : VC_YMIN = 46 : VC_YMAX = 50
 VC_TO_DONE = 23 : VC_TO_RIGHT = 8
 
+\ BOX_Y: the object's box (decision 20: box.6502's box_end, and zp.6502's
+\ box_c0 to box_codes) taken to A, a line within the window. BOX_VERTEX:
+\ to vertex Y, within the window, its line here and its column by box_x.
+MACRO BOX_Y
+    CMP box_y0 : BCS low_in
+    STA box_y0
+.low_in
+    CMP box_y1 : BCC high_in
+    STA box_y1
+.high_in
+ENDMACRO
+MACRO BOX_VERTEX
+    LDA v_sylo,Y
+    BOX_Y
+    JMP box_x
+ENDMACRO
+
+\ box_out: the box's part of vertex Y, past the window by its outcode A:
+\ the edges it's past noted, and its line or column where that's within
+\ the window.
+.box_out
+{
+    TSB box_codes
+    AND #5 : BNE y_past                     ; above (1) or below (4)
+    LDA v_sylo,Y
+    BOX_Y
+.y_past
+    LDA v_code,Y : AND #10 : BEQ box_x      ; within it across: not left (2) or right (8)
+    RTS
+}
+\ box_x: the box taken to vertex Y's column, within the window (its x a
+\ word below 512 there).
+.box_x
+{
+    LDA v_sxhi,Y : LSR A : LDA v_sxlo,Y : ROR A : LSR A
+    CMP box_c0 : BCS low_in
+    STA box_c0
+.low_in
+    CMP box_c1 : BCC high_in
+    STA box_c1
+.high_in
+    RTS
+}
+
 \ vertex_far: vertex Y of a far object onto the screen, and its outcode
 \ unless the object is inside the window; the caller makes it once an
-\ object, by its mark.
+\ object, by its mark. It goes into the object's box.
 .vertex_far
 {
     ZA_AUTO1 vtx
@@ -1047,8 +1108,10 @@ VC_TO_DONE = 23 : VC_TO_RIGHT = 8
     BIT far_inside : BMI inside
 .code
     VERTEX_CODE : STA v_code,Y
+    TAX : BEQ inside                        ; (VERTEX_CODE leaves Z its last test's)
+    JMP box_out
 .inside
-    RTS
+    BOX_VERTEX
 }
 
 \ faces: each face's edges marked if it's visible: always-visible, or the
@@ -1219,8 +1282,8 @@ VC_TO_DONE = 23 : VC_TO_RIGHT = 8
 }
 
 \ vertex: vertex Y of the shape into camera space (&03FFE) and, in front
-\ of the near plane, projected, with its outcode; the caller makes it
-\ once an object, by its mark.
+\ of the near plane, projected, with its outcode, into the object's box;
+\ the caller makes it once an object, by its mark.
 .vertex
 {
     ZA_AUTO1 vtx
@@ -1292,7 +1355,12 @@ VC_TO_DONE = 23 : VC_TO_RIGHT = 8
     LDA pq+1 : ADC #HI(VIEW_CY) : STA v_syhi,Y
 .code
     VERTEX_CODE : STA v_code,Y
-    RTS
+.track
+    TAX                                     ; patched (draw_shape): RTS, for an object with no box
+    BEQ inside                              ; (VERTEX_CODE leaves Z its last test's)
+    JMP box_out
+.inside
+    BOX_VERTEX
 }
 
 \ proj_z: ready proj_x for the depth pz (2 or more): the reciprocal's
@@ -1908,7 +1976,8 @@ CLIP_SITES = FLATTEN({
     clip_line.edge_right + 1, clip_line.edge_right_hi + 1,
     clip_line.y_min + 1, clip_line.y_max + 1, clip_line.y_high + 1, clip_line.y_low + 1,
     clip_line.x_hi + 1, clip_line.x_lo + 1, clip_line.x_high + 1, clip_line.x_high_hi + 1,
-    clip_line.x_min + 1, clip_line.x_in + 1, clip_line.x_low + 1})
+    clip_line.x_min + 1, clip_line.x_in + 1, clip_line.x_low + 1,
+    box_end.e_top + 1, box_end.e_left + 1, box_end.e_bottom + 1, box_end.e_right + 1})
 FUNCTION clip_low(x1, to_done, to_right) = LO(to_right + (x1 >= 255) * (to_done - to_right))
 FUNCTION clip_values(x0, x1, y0, y1) = FLATTEN({
     LO(x0 - VIEW_CX), LO(x1 - VIEW_CX + 1), LO(y0 - VIEW_CY), LO(y1 - VIEW_CY + 1),
@@ -1917,7 +1986,8 @@ FUNCTION clip_values(x0, x1, y0, y1) = FLATTEN({
     y0, LO(x0), y1, LO(x1), HI(x1),
     y0, y1 + 1, y1, y0,
     HI(x1 + 1), LO(x1 + 1), LO(x1), HI(x1),
-    x0, clip_low(x1, clip_line.clamped - (clip_line.x_in + 2), clip_line.byte_right - (clip_line.x_in + 2)), x0})
+    x0, clip_low(x1, clip_line.clamped - (clip_line.x_in + 2), clip_line.byte_right - (clip_line.x_in + 2)), x0,
+    y0, x0 DIV 4, y1, x1 DIV 4})
 CLIP_N = SHAPE(CLIP_SITES)[0]
 ASSERT SHAPE(clip_values(VIEW_XMIN, VIEW_XMAX, VIEW_YMIN, VIEW_YMAX))[0] = CLIP_N
 FOR w = {{VIEW_XMIN, VIEW_XMAX, VIEW_YMIN, VIEW_YMAX}, {MV_XMIN, MV_XMAX, MV_YMIN, MV_YMAX}}
@@ -1925,6 +1995,8 @@ FOR w = {{VIEW_XMIN, VIEW_XMAX, VIEW_YMIN, VIEW_YMAX}, {MV_XMIN, MV_XMAX, MV_YMI
     \ (only the low bytes are patched where they're relative to the centre)
     ASSERT HI(w[0] - VIEW_CX) = HI(VIEW_XMIN - VIEW_CX) AND HI(w[1] - VIEW_CX + 1) = HI(VIEW_XMAX - VIEW_CX + 1)
     ASSERT HI(w[2] - VIEW_CY) = HI(VIEW_YMIN - VIEW_CY) AND HI(w[3] - VIEW_CY + 1) = HI(VIEW_YMAX - VIEW_CY + 1)
+    \ (a box, box_end's, is whole bytes within the window)
+    ASSERT w[0] MOD 4 = 0 AND w[1] MOD 4 = 3
     \ (a far object centred within the window is within FAR_C_MAX of the
     \ projection's centre, where far_reach's bound holds)
     ASSERT VIEW_CX - w[0] <= FAR_C_MAX AND w[1] - VIEW_CX <= FAR_C_MAX

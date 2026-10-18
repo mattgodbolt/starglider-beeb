@@ -144,6 +144,16 @@ ASSERT LO(edge_mark) = 0 AND LO(v_xlo) = 0
 .ground_h   SKIP 2
 .mat_scaled SKIP 1          ; non-zero: xf_amag and xf_asign are mat's, for scaled_for
 .scaled_for SKIP 1          ; the shape's scale they're for
+    \ the box of the object being drawn (decision 20, box.6502's box_end):
+    \ its first entry on the erase list, the columns and lines its
+    \ vertices lie in within the window, and the window's edges any vertex
+    \ is past (their outcodes ORed), which the box goes to
+.box_start  SKIP 1
+.box_c0     SKIP 1
+.box_c1     SKIP 1
+.box_y0     SKIP 1
+.box_y1     SKIP 1
+.box_codes  SKIP 1
     \ the frame (engine.6502): the screen being drawn, 0 main RAM's or 1
     \ shadow's, whether it's drawn and ready to show, and each screen's
     \ erase list

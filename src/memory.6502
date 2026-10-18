@@ -28,11 +28,13 @@ ENDSECTION
 MAIN_TOP = LISTS
 
 \ The erase lists: each screen's lines as the line drawer set them up
-\ (line.6502's line_go), to be drawn again as zeros, in shadow RAM below
-\ the shadow screen. A field a page, indexed by line from ERASE_LINES
-\ down (index 0 takes the lines past the end, and is never read), the two
-\ screens' pages of a field side by side: field f of screen s is at
-\ ERASE_LIST + (2 f + s) * 256.
+\ (line.6502's line_go), to be drawn again as zeros, and the boxes of the
+\ objects cheaper cleared (box.6502, decision 20: code LINE_BOX, its first
+\ cell, its first line in the cell's character row, its columns and its
+\ lines), in shadow RAM below the shadow screen. A field a page, indexed
+\ by entry from ERASE_LINES down (index 0 takes the entries past the end,
+\ and is never read), the two screens' pages of a field side by side:
+\ field f of screen s is at ERASE_LIST + (2 f + s) * 256.
 ERASE_LIST  = &3000
 ERASE_LINES = 255
 EF_LO   = 0                         ; the first byte's character row and column

@@ -174,13 +174,13 @@ owns.
 | OS pages &0400-&0CFF | vertex arrays and marks, the lists, the draw list |
 | &0D00-&0DFF | the disc reader's NMI routine |
 | Main RAM &0E00-&417F | the draw phase's code, the main loop, the interrupts and the disc reader, the object table |
-| Shadow RAM &3000-&417F | the erase lists, read and written only by HAZEL's code with X set |
+| Shadow RAM &3000-&417F | the erase lists, read and written only with X set: by HAZEL's code, and the objects' boxes by bank 7's (`src/box.6502`) |
 | HAZEL | the multiply and reciprocal tables, the line drawer, the screen's clear, the vertex transforms |
 | ANDY | *as built:* the object fields only the logic reads, and the logic's variables (`src/vars.6502`): paged in with the logic's banks, over their first 4K |
 | Bank 4 | the shapes |
 | Bank 5 | the world: below &9000 the list phase, run with ANDY out (its end, `world_list_end`, just short of the sine table's 1K alignment); from &9000 the sine table and the logic that reads it (`world_render`'s, the flight, the handlers); and at its end the drawing's products that build_matrix and the ground matrix take (`kmul`, `matrix_heading`), whose callers have the bank paged |
 | Bank 6 | *as built:* the rest of the logic from `world_list_end` (the keys, the laser, collisions, the frame's end, the level change), the logic's drawing records (`src/view.6502`: the bolt and the shots) and the panel (`src/panel.6502`), its data in the gap from &9000 to `world_list_end`. Below &9000 it holds no code (baron#29, our issue #1) and is free for data, readable only with ANDY out |
-| Bank 7 | *as built in flight:* the missile view's window picture and the draw phase's view code (`src/view_under.6502`, `src/mview.6502`), the code past `world_list_end`; below &9000 no code, free for data read with ANDY out. *Planned:* flight's speech, which needs a call (the four clips are 13.4K at the ST's rate, and the room with no code in it in banks 6 and 7 adds to about 11.5K); the docked screens and their clip when docked; the front end and the title outside play |
+| Bank 7 | *as built in flight:* the missile view's window picture and the draw phase's view code (`src/view_under.6502`, `src/mview.6502`) and the objects' boxes (`src/box.6502`), the code past `world_list_end`; below &9000 no code, free for data read with ANDY out. *Planned:* flight's speech, which needs a call (the four clips are 13.4K at the ST's rate, and the room with no code in it in banks 6 and 7 adds to about 11.5K); the docked screens and their clip when docked; the front end and the title outside play |
 
 The banks' first 4K hold no code until baron#29 is fixed: the rotations'
 annotated jumps fill bank 5 there, and a jump of another bank's at one of
@@ -212,9 +212,10 @@ that grows says so at once.
   pace holds. Built: `src/engine.6502`.
 - **A frame**: the draw phase draws the draw list's objects into the
   hidden screen, after erasing what was drawn there two frames before,
-  and logs what it draws for the next erase, in shadow RAM; the panel's
-  changes are drawn into the hidden screen too, each screen remembering
-  what it shows.
+  and logs what it draws for the next erase, in shadow RAM: each line,
+  or for an object cheaper erased so, the box of bytes its lines lie in
+  (decision 20, `src/box.6502`); the panel's changes are drawn into the
+  hidden screen too, each screen remembering what it shows.
 
 ---
 
