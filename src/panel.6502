@@ -55,11 +55,37 @@ ZA_AUTO1 pt, pv             ; scratch
     \ (on into panel_new_game)
 
 \ panel_new_game (&03ABE, &03ACA): the waveforms from their first step, and
-\ the energy bar's dimming on.
+\ the energy bar's dimming on, from the next frame count.
 .panel_new_game
     STZ wave_left_n : STZ wave_right_n
     LDA #2 : STA energy_dim
+    LDA frame_count : SEC : SBC #1 : STA wave_fc
+    LDA frame_count+1 : SBC #0 : STA wave_fc+1
     RTS
+
+\ panel_steps: the waveforms and the energy bar's dimming stepped for each
+\ step since the last panel drawn. The ST steps them each frame it draws
+\ (&05872, &0597E), and its frame was its game's step: here each step's
+\ frame count, which frame_end's logic counts, stands for one (decision
+\ 25), so a step with no frame of its own still moves them.
+.panel_steps
+{
+.each
+    LDA wave_fc : CMP frame_count : BNE step
+    LDA wave_fc+1 : CMP frame_count+1 : BEQ done
+.step
+    INC wave_fc : BNE counted
+    INC wave_fc+1
+.counted
+    INC wave_left_n : INC wave_right_n
+    LDA wave_fc : AND #2 : BNE each           ; toggled on counts with bit 1 clear
+    LDA energy_dim : EOR #2 : STA energy_dim
+    BRA each
+.done
+    LDA wave_left_n : AND #15 : STA wave_left_n
+    LDA wave_right_n : AND #15 : STA wave_right_n
+    RTS
+}
 
 \ panel_frame: the panel drawn into the screen draw_buffer names, what this
 \ screen shows of it changed to what this frame's state shows; and what
@@ -71,6 +97,7 @@ ZA_AUTO1 pt, pv             ; scratch
     LDX pb : LDA ps_valid,X : BNE known
     JSR panel_fresh
 .known
+    JSR panel_steps
     JSR waves
     JSR gauges
     JSR scanner
@@ -274,18 +301,16 @@ ZA_AUTO1 blit_mid, blit_next
 }
 
 \ ---------------------------------------------------------------------------
-\ waves (&05872): each waveform one step on (15, then 0) and its frame
-\ drawn, 16 x 8 over all it covers, every frame.
+\ waves (&05872): each waveform's frame, as panel_steps has stepped it,
+\ drawn 16 x 8 over all it covers, every frame.
 .waves
 {
     LDA PC_WAVE : STA pcol
     ASSERT P_WAVE_LEFT_Y = P_WAVE_RIGHT_Y AND (P_WAVE_LEFT_X OR P_WAVE_RIGHT_X) MOD 4 = 0
-    LDA wave_left_n : INC A : AND #15 : STA wave_left_n
-    TAX : LDA wave_left,X
+    LDX wave_left_n : LDA wave_left,X
     LDX #LO(scr(P_WAVE_LEFT_X, P_WAVE_LEFT_Y)) : LDY #HI(scr(P_WAVE_LEFT_X, P_WAVE_LEFT_Y))
     JSR one
-    LDA wave_right_n : INC A : AND #15 : STA wave_right_n
-    TAX : LDA wave_right,X
+    LDX wave_right_n : LDA wave_right,X
     LDX #LO(scr(P_WAVE_RIGHT_X, P_WAVE_RIGHT_Y)) : LDY #HI(scr(P_WAVE_RIGHT_X, P_WAVE_RIGHT_Y))
 .one
     \ frame A to (X, Y): each column's rows in a run, the first five in
@@ -311,13 +336,9 @@ ZA_AUTO1 blit_mid, blit_next
 }
 
 \ ---------------------------------------------------------------------------
-\ gauges: the energy bar's dimming toggled on frames with bit 1 of the frame
-\ count clear (&0597E), then the altitude, the speed, the bars and the bank
-\ ticks.
+\ gauges: the altitude, the speed, the bars (the energy's dimmed as
+\ panel_steps leaves energy_dim) and the bank ticks.
 .gauges
-    LDA frame_count : AND #2 : BNE gauges_toggled
-    LDA energy_dim : EOR #2 : STA energy_dim
-.gauges_toggled
     JSR altitude
     JSR speedo
     JSR bars
@@ -968,18 +989,20 @@ NEXT
 \ flash_show (frame_end's &08ECA): colour 0, the whole screen's, from
 \ flash_shown, as the nearest of the BBC's eight to the ST's colour (by the
 \ top two bits of its red, green and blue: tools/mkpanel.py); 0, none, is
-\ black. The ST writes the palette as its frame ends, and so does this,
-\ each step. (Only frame_end_logic calls it, so only with the logic.)
+\ black. The ST writes the palette as its frame ends and is shown; here
+\ the interrupt writes it as the frame is shown (decision 24), from
+\ flash_pending, which a step's flash sets and a step's black doesn't
+\ undo, so a flash on a step with no frame of its own still shows. (Only
+\ frame_end_logic calls it, so only with the logic.)
 IF DEFINED(frame_end_logic)
 .flash_show
 {
     LDA flash_shown+1 : ASL A : ASL A : ASL A : AND #&30 : STA pt
     LDA flash_shown : LSR A : LSR A : LSR A : AND #&0C : ORA pt : STA pt
     LDA flash_shown : LSR A : AND #3 : ORA pt : TAX
-    LDA flash_colour,X : EOR #7 : STA pt    ; the ULA takes the colour EORed with 7
-    FOR e = {0, 1, 4, 5}                    ; logical 0's entries (engine.6502)
-        LDA pt : ORA #e * 16 : STA ula_pal
-    NEXT
+    LDA flash_colour,X : BEQ none
+    STA flash_pending
+.none
     RTS
 }
 ENDIF

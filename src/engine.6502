@@ -66,8 +66,9 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
 \ irq_handler: the split, when T1 comes; at each vertical sync the view's
 \ colours back, T1 started, the field counted, a frame drawn shown from
 \ it, by ACCCON's D (TSB and TRB, which the line drawer's X changes can't
-\ split), and the controls read (input.6502). It must lie below &3000,
-\ which X moves to shadow RAM.
+\ split), with its colour 0 (decision 24: the ST writes its flash as its
+\ frame is shown), and the controls read (input.6502). It must lie below
+\ &3000, which X moves to shadow RAM.
 .irq_handler
 {
     ZA_INTERRUPT
@@ -89,6 +90,11 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
     INC fields
     LDA frame_ready : BEQ shown
     STZ frame_ready
+    LDA flash_pending : EOR #7                  ; the ULA takes the colour EORed with 7
+    FOR e = {0, 1, 4, 5}                        ; logical 0's entries
+        ORA #e * 16 : STA ula_pal : AND #7
+    NEXT
+    STZ flash_pending
     LDA #ACCCON_D
     LDX draw_buffer : BEQ show_main
     TSB acccon

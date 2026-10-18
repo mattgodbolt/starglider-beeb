@@ -896,3 +896,11 @@ is the controls that must feel right. Three change code: the flash
 written at the flip (24), the panel's animations per step (25) and every
 shot since the last frame (30).
 
+Decisions 24 and 25 are built. Each step's flash leaves its colour
+pending, which a later step's black doesn't undo, and the interrupt
+writes it to logical 0 as it shows the frame. So a flash on a step whose
+frame was dropped still shows, and it lands as the ST's does. The panel
+steps the waveforms and the energy bar's dimming once for each frame
+count since its last draw (`panel_steps`), the ST's per-frame rule run
+for every step, and `make panel`'s model does the same.
+
