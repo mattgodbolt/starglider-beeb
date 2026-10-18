@@ -124,6 +124,23 @@ SIGHT_CY = 68
 DISC_LOADS = P% - disc_load_bank
 
 \ ---------------------------------------------------------------------------
+\ install_irq: engine.6502's irq_handler on IRQ1V, and only the vertical
+\ sync's and the split's interrupts on: nothing goes to the OS, whose IRQ
+\ entry (MOS 3.20, &E59E) reads nothing but IRQ1V, so HAZEL can stay
+\ paged over its code.
+.install_irq
+    SEI
+    LDA #&7F : STA sysvia_ier : STA usrvia_ier  ; anything not serviced would
+                                                ; hold IRQ asserted
+    LDA #LO(irq_handler) : STA irq1v
+    LDA #HI(irq_handler) : STA irq1v+1
+    LDA usrvia_acr : AND #&3F : STA usrvia_acr  ; T1 one-shot
+    LDA #2 : STA sysvia_ifr                     ; a vertical sync already flagged
+    LDA #&82 : STA sysvia_ier                   ; CA1: the vertical sync
+    LDA #&C0 : STA usrvia_ier                   ; T1: the split
+    CLI
+    RTS
+
 \ input_init: each axis read, and taken as where the stick is, for the
 \ accumulators to move from; the conversions the interrupt reads begun
 \ (input.6502). Before the interrupt is on: it waits for each conversion.
