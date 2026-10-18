@@ -66,7 +66,7 @@ disc:
 	cp $(TARGET) $(DISC)
 
 run: $(TARGET)
-	node tools/play.mjs '6,!run' shots/ --disc $(TARGET) --until start
+	node tools/play.mjs '3,!run' shots/ --disc $(TARGET) --until start_loaded
 
 # The ST's program, off TOSEC's clean image: the shapes and tables come
 # from it at build time, so nothing of the original is committed.
