@@ -1,7 +1,8 @@
 // The disc's files, put where !BOOT (src/main.6502) puts them, for the
 // tools that run the program on jsbeeb's TestMachine without booting:
 // SHAPES and WORLD in their banks, TABLES and CODE2 staged in bank 7,
-// the cockpit in main RAM's screen. Then run from the symbol start.
+// the cockpit in main RAM's screen, and the disc in the drive. Then run
+// from the symbol start.
 import fs from "node:fs";
 
 export function ssdFiles(path) {
@@ -17,7 +18,9 @@ export function ssdFiles(path) {
     return files;
 }
 
-export function loadDisc(cpu, path, sym) {
+export function loadDisc(tm, path, sym) {
+    tm.loadDiscData(fs.readFileSync(path));         // in the drive, for the game's own reader
+    const cpu = tm.processor;
     const ram = cpu.ramRomOs;
     const bank = (n) => cpu.romOffset + n * 16384;
     const files = ssdFiles(path);

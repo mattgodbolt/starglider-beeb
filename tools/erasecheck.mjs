@@ -20,7 +20,7 @@ const cpu = tm.processor, ram = cpu.ramRomOs;
 const bank = (n) => cpu.romOffset + n * 16384;
 // unpack the disc's files from the .ssd by name
 const { loadDisc } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
-loadDisc(cpu, path.join(root, "build/starglider.ssd"), sym);
+loadDisc(tm, path.join(root, "build/starglider.ssd"), sym);
 const erased = sym["frame.erased"];
 let bad = 0;
 const frames = Number(process.argv[2] ?? 700);

@@ -44,8 +44,9 @@ make disc       # the disc from a clean tree, as starglider.ssd: the
                 # README links it (github: in jsbeeb's URL, not gh:)
 make spike      # the spike on every captured scene: checked against the
                 # ST's renderer, and timed (tools/scenecheck.py)
-make check      # sincos against the ST's sine table at every angle, make spike, and the
-                # disc's erasing (tools/erasecheck.mjs)
+make check      # sincos against the ST's sine table at every angle, make spike, the
+                # disc's erasing (tools/erasecheck.mjs) and its own disc reader
+                # (tools/disccheck.mjs)
 make memory     # what each region of the memory map holds (src/memory.6502)
 make fps        # the disc's frames and steps a second
 make scenes     # capture the scenes in Hatari (slow; needs ../hatari)
@@ -74,6 +75,12 @@ is the frame: the interrupt, the fixed step, the flip (decision 14).
   bank and puts `bank_now` back is always right.
 - Code in a bank may call main RAM's only if what it calls leaves the
   bank paged as it was (`build_matrix` pages the world's bank, its own).
+- The disc (`src/disc.6502`, decision 12) is the game's own 1770 reader,
+  a track a read, its NMI routine at &0D00 paging the destination's bank
+  for each byte. An interrupt handler that pages a bank must set
+  `bank_now` as it does, or a byte arriving then lands in the wrong bank.
+- Code that sets ACCCON's X from main RAM must lie below &3000
+  (`src/cockpit.6502`, the interrupt handler): `ASSERT` it.
 `node tools/scenerun.mjs SCENES OUT --profile 37` samples where the cycles
 go.
 

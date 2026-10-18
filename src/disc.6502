@@ -1,0 +1,276 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the disc, read by the game (decision 12)
+\
+\ The Master's WD1770 driven directly while the game runs on: Chuckie Egg
+\ 2's streaming edition's reader, its Master half
+\ (../chuckie-egg-2-beeb/src/startup.6502 and docs/streaming.md, which
+\ measured it), but a track at a time: one multi-sector read from the
+\ first sector wanted, stopped (Force Interrupt) after the last byte
+\ wanted, so the next sector needn't be asked for in the moment before it
+\ comes round, which a game polling between frames would miss. Each byte
+\ comes by NMI to the routine at NMI_PAGE, which pages the destination's
+\ sideways bank for that byte and puts bank_now back, so a load into a
+\ bank goes on whatever the game has paged.
+\
+\ The game's files are found in the disc's catalogue (DFS: sector 0 the
+\ names, sector 1 each file's length and start sector; ten sectors a
+\ track), which disc_init reads, so they can be anywhere on the disc.
+\ disc_load starts a file's read; disc_step, from the engine's waits,
+\ moves it on; disc_wait waits for it.
+\ ***************************************************************************
+
+W_CONTROL = &FE24
+W_STATUS  = &FE28
+W_COMMAND = &FE28
+W_TRACK   = &FE29
+W_SECTOR  = &FE2A
+W_DATA    = &FE2B
+W_LATCH   = &25                     ; drive 0, not reset, side 0, single density
+W_RATE    = 0                       ; 6ms steps (r1 r0)
+STA_ABS   = &8D
+BIT_ABS   = &2C
+DISC_SECTORS = 10                   ; a track's
+
+\ The catalogue's two sectors, read into the workspace's marks, which the
+\ draw phase doesn't need until the first frame.
+CATALOGUE = edge_mark
+ASSERT vert_mark = edge_mark + 256
+
+\ disc_init: the NMI routine into its page, the controller reset, and each
+\ of disc_names found in the catalogue (disc_wait's, so interrupts can be
+\ off, as at start: NMIs come anyway). A file that isn't there has its
+\ length 0, and loads as nothing.
+.disc_init
+{
+    ZA_AUTO1 file, entry, n, name, count
+    LDX #nmi_end - nmi_load - 1
+.copy
+    LDA nmi_load,X : STA NMI_PAGE,X
+    DEX : BPL copy                              ; (its first byte last, so it's whole first)
+    STZ fdc_state
+    LDA #W_LATCH AND NOT(4) : STA W_CONTROL     ; reset
+    LDX #20
+.reset
+    DEX : BNE reset
+    LDA #W_LATCH : STA W_CONTROL
+    LDA #&FF : STA fdc_cur                      ; the head's track not known
+    \ the catalogue
+    STZ fdc_track : STZ fdc_sect
+    LDA #LO(CATALOGUE) : STA fe_dst : LDA #HI(CATALOGUE) : STA fe_dst+1
+    STZ fe_len : LDA #2 : STA fe_len+1
+    STZ fe_bank
+    JSR disc_start
+    JSR disc_wait
+    \ each file by name: the entries' names are at 8 + 8e in sector 0,
+    \ their addresses at the same place in sector 1
+    LDA CATALOGUE + &105 : LSR A : LSR A : LSR A : STA n
+    LDX #DISC_FILES - 1
+.each_file
+    STX file
+    STZ df_len_lo,X : STZ df_len_hi,X
+    TXA : ASL A : ASL A : ASL A : SEC : SBC file : STA name    ; 7 file
+    LDA n : STA entry
+.each_entry
+    DEC entry : BMI next_file
+    LDA entry : ASL A : ASL A : ASL A : CLC : ADC #8 : TAY      ; 8 + 8e
+    LDX name
+    LDA #7 : STA count
+.char
+    LDA CATALOGUE,Y : AND #&7F
+    CMP disc_names,X : BNE each_entry
+    INY : INX
+    DEC count : BNE char
+    LDA CATALOGUE,Y : AND #&7F : CMP #'$' : BNE each_entry
+    \ found: from sector 1, its length and start sector
+    TYA : SEC : SBC #7 : TAY                    ; back to the entry's start
+    LDX file
+    LDA CATALOGUE + &104,Y : STA df_len_lo,X
+    LDA CATALOGUE + &105,Y : STA df_len_hi,X
+    LDA CATALOGUE + &107,Y : STA df_sect_lo,X
+    LDA CATALOGUE + &106,Y : AND #3 : STA df_sect_hi,X
+.next_file
+    LDX file
+    DEX : BPL each_file
+    RTS
+}
+
+\ disc_load: file X's read begun, to page A of bank Y, from its start;
+\ disc_step moves it on.
+.disc_load
+{
+    ZA_AUTO2 rem
+    STA fe_dst+1 : STZ fe_dst
+    STY fe_bank
+    LDA df_len_lo,X : STA fe_len
+    LDA df_len_hi,X : STA fe_len+1
+    ORA fe_len : BEQ none
+    \ its first sector as track and sector: the sector number by ten
+    LDA df_sect_lo,X : STA rem
+    LDA df_sect_hi,X : STA rem+1
+    STZ fdc_track
+.track
+    LDA rem : SEC : SBC #DISC_SECTORS : TAY
+    LDA rem+1 : SBC #0 : BCC split
+    STA rem+1 : STY rem
+    INC fdc_track
+    BRA track
+.split
+    LDA rem : STA fdc_sect
+    JMP disc_start
+.none
+    RTS
+}
+
+\ disc_wait: until the read is done.
+.disc_wait
+    JSR disc_step : BNE disc_wait
+    RTS
+
+\ disc_step: the read moved on as far as it can without waiting: Z clear
+\ while there's more to read.
+.disc_step
+{
+    LDA fdc_state : BEQ done                    ; idle
+    JSR disc_poll : BCS busy
+    BNE next                                    ; an error: the track again
+    \ the track's bytes are in: on past them, to the next track's
+    LDA fe_dst : CLC : ADC fe_track_lo : STA fe_dst
+    LDA fe_dst+1 : ADC fe_track_hi : STA fe_dst+1
+    LDA fe_len : SEC : SBC fe_track_lo : STA fe_len
+    LDA fe_len+1 : SBC fe_track_hi : STA fe_len+1
+    STZ fdc_sect : INC fdc_track
+    ORA fe_len : BEQ done
+.next
+    JSR disc_start
+.busy
+    LDA fdc_state                               ; 0 once done
+.done
+    RTS
+}
+
+\ disc_start: reading the rest of the file on fdc_track begun, from
+\ sector fdc_sect. The 1770 can't seek within a read, so a read on another
+\ track is a seek first (a restore before it, if the head's track isn't
+\ known), then the read, which disc_poll starts once the seek is done.
+.disc_start
+    LDA fdc_track
+    CMP fdc_cur : BEQ w_start
+    LDA #1 : STA fdc_state                      ; 1: seeking
+    LDA fdc_track
+    LDX #&00 + W_RATE                           ; Restore, then the seek
+    BIT fdc_cur : BMI w_go
+.w_seek
+    STA W_DATA
+    LDX #&10 + W_RATE                           ; Seek
+.w_go
+    TXA
+    BRA w_command
+.w_start
+{
+    \ this track's bytes: the rest of its sectors, or the rest of the
+    \ file if that's less
+    LDA #DISC_SECTORS : SEC : SBC fdc_sect : STA fe_track_hi
+    STZ fe_track_lo
+    LDA fe_len+1 : CMP fe_track_hi : BCC fits   ; under the track's pages
+    BNE whole
+    LDA fe_len : BEQ fits                       ; exactly them
+.whole
+    BRA armed
+.fits
+    LDA fe_len : STA fe_track_lo
+    LDA fe_len+1 : STA fe_track_hi
+.armed
+    \ armed: the bytes to fe_dst, counted by the NMI routine as a low byte
+    \ (0 for 256) and the pages it starts, the rest read and dropped
+    LDA fe_dst : STA nmi_dst + 1
+    LDA fe_dst+1 : STA nmi_dst + 2
+    LDA fe_bank : STA nmi_bank + 1
+    LDA fe_track_lo : STA nmi_left
+    CMP #1                                      ; carry set if a part page
+    LDA fe_track_hi : ADC #0 : STA nmi_pages
+    LDA #STA_ABS : STA nmi_dst
+    LDA #2 : STA fdc_state                      ; 2: reading
+    LDA fdc_sect : STA W_SECTOR
+    LDA #&90                                    ; Read Sector, multiple
+}
+\ The 1770 command A. Its status isn't valid for a while after (the
+\ WD1770's data sheet: a poll at once would find the command done before
+\ it's begun), some 70us.
+.w_command
+{
+    STA W_COMMAND
+    LDX #28
+.wait
+    DEX : BNE wait
+}
+.w_rts
+    RTS
+
+\ disc_poll: carry set while the controller's busy; then carry clear, and
+\ Z set, or A the error bits.
+.disc_poll
+{
+    LDA W_STATUS : LSR A : BCS w_rts            ; busy
+    LDA fdc_state : LSR A : BCC read            ; 2: the read is done
+    \ the seek, or the restore, is done (carry set)
+    LDA fdc_track
+    BIT fdc_cur : BPL sought
+    INC fdc_cur : BNE sought
+    JSR w_seek                                  ; restored (from &FF): now the seek
+    SEC                                         ; (busy)
+    RTS
+.sought
+    STA fdc_cur
+    JSR w_start
+    SEC                                         ; (busy)
+    RTS
+.read
+    STZ fdc_state
+    LDA nmi_dst : CMP #BIT_ABS : BNE short      ; stopped before it had them all
+    LDA W_STATUS : AND #&0C                     ; CRC, lost data
+    CLC
+    RTS
+.short
+    LDA #&10                                    ; (as record not found)
+    CLC
+    RTS
+}
+
+\ The NMI routine, copied to NMI_PAGE. It stores nothing until a read arms
+\ it (making nmi_dst a STA); the last byte wanted makes it a BIT again and
+\ stops the read, and any NMI before the first read is read and dropped.
+\ The count is nmi_left's low byte (0 for 256) and nmi_pages, the pages it
+\ starts. A is kept in the LDA # (Tom Seddon's), so no zero page.
+.nmi_load
+SECTION Nmi, org = NMI_PAGE, guard = NMI_PAGE + &40, cmos = TRUE
+    STA nmi_restore + 1
+.nmi_bank
+    LDA #0 : STA romsel                         ; (the destination's bank)
+    LDA W_DATA
+.nmi_dst
+    BIT &8000                                   ; (a STA once armed)
+    LDA bank_now : STA romsel
+    INC nmi_dst + 1
+    BNE nmi_count
+    INC nmi_dst + 2
+.nmi_count
+    DEC nmi_left
+    BNE nmi_restore
+    DEC nmi_pages
+    BEQ nmi_last
+.nmi_restore
+    LDA #0
+    RTI
+.nmi_last
+    LDA #BIT_ABS : STA nmi_dst
+    LDA #&D0 : STA W_COMMAND                    ; Force Interrupt: the read stops
+    BRA nmi_restore
+ENDSECTION
+.nmi_end
+
+\ The game's files, by name (seven characters, padded), in DF_* order.
+.disc_names
+    EQUS "SHAPES "
+DF_SHAPES = 0
+DISC_FILES = (P% - disc_names) DIV 7
+ASSERT DISC_FILES <= DISC_MAX

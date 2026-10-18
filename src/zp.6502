@@ -121,6 +121,24 @@ SECTION Work, org = WORK, guard = NMI_PAGE, virtual = TRUE
 .erase_stop_lo SKIP 2       ; by screen: where its erase list ends ...
 .erase_stop_hi SKIP 2
 .erase_full SKIP 2          ; ... and non-zero if it overflowed
+    \ the disc (disc.6502): the reader's state, what's left of the file
+    \ being read, and the game's files as the catalogue has them
+DISC_MAX = 8
+.fdc_state  SKIP 1          ; 0 idle, 1 seeking, 2 reading
+.fdc_cur    SKIP 1          ; the head's track (&FF: not known)
+.fdc_sect   SKIP 1          ; the sector being read, and its track
+.fdc_track  SKIP 1
+.fe_len     SKIP 2          ; the bytes still to read ...
+.fe_dst     SKIP 2          ; ... to where ...
+.fe_bank    SKIP 1          ; ... in which bank
+.fe_track_lo SKIP 1         ; the bytes this track's read wants
+.fe_track_hi SKIP 1
+.nmi_left   SKIP 1          ; the NMI routine's count: a low byte (0 for 256) ...
+.nmi_pages  SKIP 1          ; ... and the pages it starts
+.df_len_lo  SKIP DISC_MAX   ; by file: its length ...
+.df_len_hi  SKIP DISC_MAX
+.df_sect_lo SKIP DISC_MAX   ; ... and its first sector
+.df_sect_hi SKIP DISC_MAX
     \ by shape and colour
 .anim_frame SKIP 32         ; each shape's animation frame, as its list numbers them
 .colour_map SKIP 16         ; the ST's colours to the screen's bytes (&00, &0F, &F0, &FF)

@@ -102,6 +102,7 @@ ASSERT irq_handler < &3000
 {
     ZA_AUTO1 due
 .wait
+    JSR disc_step                               ; a read goes on while it waits
     LDA fields : SEC : SBC stepped
     CMP #STEP_FIELDS : BCC wait
     \ the steps due, no more than MAX_STEPS: past that, the game slows
@@ -132,6 +133,7 @@ ASSERT irq_handler < &3000
 .frame
 {
 .shown
+    JSR disc_step
     LDA frame_ready : BNE shown                 ; the last frame not yet up
     LDA draw_buffer : EOR #1 : STA draw_buffer
     TAX : LDA buffer_bank,X : STA draw_bank

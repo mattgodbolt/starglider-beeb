@@ -278,3 +278,30 @@ view's window, with a palette split at the view's bottom edge (decision
   the cockpit into the screen. `start` copies the cockpit to the shadow
   screen a page at a time, and only the window is ever cleared, by code
   below &3000, where ACCCON's X changes nothing.
+
+### The disc reader
+
+Chuckie Egg 2's streaming edition's 1770 reader, its Master half, is now
+the game's (`src/disc.6502`, decision 12), with three changes.
+
+- **The NMI routine pages the destination's bank** for each byte and puts
+  `bank_now` back, so a load into a bank goes on whatever the game has
+  paged. That's why `BANK` writes `bank_now` first.
+- **Files are found by name** in the DFS catalogue, which `disc_init`
+  reads at start, so nothing depends on where baron puts them.
+- **A track a read.** Read a sector at a time, with the next asked for
+  from the engine's waits, 16K took 13.75 seconds: the polls come a frame
+  apart, so every sector cost a revolution. Now each track is one
+  multi-sector read from the first sector wanted, and the NMI routine
+  stops it with a Force Interrupt after the last byte wanted. 16K takes
+  about 3 seconds, with the game running throughout, a little slower
+  while the NMIs take their share. (One slip on the way: CE2's poll
+  relies on the carry surviving from the poll into the next read's start,
+  to report "busy", and the new track arithmetic broke that.)
+
+Until the game has a file of its own to load, the disc reads SHAPES
+again into bank 6, which nothing uses yet, as the models turn.
+`tools/disccheck.mjs` runs that with the disc in jsbeeb's drive and
+checks every byte. The tools that run the disc without booting now put
+it in the drive too (`tools/disc.mjs`). Real hardware is the test that
+counts here, as CE2 found: jsbeeb's 1770 is kinder than the chip.
