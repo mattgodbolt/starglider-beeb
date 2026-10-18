@@ -69,6 +69,9 @@ ENDSECTION
 \ paged).
 SECTION LogicBank, org = &8000, filename = "LOGIC", guard = &C000, cmos = TRUE
     EQUD 0, 0
+    \ The bank's own first 4K, under ANDY, for what is read with ANDY
+    \ paged out: the sound effects' tables (sfx.6502).
+INCLUDE "../build/gen/sfx.6502"
     SKIP ANDY_TOP - P%
     \ Data from where ANDY ends; code past the world bank's list phase too:
     \ Baron matches its control-flow annotations to their jumps by address
@@ -86,4 +89,5 @@ INCLUDE "logic/frame.6502"
 INCLUDE "logic/level.6502"
 INCLUDE "view.6502"
 INCLUDE "panel.6502"
+INCLUDE "sfx.6502"
 ENDSECTION

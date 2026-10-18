@@ -1,0 +1,173 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the sound effects (decision 5): their
+\ start, the field's work, and the samples
+\
+\ In the logic's bank, past ANDY, run with ANDY paged out: the records and
+\ tables (tools/mksfx.py) are in the bank's own first 4K. sound.6502 says
+\ how the ST's effects go onto the SN76489.
+\ ***************************************************************************
+
+\ sfx_begin: sfx_start's effect Y with count X: nothing while a sample
+\ plays, with the sound off ($2CB), or while a noise's lock lasts (&29C),
+\ nor for the effects nothing starts, which the port leaves out; else the
+\ effect's record. A noise's sets the lock, its period and its envelope
+\ from the top, on all three channels, and leaves a Timer A effect
+\ ticking under it, as on the ST; a Timer A effect's (&0052E, &00626,
+\ &00180) sets its timer, its count, and tone A at its level, the noise
+\ off, the two tones their first at once.
+.sfx_begin
+{
+    JSR split_clear
+    PHP : SEI                                   ; (the field's count changes sample_left)
+    LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3 : BNE done
+    LDA sound_on : BEQ done
+    LDA sfx_lock : BNE done
+    LDA sfx_record_at,Y : CMP #&FF : BEQ done
+    TAY
+    LDA sfx_records,Y : BNE noise               ; (from ta_kind: Timer A's)
+    STX ta_count
+.noise
+    JSR sfx_record
+.done
+    PLP
+    RTS
+}
+
+\ split_clear: once the palette split (User VIA T1) isn't due within 512
+\ microseconds (its count's high byte 2 or more; it runs on past 0), for
+\ an effect's start, which keeps interrupts off longer than the split's
+\ window allows. Interrupts on, or the count runs past anyway.
+.split_clear
+    LDA usrvia_t1ch : CMP #2 : BCC split_clear
+    RTS
+
+\ sfx_record: the record at Y in sfx_records: the state from the variable
+\ it names (as an offset from ta_kind) to the end, the chip's bytes, and
+\ for a record from ta_kind, T1 at its latch if it starts an effect, or
+\ stopped. With interrupts off.
+.sfx_record
+{
+    LDX sfx_records,Y : INY
+    PHX
+.state
+    LDA sfx_records,Y : STA ta_kind,X : INY
+    INX : CPX #SFX_STATE : BNE state
+    LDX sfx_records,Y : INY                     ; the chip's bytes
+.chip
+    LDA sfx_records,Y : JSR sn_write : INY
+    DEX : BNE chip
+    PLX : BNE done                              ; (a noise's leaves T1 as it is)
+    LDA #&40 : STA sysvia_ier
+    LDA ta_kind : BEQ done
+    \ T1 at Timer A's rate, from now (sound_init has it free-running)
+    LDA sfx_records,Y : STA sysvia_t1cl : INY
+    LDA sfx_records,Y : STA sysvia_t1ch
+    LDA #&C0 : STA sysvia_ier
+.done
+    RTS
+}
+
+\ sound_field: sound_vsync's, while there's work: with X not 0, the
+\ samples' bytes counted down at their rate, to 0; and while the noise
+\ sounds, its envelope's level by the field, falling from 31 to 0 (the
+\ shapes the noise effects use, which hold it there), on the three
+\ channels or two (env_att's from noise_from). X only: the interrupt
+\ keeps it, not Y.
+SAMPLE_FIELD = (312 * 64 * (2457600 DIV (50 * 8)) * 4 + 7812) DIV 15625
+ASSERT SAMPLE_FIELD < &10000
+.sound_field
+{
+    TXA : BEQ noise
+    \ the samples: the speeches' rate (Timer A control 4, data 8: 6144Hz)
+    \ a field, 8.8, until the player (to come) counts them itself
+    LDA sample_frac : SEC : SBC #LO(SAMPLE_FIELD) : STA sample_frac
+    LDA sample_left : SBC #HI(SAMPLE_FIELD) : STA sample_left
+    LDX #&FD                                    ; (bytes 1-3: INX keeps the borrow)
+.borrow
+    LDA sample_left + 1 - &FD,X : SBC #0 : STA sample_left + 1 - &FD,X
+    INX : BNE borrow
+    BCS noise
+    LDX #3
+.played
+    STZ sample_left,X
+    DEX : BPL played
+.noise
+    LDA sfx_mix : CMP #SFX_MIX_NOISE : BNE done
+    LDA env_pos : CLC : ADC env_rate : STA env_pos
+    LDA env_pos+1 : ADC env_rate+1 : STA env_pos+1
+    CMP #31 : BCC falling
+    STZ sfx_mix                                 ; at 0: the noise is done
+    LDA #31
+.falling
+    EOR #31                                     ; the level: 31 less the steps
+    ORA noise_from : TAX
+    LDA env_att,X
+    CMP noise_att : BEQ done
+    STA noise_att
+    ORA #SN_NOISE OR SN_VOL
+    JMP sn_write
+.done
+    RTS
+}
+
+\ sound_init: port A as the chip wants it (an output, the keyboard on
+\ auto-scan), T1 free-running for the effects, every channel silent, no
+\ effect. Interrupts off.
+.sound_init
+    LDA #&FF : STA sysvia_ddra
+    LDA #&0B : STA sysvia_orb
+    LDA sysvia_acr : AND #&3F : ORA #&40 : STA sysvia_acr
+    LDY #SFX_INIT
+    JMP sfx_record
+
+\ The samples sample_start plays (sample_clip), each the ST's: the title
+\ song (star) and Clare Edgeley's four speeches (clare1 to clare4).
+SAMPLE_SONG    = 0
+SAMPLE_LAUNCH  = 1                  ; a missile launched (L)
+SAMPLE_DOCKED  = 2                  ; at the silo tunnel's end
+SAMPLE_SHIELDS = 3                  ; the shields low
+SAMPLE_ENERGY  = 4                  ; the energy low
+
+\ sample_start (the ST's &01A50): sample_clip, if the sound is on. The
+\ caller sets sample_clip and the ST's length and rate of it (sample_len,
+\ sample_tacr, sample_tadr) first, as the ST's sets &A0, &A4, &2CF and
+\ &2D0. The bytes left are what the logic reads back: while they're not 0
+\ the speech warnings wait and no effect starts; sound_field counts them
+\ down. Timer A is the sample's on the ST, its mixer all off, so an
+\ effect playing stops (SFX_QUIET, read with ANDY, which the logic has
+\ paged, out).
+.sample_start
+{
+    LDA sound_on : BEQ off
+    JSR split_clear
+    PHP : SEI
+    LDX #3
+.len
+    LDA sample_len,X : STA sample_left,X
+    DEX : BPL len
+    STZ sample_frac
+    LDA bank_now : PHA
+    BANK BANK_LOGIC
+    LDY #SFX_QUIET : JSR sfx_record
+    PLA : STA bank_now : STA romsel
+    PLP
+.off
+    RTS
+}
+
+\ speech: sample_clip at the speeches' rate (Timer A control 4, data 8:
+\ 6144Hz on the ST), sample_len's high word 0: its low word set first.
+.speech
+    STZ sample_len+2 : STZ sample_len+3
+    LDA #4 : STA sample_tacr
+    LDA #8 : STA sample_tadr
+    JMP sample_start
+
+\ sample_stop (Q's, and the ST's &02A30): the clip playing, if one is, to
+\ end. The ST sets its bytes left (&01E56) to 1, which its next sample
+\ ends; the port counts them by the field, so ends it at once.
+.sample_stop
+    PHP : SEI
+    STZ sample_left : STZ sample_left+1 : STZ sample_left+2 : STZ sample_left+3
+    PLP
+    RTS

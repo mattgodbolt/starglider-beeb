@@ -1,47 +1,172 @@
 \ ***************************************************************************
-\ STARGLIDER for the BBC Master - the sound effects (decision 5)
+\ STARGLIDER for the BBC Master - the sound effects (decision 5): what the
+\ interrupt runs, and sfx_start
 \
-\ The sound layer is to come; the logic calls sfx_start as the ST's does.
+\ The ST's effects (sfx_start, &00110; docs/research/st.md, "Music and
+\ effects"), the eight it starts, on the SN76489: tone A's on tone 0 and
+\ the noise on the noise channel, clocked by tone 2 (silent), at the YM's
+\ own periods, which the SN takes as they are. Timer A's effects tick on
+\ System VIA T1 at Timer A's rate, the fastest sweeps taking k of its
+\ ticks a tick (tools/mksfx.py); the noise's lock, the YM's envelope and
+\ the samples' count go by the field (sound_vsync), as the ST's VBL counts
+\ the lock. The rest is in the logic's bank (sfx.6502), with the records
+\ each effect starts from. This must lie below &3000, where ACCCON's X
+\ changes nothing: the interrupt runs it.
+\
+\ Every write of the chip is in the interrupt or with interrupts off
+\ (input.6502).
 \ ***************************************************************************
 
-\ sfx_start (the ST's &00110): effect A, with X the ST's d1. It changes no
-\ state the game's logic reads (docs/research/st-logic.md).
-.sfx_start
+\ The chip's latch bytes: a register, then its low 4 bits (a period's) or
+\ its attenuation (SN_VOL's), 15 silent.
+SN_TONE0 = &80
+SN_NOISE = &E0
+SN_VOL   = &10
+SN_OFF   = 15
+
+\ The sound's state, in the order the records set it (tools/mksfx.py's
+\ STATE). Timer A's effect: its kind (0 when none ticks, bit 7 the two
+\ tones), the period as the chip takes it (its low 4 bits, the rest), a
+\ sweep's start, end and step or the two tones, the two tones' ticks, and
+\ the period's top bits the chip has (&FF not known). sfx_mix is what the
+\ YM's mixer lets through; noise_from is where the noise's attenuations
+\ start in env_att: three channels', or two's (ENV_TWO) once a Timer A
+\ effect's end has put channel A's volume to 0.
+.ta_kind        SKIP 1
+.ta_lo          SKIP 1
+.ta_hi          SKIP 1
+.ta_start_lo    SKIP 1
+.ta_start_hi    SKIP 1
+.ta_end_lo      SKIP 1
+.ta_end_hi      SKIP 1
+.ta_step        SKIP 1
+.ta_tick        SKIP 1
+.ta_written     SKIP 1
+.sfx_mix        SKIP 1
+.noise_from     SKIP 1
+.sfx_lock       SKIP 1      ; the ST's &29C: fields until another effect may start
+.env_pos        SKIP 2      ; the envelope's steps since it started, 8.8
+.env_rate       SKIP 2      ; ... and a field's
+.noise_att      SKIP 1      ; the noise's attenuation on the chip
+SFX_STATE = P% - ta_kind
+.ta_count       SKIP 1      ; the sweeps or halves to go
+.sample_frac    SKIP 1      ; the samples' count's fraction (sfx.6502)
+SFX_KIND_TWO  = &80
+SFX_MIX_TONE  = &01
+SFX_MIX_NOISE = &40
+ENV_TWO       = 32
+
+\ sn_write: A to the chip, by the System VIA's port A, with its write
+\ enable (the addressable latch's bit 0) held low for the chip to take it:
+\ 32 of its 4 MHz clocks (TI's data sheet), and jsbeeb takes the byte 14
+\ cycles after the enable falls. With interrupts off; it keeps X and Y.
+.sn_write
+    STA sysvia_ora_nh
+    STZ sysvia_orb                              ; write enable low
+    PHA : PLA : PHA : PLA                       ; (14 cycles)
+    LDA #8 : STA sysvia_orb                     ; and high
     RTS
 
-\ The samples sample_start plays (sample_clip), each the ST's: the title
-\ song (star) and Clare Edgeley's four speeches (clare1 to clare4).
-SAMPLE_SONG    = 0
-SAMPLE_LAUNCH  = 1                  ; a missile launched (L)
-SAMPLE_DOCKED  = 2                  ; at the silo tunnel's end
-SAMPLE_SHIELDS = 3                  ; the shields low
-SAMPLE_ENERGY  = 4                  ; the energy low
-
-\ sample_start (the ST's &01A50): sample_clip, if the sound is on. The
-\ caller sets sample_clip and the ST's length and rate of it (sample_len,
-\ sample_tacr, sample_tadr) first, as the ST's sets &A0, &A4, &2CF and
-\ &2D0. The bytes left are what the logic reads back: while they're not 0
-\ the speech warnings wait, and the player (to come) counts them down.
-.sample_start
+\ sound_tick: System VIA T1's interrupt, Timer A's tick for the effect: a
+\ sweep's next period (the ST's &005AC, by 1, and &006A4, by 4, or k of
+\ its ticks: tools/mksfx.py), or the two tones' (&00228). At a sweep's end
+\ (its period at or past the end) the period stays the last written while
+\ it starts again; at the effect's end (the sweeps or halves d1 gave) the
+\ timer stops and channel A's volume goes to 0. A and X.
+\ A tick due within 256 microseconds of the palette split (User VIA T1's
+\ count, which runs on past 0, its high byte 0) lets the split go first,
+\ which the tick would hold up past its window: it waits for the split's
+\ flag, for the interrupt to take it at once (engine.6502), and leaves its
+\ own for the interrupt to come back to.
+.sound_tick
 {
-    LDA sound_on : BEQ off
-    LDX #3
-.len
-    LDA sample_len,X : STA sample_left,X
-    DEX : BPL len
-.off
+    LDA usrvia_t1ch : BNE clear                 ; (its low byte read would acknowledge it)
+.split
+    BIT usrvia_ifr : BVC split
+    RTS
+.clear
+    LDA sysvia_t1cl                             ; acknowledged
+    LDX #ta_start_lo - ta_lo                    ; (a sweep's restart, the first tone)
+    BIT ta_kind : BMI two
+    LDA ta_lo : CLC : ADC ta_step
+    CMP #16 : BCC same_hi
+    SBC #16                                     ; (C set)
+    INC ta_hi
+.same_hi
+    STA ta_lo
+    CMP ta_end_lo
+    LDA ta_hi : SBC ta_end_hi : BCC tone0_write
+    JSR period
+.count
+    DEC ta_count : BNE done
+    STZ ta_kind
+    LDA #&40 : STA sysvia_ier                   ; T1's interrupt off
+    LDA #ENV_TWO : STA noise_from               ; (sound_field's noise takes it)
+    LDA sfx_mix : CMP #SFX_MIX_TONE : BNE done
+    LDA #SN_TONE0 OR SN_VOL OR SN_OFF
+    JMP sn_write
+.two
+    INC ta_tick : LDA ta_tick
+    CMP #&20 : BEQ second
+    CMP #&40 : BNE done
+    STZ ta_tick
+    BRA tone
+.second
+    LDX #ta_end_lo - ta_lo
+.tone
+    JSR period
+    JSR tone0_write
+    BRA count
+.done
+    RTS
+\ period: ta_lo and ta_hi from the pair X on
+.period
+    LDA ta_lo,X : STA ta_lo
+    LDA ta_hi,X : STA ta_hi
     RTS
 }
 
-\ speech: sample_clip at the speeches' rate (Timer A control 4, data 8:
-\ 6144Hz on the ST), sample_len's high word 0: its low word set first.
-.speech
-    STZ sample_len+2 : STZ sample_len+3
-    LDA #4 : STA sample_tacr
-    LDA #8 : STA sample_tadr
-    JMP sample_start
+\ tone0_write: ta_lo and ta_hi into tone 0's period: the latch byte with
+\ the low 4 bits, then the data byte with the rest if the chip hasn't them.
+.tone0_write
+{
+    LDA ta_lo : ORA #SN_TONE0 : JSR sn_write
+    LDA ta_hi : CMP ta_written : BEQ done
+    STA ta_written
+    JMP sn_write
+.done
+    RTS
+}
 
-\ sample_stop (Q's, and the ST's &02A30): the clip playing, if one is, to
-\ end at its next sample (the ST sets its bytes left, &01E56, to 1).
-.sample_stop
+\ sound_vsync: the field's part, from the vertical sync's interrupt: the
+\ lock counted down, as the ST's VBL counts &29C; and while a sample's
+\ bytes are left or the noise sounds, sound_field, in the logic's bank
+\ (bank_now first, as the disc's NMI routine expects, and back).
+.sound_vsync
+{
+    LDA sfx_lock : BEQ unlocked
+    DEC sfx_lock
+.unlocked
+    LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3
+    TAX : BNE field                             ; (X: sound_field's, a sample's left)
+    LDA sfx_mix : CMP #SFX_MIX_NOISE : BNE done
+.field
+    LDA bank_now : PHA
+    BANK BANK_LOGIC
+    JSR sound_field
+    PLA : STA bank_now : STA romsel
+.done
+    RTS
+}
+
+\ sfx_start (the ST's &00110): effect A, with X the ST's d1 (the logic's
+\ callers give 0, 1 or 10), by sfx_begin in the logic's bank, which the
+\ world's callers haven't paged. It changes no state the game's logic
+\ reads (docs/research/st-logic.md); A and Y go.
+.sfx_start
+    TAY
+    LDA bank_now : PHA
+    BANK BANK_LOGIC
+    JSR sfx_begin
+    PLA : STA bank_now : STA romsel
     RTS

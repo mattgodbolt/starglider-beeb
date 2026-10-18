@@ -107,6 +107,8 @@ ENDIF
 
 INCLUDE "engine.6502"
 INCLUDE "input.6502"
+INCLUDE "sound.6502"
+ASSERT P% <= &3000                  ; (the interrupt runs it)
 INCLUDE "cockpit.6502"
 INCLUDE "disc.6502"
 
@@ -172,6 +174,8 @@ SIGHT_CY = 68
     ASSERT CODE2 - TABLES <= WIN_PIC - &8000    ; (TABLES' guard is CODE2)
     JSR disc_load
     JSR input_init
+    BANK BANK_LOGIC
+    JSR sound_init
     JSR install_irq
     \ the new game, as the ST's start_game makes it (L_01EFE), and its
     \ first level's start (L_01F06)

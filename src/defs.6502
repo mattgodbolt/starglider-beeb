@@ -14,7 +14,10 @@ ACCCON_Y   = 8              ; ... Y: HAZEL's RAM at &C000-&DFFF
 sysvia_orb = &FE40          ; the addressable latch (bit 3: the keyboard's enable);
                             ; read, bits 4 and 5 the joysticks' fire buttons, low pressed
 sysvia_ddra = &FE43
-sysvia_ifr = &FE4D          ; bit 1: the vertical sync (CA1) has come
+sysvia_t1cl = &FE44         ; T1's counter, low (reading it acknowledges T1): the effects' timer
+sysvia_t1ch = &FE45         ; ... high (writing it starts the count)
+sysvia_acr = &FE4B
+sysvia_ifr = &FE4D          ; bit 1: the vertical sync (CA1) has come; bit 6: T1
 sysvia_ier = &FE4E          ; write bit 7 clear to disable the bits set
 sysvia_ora_nh = &FE4F       ; port A without handshake: the keyboard
 usrvia_t1cl = &FE64         ; T1's counter, low (reading it acknowledges T1)

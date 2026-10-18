@@ -23,7 +23,6 @@ INCLUDE "step.6502"
     JSR rotate_exact
     BANK_ANDY BANK_PIC
     RTS
-INCLUDE "sound.6502"
 
 
 \ objects_clear: every field of every slot to 0.

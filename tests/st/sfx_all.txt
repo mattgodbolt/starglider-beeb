@@ -1,0 +1,85 @@
+# Every sound effect, from the game's own tester (tools/st_sfx.py): each of
+# the 24 with d1 = 1 as the tester plays them, docking's with its 10, and
+# the meetings the game can make: a hit while the laser sounds, the laser
+# once a hit's lock has run out, a hit inside the lock, the laser again
+# while it sounds, one sweep after another.
+wait 38
+key 57
+wait 4
+tester
+play 0
+wait 4
+play 1
+wait 4
+play 2
+wait 4
+play 3
+wait 4
+play 4
+wait 4
+play 5
+wait 4
+play 6
+wait 4
+play 7
+wait 4
+play 8
+wait 2
+play 9
+wait 2
+play 10
+wait 2
+play 11
+wait 2
+play 12
+wait 4
+play 13
+wait 4
+play 14
+wait 4
+play 15
+wait 4
+play 16
+wait 2
+play 17
+wait 2
+play 18
+wait 2
+play 19
+wait 2
+play 20
+wait 2
+play 21
+wait 2
+play 22
+wait 9
+play 23
+wait 2
+# docking's
+play 16 10
+wait 5
+# a hit while the laser sounds: the noise over its sweep, which still ends
+play 20
+wait 0.05
+play 0
+wait 4
+# the laser once a hit's lock has run out, over the hit's envelope
+play 2
+wait 1
+play 20
+wait 1
+# a hit inside a hit's lock: nothing
+play 1
+wait 0.2
+play 3
+wait 4
+# the laser again while it sounds
+play 20
+wait 0.05
+play 20
+wait 1
+# one sweep after another, the first cut short
+play 9
+play 8
+wait 1
+quit
