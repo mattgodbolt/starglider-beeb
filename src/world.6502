@@ -293,13 +293,18 @@ ROT_SLACK = 512
 NEAR_BOX = 2000 + ROT_SLACK
 MACRO RELEVANT yes
     LDA rot_acc+5 : BPL ahead
-    \ behind the player: wholly behind the view, with the slack, if z <=
-    \ -(size + slack), when only NEAR_BOX can catch it
+    \ behind the player: below -3 slack / 2 the pyramid is empty, and only
+    \ NEAR_BOX can catch it; above, so it is if it's wholly behind the view,
+    \ z <= -(size + slack)
+    CMP #HI(-3 * ROT_SLACK / 2) : BCS just_behind
+    ASSERT LO(-3 * ROT_SLACK / 2) = 0 AND -3 * ROT_SLACK / 2 > -NEAR_BOX
+    JMP near_test
+.just_behind
     LDY otype
     LDA rot_acc+4 : CLC : ADC size_z_lo,Y : STA t16
     LDA rot_acc+5 : ADC size_z_hi,Y : STA t16+1
     CMPS16 t16, #1 - ROT_SLACK : BPL pyramid
-    CMPS16 rot_acc+4, #-NEAR_BOX : BPL near_test
+    BRA near_test
 .not
     JMP no
 .ahead
@@ -319,10 +324,10 @@ MACRO RELEVANT yes
     WITHIN rot_acc+2, z2, near_test
     JMP yes
 .near_test
-    \ within NEAR_BOX on every axis?
+    \ within NEAR_BOX on every axis? (z first: most behind are far behind)
+    WITHIN rot_acc+4, #NEAR_BOX, no
     WITHIN rot_acc, #NEAR_BOX, no
     WITHIN rot_acc+2, #NEAR_BOX, no
-    WITHIN rot_acc+4, #NEAR_BOX, no
     JMP yes
 .no
 ENDMACRO
