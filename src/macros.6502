@@ -103,6 +103,11 @@ MACRO BANK n
     LDA #n : STA bank_now : STA romsel
 ENDMACRO
 
+\ BANK_ANDY n: bank n with ANDY over its first 4K, as the logic runs.
+MACRO BANK_ANDY n
+    LDA #n OR ROMSEL_ANDY : STA bank_now : STA romsel
+ENDMACRO
+
 \ ASRW v: the word v one bit right, as the 68000's asr: its sign kept.
 MACRO ASRW v
     LDA v+1 : CMP #&80 : ROR A : STA v+1

@@ -1,17 +1,21 @@
 \ ***************************************************************************
 \ STARGLIDER for the BBC Master - the disc
 \
-\ For now the disc shows the renderer: the ST's models turning one after
-\ another, as its Interrogate screen shows them, drawn by the port's
-\ renderer into a double-buffered MODE 1 screen at the ST's 320 x 200.
+\ The game, from a new game at level 1, as the ST's title starts one (the
+\ front end is to come): the ST's logic (logic/, decision 1) stepped on
+\ the engine (engine.6502, decision 14) in the ST's order, steered by the
+\ ST's keys and the analogue joystick (input.6502, decision 6), drawn by
+\ the port's renderer into a double-buffered MODE 1 screen at the ST's
+\ 320 x 200.
 \
 \ !BOOT (*EXEC'd) sets the mode and palette through BASIC and the OS and
 \ runs SG, which makes no OS call: it loads the rest itself, with its own
 \ disc reader (disc.6502, decision 12), a track a revolution: HAZEL's
-\ files into HAZEL (the filing system's workspace until then), the shapes
-\ and the world into their banks, and the cockpit into the screen, which
-\ it copies into the shadow screen. (*SRLOAD, Q or no, loaded the banks
-\ at a fraction of the speed: docs/journal.md, 2026-10-18.)
+\ files into HAZEL (the filing system's workspace until then), the shapes,
+\ the world and the logic into their banks, and the cockpit into the
+\ screen, which it copies into the shadow screen. (*SRLOAD, Q or no,
+\ loaded the banks at a fraction of the speed: docs/journal.md,
+\ 2026-10-18.)
 \ ***************************************************************************
 
 INCLUDE "defs.6502"
@@ -69,7 +73,7 @@ SECTION Main, org = &0E00, filename = "SG", guard = MAIN_TOP, cmos = TRUE
 IF DEFINED(SPLIT_SWEEP)
     JSR split_test
 ENDIF
-    JMP models
+    JMP game
 
 IF DEFINED(SPLIT_SWEEP)
 \ split_test: scan lines 126-131 whole in logical 3, on both screens, so a
@@ -103,6 +107,7 @@ ASSERT P% <= &3000
 ENDIF
 
 INCLUDE "engine.6502"
+INCLUDE "input.6502"
 INCLUDE "cockpit.6502"
 INCLUDE "disc.6502"
 
@@ -110,101 +115,137 @@ INCLUDE "disc.6502"
 \ The files start loads (disc_load: the file, where, its bank), the last
 \ first.
 .disc_load_file
-    EQUB DF_COCKPIT, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
+    EQUB DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
 .disc_load_lo
-    EQUB LO(SCREEN), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
+    EQUB LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
 .disc_load_hi
-    EQUB HI(SCREEN), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
+    EQUB HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
 .disc_load_bank
-    EQUB BANK_SHAPES, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
+    EQUB BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
 DISC_LOADS = P% - disc_load_bank
 
 \ ---------------------------------------------------------------------------
-\ models: each type with a model in turn, turning, two radii from the
-\ camera, on the engine's step (engine.6502).
-MODEL_STEPS = 120                   ; steps each model is shown
-TURN = 24                           ; its heading's step a step (4096 a turn)
-TILT = 320                          ; and its pitch
-.model_types
-    EQUB 1, 2, 3, 4, 5, 7, 8, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28
-MODELS = P% - model_types
-
-.models
+\ game: the game's state as the ST's start-up and title leave it, a new
+\ game as the title starts one, and the engine (engine.6502), for ever.
+SIGHT_CX = 160                      ; the sight's centre (init_resolution's, in colour)
+SIGHT_CY = 68
+.game
 {
-    \ The player at the origin, looking along z; one object.
-    LDX #pl_roll + 1 - pl_x
-.zero
-    STZ pl_x,X
-    DEX : BPL zero
+    \ the logic's variables 0, in the workspace and in ANDY (with the
+    \ objects' fields there), and the objects', the silo's two records
+    \ included, which no level's set-up clears: as the ST's are as it loads
+    LDX #0
+.work
+    STZ work_end,X
+    INX : CPX #LO(logic_work_end - work_end) : BNE work
+    ASSERT logic_work_end - work_end <= 256
+    BANK_ANDY BANK_LOGIC
+    JSR andy_clear
     JSR objects_clear
-    LDA #1 : STA n_slots
-    STZ docked : STZ silo_missile : STZ all_faces
+    LDX #pl_roll + 1 - pl_x
+.player
+    STZ pl_x,X
+    DEX : BPL player
+    STZ n_slots : STZ docked : STZ silo_missile : STZ all_faces
+    \ what the ST's start-up sets (init_resolution's sight centre, the
+    \ sound on), the beam's colour as the program loads, and what the
+    \ title leaves: the four frame_ends before it waits for a key, and its
+    \ scene's player at y &64 (sub_03B38)
+    LDA #SIGHT_CX : STA sight_cx
+    LDA #SIGHT_CY : STA sight_cy
+    LDA #&FF : STA sound_on
     LDA #15 : STA beam_colour
+    LDA #4 : STA frame_count
+    LDA #&64 : STA pl_y
     LDX #15
 .colours
-    LDA model_colours,X : STA colour_map,X
+    LDA st_colours,X : STA colour_map,X
     DEX : BPL colours
-    STZ model_i
-    JSR set_model
-    \ Main RAM's screen shown, and both cleared before they're drawn.
+    \ main RAM's screen shown, and both cleared before they're drawn
     JSR erase_init
-    STZ draw_buffer : STZ frame_ready
-    LDA fields : STA stepped
+    STZ draw_buffer : STZ frame_drawn : STZ frame_ready
     \ The disc reader at work (decision 12): until the game has a file of
-    \ its own to load, SHAPES read again into the loading area as the
-    \ models turn (tools/disccheck.mjs checks it).
+    \ its own to load, SHAPES read again into the loading area as the game
+    \ starts (tools/disccheck.mjs checks it).
     LDX #DF_SHAPES : LDY #BANK_SPARE
     STZ fe_dst : LDA #&80 : STA fe_dst+1
     JSR disc_load
+    JSR input_init
     JSR install_irq
+    \ the new game, as the ST's start_game makes it (L_01EFE), and its
+    \ first level's start (L_01F06)
+    BANK_ANDY BANK_LOGIC
+    JSR new_game
+    JSR level_start
+    LDA fields : STA stepped
     JMP engine_run
 }
 
-\ step_logic (the engine's): turn it, step the animations as the ST's
-\ frame does (animate_shapes, in the world's bank), and after a while the
-\ next model.
-.step_logic
+\ andy_clear: ANDY, paged, all 0.
+.andy_clear
 {
-    LDA ob_heading_lo : CLC : ADC #LO(TURN) : STA ob_heading_lo
-    LDA ob_heading_hi : ADC #HI(TURN) : STA ob_heading_hi
-    BANK BANK_WORLD
-    JSR animate_shapes
-    INC model_t : BNE same_model
-    INC model_t+1
-.same_model
-    LDA model_t : CMP #LO(MODEL_STEPS) : BNE done
-    LDA model_t+1 : CMP #HI(MODEL_STEPS) : BNE done
-    INC model_i : LDA model_i : CMP #MODELS : BNE next_model
-    STZ model_i
-.next_model
-    JMP set_model
-.done
+    ZA_AUTO2 p
+    STZ p : LDA #HI(ANDY) : STA p+1
+    LDY #0 : TYA
+.page
+    STA (p),Y
+    INY : BNE page
+    INC p+1 : LDX p+1 : CPX #HI(ANDY_TOP) : BNE page
     RTS
 }
 
-\ set_model: model_i's type in slot 0, two radii from the camera.
-.set_model
+\ step_lists (the engine's): world_render's logic up to the lists, the
+\ step's frame to be drawn from them.
+.step_lists
+    BANK_ANDY BANK_WORLD
+    JMP world_lists
+
+\ step_logic (the engine's): the rest of the ST's frame (docs/research/
+\ st-logic.md, "The main loop"), each routine in its bank with ANDY: the
+\ rest of world_render's logic; read_keys, the stick's move taken first,
+\ as the ST's mouse's would be there with the keys'; player_flight,
+\ object_handlers, animate_shapes, collisions, level_message and
+\ frame_end's logic; the step's frame shown, if it drew one; then the
+\ post-frame tests, which may go on to a level's change or, the game
+\ over, to the next game (at once, until the front end is in).
+.step_logic
 {
-    LDX model_i : LDA model_types,X : STA model_type
-    TAX : LDA type_shape,X : STA model_shape
-    BANK BANK_SHAPES
-    LDX model_shape
-    LDA shape_lo,X : STA set_ptr : LDA shape_hi,X : STA set_ptr+1
-    LDY #8 : LDA (set_ptr),Y : STA model_z : INY : LDA (set_ptr),Y : STA model_z+1
-    ASL model_z : ROL model_z+1                     ; two radii
-    LDA model_type : STA ob_type
-    LDA model_z : STA ob_z_lo : LDA model_z+1 : STA ob_z_hi
-    LDA #LO(TILT) : STA ob_pitch_lo : LDA #HI(TILT) : STA ob_pitch_hi
-    STZ model_t : STZ model_t+1
+    BANK_ANDY BANK_LOGIC
+    JSR world_after
+    JSR input_step
+    JSR read_keys
+    BANK_ANDY BANK_WORLD
+    JSR player_flight
+    JSR object_handlers
+    JSR animate_shapes
+    BANK_ANDY BANK_LOGIC
+    JSR collisions
+    JSR level_message
+    JSR frame_end_logic
+    JSR frame_show
+    \ the post-frame tests (&01F30): a level change first; then a game
+    \ that ended in an earlier step ends here, as the ST runs one more
+    \ frame whole before it ends
+    BANK_ANDY BANK_LOGIC
+    LDA game_over : ORA game_over+1 : PHA
+    JSR post_frame
+    PLA : TAX
+    LDA level_changed : BNE level
+    TXA : BEQ playing
+    JSR new_game
+.level
+    JMP level_start
+.playing
     RTS
 }
 
 \ The ST's colours, for now: reds colour 1 (red), blues and cyans colour 2
 \ (cyan), white colour 3 (decision 3 leaves the choice to make).
-.model_colours
+.st_colours
     EQUB &00, &0F, &0F, &0F, &0F, &0F, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &FF
 
 INCLUDE "code.6502"
+INCLUDE "overlays.6502"
 ENDSECTION
 
 \ The cockpit's screen (tools/mkcockpit.py), which !BOOT loads.
@@ -212,15 +253,13 @@ SECTION Cockpit, org = SCREEN, filename = "COCKPIT"
 INCBIN "../build/gen/cockpit.bin"
 ENDSECTION
 
-\ The models' own state, in the workspace.
-SECTION ModelWork, org = logic_work_end, guard = NMI_PAGE, virtual = TRUE
-.model_i      SKIP 1
-.model_type   SKIP 1
-.model_shape  SKIP 1
-.model_t      SKIP 2
-.model_z      SKIP 2
+\ The controls' state (input.6502), in the workspace, below &3000 for the
+\ interrupt.
+SECTION GameWork, org = logic_work_end, guard = NMI_PAGE, virtual = TRUE
+.adc_channel  SKIP 1        ; the joystick's axis converting: 0 x, 1 y
+.adc_raw      SKIP 2        ; by axis, its last reading, the ADC's top 8 bits
+.adc_kept     SKIP 2        ; and the reading the accumulators last moved to
+.keys_held    SKIP 1        ; the keys held at the last read of them
 ENDSECTION
-
-ZA_AUTO2 set_ptr
 
 INCLUDE "banks.6502"

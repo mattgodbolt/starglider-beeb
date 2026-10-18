@@ -75,6 +75,11 @@ the lists and objects at the top of main RAM, the list phase and the sine
 table in the world's bank (5, `src/world.6502`), the shapes in bank 4,
 the erase lists in shadow RAM below the shadow screen. `src/engine.6502`
 is the frame: the interrupt, the fixed step, the flip (decision 14).
+`src/main.6502` steps the game in the ST's order (`step_lists`,
+`step_logic`); `src/input.6502` is the controls (decision 6): the
+vertical sync's interrupt reads the keys into the ST's `key_state` and
+`key_latch`, and each step adds the joystick's move to the accumulators
+the ST's mouse moves.
 
 - The MOS's IRQ entry keeps A at &FC, so baron's pool stops at &FB, and
   the interrupt handler ends `LDA &FC : RTI`. It must lie below &3000.
@@ -166,6 +171,12 @@ says how):
 - Generated code with patched operands: assert that each copy's labels
   sit at the same offsets (`mkrotate.py`) when one routine patches them
   all through a pointer.
+- The engine's step is a loop, so a variable baron thinks a step might
+  read before writing (a value made only on paths a flag or the carry
+  chooses) is kept from step to step, through the drawing and all the
+  logic, and the pool runs out. Find it (discard every global at the
+  step's top, then all but one) and `ZA_DISCARD` it where it really dies,
+  as `ground_dots` does.
 
 ## House rules
 

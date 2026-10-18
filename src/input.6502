@@ -1,0 +1,220 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the controls (decision 6): the ST's keys,
+\ and the analogue joystick as the ST's mouse
+\
+\ The logic reads the keys as the ST's keyboard interrupt leaves them
+\ (key_state by the ST's scancode, non-zero while held, and key_latch, the
+\ last key made), and steers by the accumulators the ST's mouse moves:
+\ mouse_x (the turn), mouse_y (the climb), and speed_acc instead of
+\ mouse_y while its right button is held (docs/research/st-logic.md, "The
+\ keys, the commands and the input interrupt"). The vertical sync's
+\ interrupt (input_irq) reads the BBC's key for each ST key the logic
+\ reads, and the joysticks' fire buttons as the ST's IKBD sends the mouse's
+\ buttons, as keys; and it reads the ADC, an axis a field. Each step
+\ (input_step) adds the stick's movement since the last into the
+\ accumulators, as the ST's mouse adds its counts: in the step, not the
+\ interrupt, so the logic never reads one of them half written.
+\
+\ The interrupt leaves port A as the sound chip wants it (the keyboard on
+\ auto-scan, the port an output), and it can come between any two of the
+\ foreground's instructions: a write of the chip outside an interrupt
+\ wants interrupts off across it.
+\ ***************************************************************************
+
+\ The BBC's key for each ST key the logic reads (the BBC's internal key
+\ number, then the ST's scancode): the same key where the BBC has it, or
+\ the nearest.
+MACRO KEY bbc, st
+    EQUB bbc, st
+ENDMACRO
+.key_map
+    \ the flight keys (read_keys's flight_keys)
+    KEY &62, &39                    ; SPACE: space, faster (and the silo's launch)
+    KEY &68, &35                    ; /: /, slower
+    KEY &19, &4B                    ; cursor left
+    KEY &79, &4D                    ; cursor right
+    KEY &39, &48                    ; cursor up: dive
+    KEY &29, &50                    ; cursor down: climb
+    KEY &42, &2D                    ; X: left
+    KEY &52, &2E                    ; C: right
+    KEY &57, &27                    ; ;: dive
+    KEY &67, &34                    ; .: climb
+    \ the laser's (player_laser)
+    KEY &49, &1C                    ; RETURN: Return
+    KEY &69, &52                    ; COPY: Insert, beside the cursor keys as the ST's is
+    KEY &3C, &72                    ; the keypad's RETURN: the keypad's Enter
+    \ the commands (read_keys)
+    KEY &70, &01                    ; ESCAPE: Esc
+    KEY &59, &0E                    ; DELETE: Backspace, in its place (the ST's Delete does the same)
+    KEY &43, &21                    ; F
+    KEY &65, &32                    ; M
+    KEY &56, &26                    ; L
+    KEY &37, &19                    ; P
+    KEY &10, &10                    ; Q
+    KEY &51, &1F                    ; S
+    KEY &25, &17                    ; I
+    KEY &55, &31                    ; N
+    \ and what Interrogate and the cheat's prompt wait for (keys.6502)
+    KEY &22, &12                    ; E
+    KEY &45, &24                    ; J
+    KEY &41, &1E                    ; A
+    KEY &33, &13                    ; R
+    KEY &53, &22                    ; G
+KEY_MAP_BYTES = P% - key_map
+ASSERT KEY_MAP_BYTES <= 128         ; (input_irq's index, stepped by 2, kept positive)
+
+\ The joysticks' fire buttons, the ST's mouse buttons as its IKBD sends
+\ them, as keys (its mode 7, 4): the left fires, the right turns the
+\ stick's climb into the speed.
+ST_BUTTON_LEFT  = &74
+ST_BUTTON_RIGHT = &75
+BUTTON_1 = &10                      ; port B's bit for joystick 1's button ...
+BUTTON_2 = &20                      ; ... and joystick 2's
+
+\ input_irq (the vertical sync's): each key's state, a make latched as the
+\ ST's interrupt latches it; the buttons the same; the last conversion's
+\ result kept, and the other axis's begun. Below &3000, as the interrupt
+\ is (engine.6502): what it reads and writes is too.
+CA2 = 1                             ; sysvia_ifr's bit: the keyboard's auto-scan found a key
+.input_irq
+{
+    PHY
+    \ The keys are read only when one may have changed: one was held at the
+    \ last read, or since then auto-scan has found one down (its CA2, as
+    \ the OS's keyboard interrupt; every key read is off row 0, which
+    \ auto-scan leaves out). The flag is cleared first, so a key made
+    \ during the read sets it again.
+    LDA sysvia_ifr : AND #CA2 : ORA keys_held : BEQ scanned
+    LDA #CA2 : STA sysvia_ifr
+    STZ keys_held
+    LDA #&7F : STA sysvia_ddra                  ; bits 0-6 the key, bit 7 its state
+    LDA #3 : STA sysvia_orb                     ; auto-scan off: the matrix is ours
+    LDY #KEY_MAP_BYTES - 2
+.key
+    LDX key_map+1,Y                             ; the ST's scancode
+    LDA key_map,Y : STA sysvia_ora_nh
+    LDA sysvia_ora_nh : BMI held
+    STZ key_state,X                             ; up: its break
+    DEY : DEY : BPL key
+    BRA read
+.held
+    INC keys_held
+    LDA key_state,X : BNE still
+    INC key_state,X                             ; made: held, and the last key made
+    STX key_latch
+.still
+    DEY : DEY : BPL key
+.read
+    LDA #&0B : STA sysvia_orb                   ; auto-scan back
+    LDA #&FF : STA sysvia_ddra
+.scanned
+    \ the ADC's conversion, begun a field ago, done; the other axis next
+    LDX adc_channel
+    LDA adc_high : STA adc_raw,X
+    TXA : EOR #1 : STA adc_channel
+    STA adc_control
+    PLY
+    LDX #ST_BUTTON_LEFT : LDA #BUTTON_1
+    JSR button
+    LDX #ST_BUTTON_RIGHT : LDA #BUTTON_2
+    \ (on into button)
+\ button: key X held while port B's bit A is low.
+.button
+    BIT sysvia_orb : BNE up
+    LDA key_state,X : BNE kept
+    INC key_state,X
+    STX key_latch
+.kept
+    RTS
+.up
+    STZ key_state,X
+    RTS
+}
+ASSERT P% <= &3000
+
+\ input_init: each axis read, and taken as where the stick is, for the
+\ accumulators to move from; the conversions the interrupt reads begun.
+\ Before the interrupt is on: it waits for each conversion.
+.input_init
+{
+    LDX #1
+.axis
+    STX adc_control
+.converting
+    BIT adc_control : BMI converting
+    LDA adc_high : STA adc_raw,X : STA adc_kept,X
+    DEX : BPL axis
+    STZ adc_channel                             ; (the last begun, and done)
+    RTS
+}
+
+\ input_step: the stick's movement since the last step into the
+\ accumulators, as the ST's mouse moves them: right adds to the turn
+\ (mouse_x) and back to the climb (mouse_y), or with the right button held
+\ to the speed accumulator (speed_acc), whose increase is slower. The
+\ stick's travel from its centre (the ADC's 128) to either end is the
+\ turn's clamp (31/8 a count of the ADC's 8 bits, &1F0) and the climb's
+\ (5/2 a count, &140), so a stick that goes no further than its ends
+\ comes back to the same turn and climb; a move of a count is noise, and
+\ isn't taken. Each axis's scaled reading is taken whole, so the sum of
+\ the moves is always the stick's move since the first.
+STICK_NOISE = 1                     ; the most a still stick's reading moves
+.input_step
+{
+    ZA_AUTO2 d, s
+    ZA_AUTO1 r                                  ; a reading, read once: the interrupt writes it
+    ZA_AUTO1 u
+    \ x: the BBC's reading falls to the right
+    LDA adc_raw : STA r
+    SEC : SBC adc_kept : JSR noise : BCC x_done
+    LDA adc_kept : JSR scale_x : MOVW s, d
+    LDA r : STA adc_kept : JSR scale_x
+    SUBW s, d                                   ; the scaled kept less the scaled new
+    ADDW mouse_x, s
+.x_done
+    \ y: the BBC's reading falls as the stick comes back
+    LDA adc_raw+1 : STA r
+    SEC : SBC adc_kept+1 : JSR noise : BCC done
+    LDA adc_kept+1 : JSR scale_y : MOVW s, d
+    LDA r : STA adc_kept+1 : JSR scale_y
+    SUBW s, d
+    LDA key_state + ST_BUTTON_RIGHT : BNE speed
+    ADDW mouse_y, s
+.done
+    RTS
+.speed
+    ADDW speed_acc, s
+    RTS
+\ noise: d = A, with the carry the subtraction left, as a 9-bit signed
+\ word; carry set if it's more than noise
+.noise
+    STA d
+    LDA #0 : SBC #0 : STA d+1                   ; (a borrow: -1)
+    BPL positive
+    LDA d : EOR #&FF : INC A                    ; |d|
+    BRA compare
+.positive
+    LDA d
+.compare
+    CMP #STICK_NOISE + 1
+    RTS
+\ scale_x: d = 31/8 A (rounded down), A an ADC reading: 4 A less A / 8
+\ rounded up
+.scale_x
+    STA d : STZ d+1
+    CLC : ADC #7 : ROR A : LSR A : LSR A : STA u
+    ASL d : ROL d+1 : ASL d : ROL d+1
+    LDA d : SEC : SBC u : STA d
+    BCS x_scaled
+    DEC d+1
+.x_scaled
+    RTS
+\ scale_y: d = 5/2 A (rounded down), A an ADC reading
+.scale_y
+    STA d : STZ d+1
+    LSR A                                       ; A / 2 ...
+    ASL d : ROL d+1                             ; ... and 2 A
+    CLC : ADC d : STA d
+    LDA d+1 : ADC #0 : STA d+1
+    RTS
+}

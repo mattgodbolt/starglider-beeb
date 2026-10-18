@@ -8,12 +8,6 @@
 \ with the sine table; the objects are in main RAM (objects.6502).
 \ ***************************************************************************
 
-\ list_phase: the camera, and the lists from it.
-.list_phase
-    JSR camera
-    JSR coarse_list
-    JMP rotate_lists
-
 \ ---------------------------------------------------------------------------
 \ camera (&050A2, &04258): the matrix from the player's angles, the roll
 \ negated. Most steps have the last one's angles (the player isn't
