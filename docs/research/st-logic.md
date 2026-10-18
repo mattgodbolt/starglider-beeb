@@ -17,6 +17,7 @@ ranges touch the same variable or field, both are listed.*
 - [The object handlers, second half](#handlers2)
 - [The bearing, collisions, docking, refuelling and the laser](#collide)
 - [The frame's end, the score, the interrupts and world_render's logic](#frame)
+- [The front end: the title, the credits, the K screen and the game's end](#front)
 - [Every object field](#fields)
 - [Every variable](#variables)
 
@@ -808,6 +809,57 @@ ranges touch the same variable or field, both are listed.*
 - Whether the stale near list in the missile view's 13 opening frames can register a hit. Launch while within ramming distance of an object, with a breakpoint on &084A4 (+&109BE).
 - The unreached fragments &051B4-&05247 (a line built from the pitch sines; a horizon?) and &054E4-&05527 (an older docked render: hidden lines forced, the DOCKING message, colour 0 = &007). They are dead code and don't matter to the port, unless something reaches them that the disassembler missed (no pointer or branch to them was found).
 - The initial value of the absolute &1E4 under EmuTOS. Irrelevant to the flight logic, but a full low-RAM compare would see it.
+
+<a id="front"></a>
+## The front end: the title, the credits, the K screen and the game's end
+
+*&01E94-&01F06 (the title loop), &02160-&0224E (the game's end), &022BA-&02380 (the K screen), &03B38-&03DB6 (the title's scene, the title shown, the credits), &00BCA-&00C30 and &049A4-&049CA (the key waits), &00E10-&01130 (the high scores), &0117E-&01508 (the text printer), &06ACC-&06B7C (the fades), &0747A-&07752 (the end screen's colours and boxes) and &08A0A-&08C9C (the pilot rating), read from the disassembly on 2026-10-18 and run in Hatari (EmuTOS 1.3, the .stx) with a breakpoint on each routine's entry printing the VBL count, through boot, the title, the credits, the K screen, a game, a game's end with a high score, the end screen, the title again and Esc. The port is `src/front.6502` and `src/front_main.6502`.*
+
+### What it does, in order
+
+- **Start-up** falls into the title loop, L_01E94.
+- **The title loop** (L_01E94): fade out (sub_06B3C); the title's scene (sub_03B38: $1F8 = &E, $130 = &64, $194/$196/$198 = 0/&50/&200, then sub_039A2: frame_end, view clear, frame_end, view clear); $29A = 0; the key latch cleared. L_01EA8: the title shown (sub_03B5A: frame_end, TITLE.TRA's bitmap copied into the drawing screen, frame_end, which shows it, then the fade in to its palette, which first sets all sixteen colours black). L_01EAC: the song started if no sample plays (sub_02290), $29A += 1, then a wait of &44C VBLs (it ends at the first VBL past the count: 1,101) for a key with a character (sub_049AE). With none, $29A odd shows the credits and goes back to L_01EAC; even goes back to L_01EA8, the title again with no fade out first. A key: ASCII & &DF; G (in cheat mode, $2CD) the model viewer (&031EE); K the K screen; anything else starts the game, Esc and the F-keys (characters 1-10) included. Measured: the credits came 1,101 VBLs after the title's fade in ended, and the title 1,101 after the credits'.
+- **The credits** (sub_03B82): fade out, the shown screen cleared (sub_00F80, which homes the printer's cursor), the text at &03BA8 in colour 15, fade in to RESULT.TRA's palette (&60002), where 15 is white.
+- **The K screen** (L_022BA): the shown screen cleared, the title's palette still on (the prompts' colours 1 and 2 are the title's orange red and dark blue, the rest white 15). Six prompts in the order Decrease Altitude ($2DA), Increase Altitude ($2DB), Bank Left ($2D8), Bank Right ($2D9), Accelerate ($2DC), Decelerate ($2DD); each waits for any key made (sub_049A4: the raw scancode, no timeout, the latch left), stores its scancode, and echoes it (sub_02362: the latch cleared, the character for the scancode patched into the first byte of " \r\n\n" and the string printed; a key with no character, a cursor key say, makes the string empty, so the next prompt follows on the same line). Then the thanks, and sub_00BCA (any key, its character, &0D after 1,501 VBLs): E goes to the title loop, Y starts the game, anything else redoes the K screen. The scancodes are stored as each is pressed, so E keeps the new keys.
+- **The game's start** (L_01EFE): sub_02A30 ends a sample (the song) at the next Timer A tick; sub_039FA's sub_039B2 fades out, copies the cockpit to both screens, clears the view, calls frame_end, clears it again and fades in; then the new game (see the main loop's section) and level_start. Measured: 8 VBLs out, 6 for the copy and its frame, 8 in.
+- **Esc in play** (&03FF2) pops read_keys' return and jumps to L_01E94: no game's end, the sample playing left to finish.
+- **The game's end** (&02160): '   POWER DRAINAGE TOO GREAT!' ($12C = 1) or 'SHIELD DEPLETED,  AGAV DESTROYED!' on the screen just shown, at line 100, x 16 (&3E88), in the colour the last print left; colour 0 black; a wait of &12C VBLs (301) or a key with a character. Then: fade out; the pilot rating (sub_08A0A); fade out; the song (sub_02290, unconditional); the high score's entry (sub_00E10); fade out; the song again if no sample plays; the table (sub_00FB2); fade in to &60002; in colour, the end screen's colours (sub_0747A); the latch cleared; sub_00BCA (1,501 VBLs or any key); the MFP and vectors put back; fade out; L_01E94, which fades out again. Measured: the game's end at VBL 4983, the fade out at 5284, the rating's fade in at 5294.
+- **The pilot rating** (sub_08A0A): the shown screen cleared, colour 15, 'AGAV PILOT RATING', then four lines, each a label at &08AE6, &08B14, &08B42, &08B70 with the long (shots $B0, hits $B8, silo dockings $C0, hits on the AGAV $C4) written into the label at +&22 by sub_045B4 (decimal, no leading zeros, nine digits at most, "0" for 0, "M " first if negative); "\r\n"; if the shots' low word isn't 0, the accuracy $29E (see the frame's end section) and 'HIT ACCURACY PERCENTAGE' with it; then 'PILOT RATING, ' and the rating's name (&08C50, by min(11, level x $29E / 100)); fade in; the latch cleared; sub_00BCA.
+- **The high score** (sub_00E10): colour 15; the score is entered if it beats one of the ten (cmp.l: signed, so a BCD score of 80,000,000 or more never does). sub_00E9E: the shown screen cleared; 'CONGRATULATIONS! You are one of the ten best AGAV pilots to date. Please type in your name:' (&01686, ending in a "*" at row 15, the name from column 7); the scores from the place down shifted one (the eleventh slot past the table takes the last), the score stored in the place; the names likewise, 16-byte records; fade in (sub_00F6C, to &60002); sub_01050 types the name into the place's record: each key by sub_00BCA (so 1,501 VBLs end it as Return would), Return or Esc ends it (a 0 stored), Backspace or Delete takes the last character back (the cursor back, a space printed, back again), and while fewer than 8 have been typed a character of &20-&7E is stored and printed. The place's number (&01674, ' 1 2 3 4 5 6 8 9 10', which skips 7) is passed in a0 to the printer, which ignores a0: it's never printed. The path for the second score D_01514 (always 0) has its own text, 'CONGRATULATIONS PILOT YOUR SCORE GETS YOU THE NUMBER ... HIGH SCORE', never shown. The table starts as JEZ SAN 100,000, ARGONAUT 50,000, (no name) 25,000, GARY 12,500, PAUL 6,500, RICARDO 5,000, DAVE 4,000, SHAHID 3,000, JAMES F. 2,000, RAINBIRD 1,000, and lasts until the machine is switched off: nothing saves it.
+- **The table** (sub_00FB2): the shown screen cleared, 'STAR SCORES' (&01A14) at row 7, then ten rows, each "\r\n" and eleven spaces, the score's eight BCD digits with their leading zeros, two spaces and the name, in the colour left (15).
+- **The end screen** (sub_0747A, colour only): sixteen boxes (&07754: offset, colour, width in 16-pixel groups less one, lines less one) drawn over the table's surround, then a new VBL handler (sub_0752A) and Timer B in event count mode, every 4 display lines (sub_0768A). The VBL steps the bases: colours 1 and 2 through eight greys (&0765A) every 3 VBLs, one up and one down; colours 3 and 4 through a sixteen-colour rainbow (&0766A) every 2; 5 and 6 change their red and blue; 7 its grey every 4. Every 4 lines Timer B moves each on a step (greys up, rainbows down, reds and grey by &100 and &111), so each box shows bands of colour scrolling through it.
+- **The fades**: sub_06ACC sets all sixteen colours black, then over 8 VBLs adds 1 to each component short of its target; sub_06B3C takes 1 from each non-zero component, 8 VBLs. Each waits for its VBL before it writes.
+- **The text printer** (&012EC, through $38): a cursor (column D_0166C, row D_0166E, address D_01670); CR to column 0, LF down a row of 8 lines, a byte of &80 or more sets the colour (D_019F0 = byte & &7F), any other byte draws its 8 x 8 glyph from the colour font at &16D88 in every plane (opaque) and moves on, to the next row after column 39. Past row 24 it wraps to the address held at absolute 4, which isn't the screen; none of the texts gets there.
+
+### Tables and texts
+
+| Address | What |
+|---|---|
+| &03BA8 | the credits, rows 2 to 22, the cursor left at row 24 |
+| &02380, &02460-&024E8, &023EC, &02500 | the K screen: its title and instructions, the six prompts, the thanks, the echo's string |
+| &08AC0-&08BD0, &08BEA-&08C46, &08C50 | the pilot rating's texts, the eleven names, the twelve pointers (10 and 11 both CHEAT!?!) |
+| &01686, &0171E, &01A14, &01A3A, &01A48 | the high scores' texts (&0171E unreached) |
+| &01792, &01536 | the ten scores (BCD longs) and names (16 bytes) as the program loads |
+| &07754 | the end screen's sixteen boxes |
+| &0765A, &0766A | its eight greys and sixteen-colour rainbow |
+| &02250, &0226E | the game's end in words |
+| &16D88 | the colour font, 8 bytes a glyph from &20 (its '-' and ':' blank) |
+
+### Timing, in VBLs (measured)
+
+| From | To | VBLs |
+|---|---|---|
+| the title's fade in done | the credits | 1,101, or a key |
+| the credits' fade in done | the title | 1,101, or a key |
+| the game's end | its fade out | 301, or a key |
+| the rating's, the end screen's waits | their end | 1,501, or a key |
+| a fade | its end | 8 |
+| the title loop's start | the title faded in | 8 (out) + 2 frames + 2 frames + 8 (in) |
+
+### Open questions
+
+- The model viewer (&031EE), reached from the title by G in cheat mode, isn't in the port; the cheat is cleared at every new game ($2CD, &03B32), so only a game ended or left by Esc in cheat mode reaches it.
+- The song's place: sub_02290 starts the sampled song at each title/credits pass when no sample plays, unconditionally after the rating, and after the high score's entry when none plays; sub_02A30 stops it at the game's start. Decision 5 chooses it by ear.
 
 <a id="fields"></a>
 ## Every object field

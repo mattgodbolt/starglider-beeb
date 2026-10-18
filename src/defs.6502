@@ -55,6 +55,9 @@ SLOTS        = 140
 SLOT_TUNNEL  = SLOTS
 SLOT_MISSILE = SLOTS + 1
 
+\ --- The front end --------------------------------------------------------
+NAME_MAX = 8                ; a high score's name's characters: the ST's entry takes 8 (&0105A)
+
 \ --- ANDY -------------------------------------------------------------------
 \ The Master's 4K of RAM over the first 4K of the sideways banks while
 \ ROMSEL's bit 7 is set: the logic's data (docs/plan.md, section 3).

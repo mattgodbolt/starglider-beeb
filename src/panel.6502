@@ -930,6 +930,34 @@ NEXT
     RTS
 }
 
+\ panel_game_over (&02160): the game's end in words, the energy's
+\ (game_over 1) or the shields', on the screen shown (draw_buffer's, the
+\ last drawn), where the ST prints them, in the colour its last print
+\ leaves (texts_note's, from the last step's state), opaque; the words
+\ are in ANDY (front_andy.6502). (The disc's alone: the spike has no
+\ game's end.)
+IF NOT(DEFINED(SPIKE))
+.panel_game_over
+{
+    JSR texts_note
+    LDA draw_bank : TSB acccon
+    LDA #LO(scr(P_GAME_OVER_X, P_GAME_OVER_Y)) : STA pp
+    LDA #HI(scr(P_GAME_OVER_X, P_GAME_OVER_Y)) : STA pp+1
+    LDA #8 - P_GAME_OVER_Y MOD 8 : STA psplit
+    STZ pmode
+    LDA note_colour : STA pcol
+    LDX #LO(go_shields) : LDY #HI(go_shields)
+    LDA game_over+1 : BNE words
+    LDA game_over : CMP #1 : BNE words
+    LDX #LO(go_power) : LDY #HI(go_power)
+.words
+    STX pstr : STY pstr+1
+    JSR print_string
+    LDA draw_bank : TRB acccon
+    RTS
+}
+ENDIF
+
 \ texts_do: the texts of A's bits, in order, drawn (erasing 0) or their
 \ glyphs' pixels cleared, with tx_mine_v, tx_level and tx_count their words.
 .texts_do

@@ -23,3 +23,15 @@ export function loadDisc(tm, path, sym) {
     cpu.ramRomOs.set(ssdFiles(path).SG, 0x0e00);
     cpu.pc = sym.start;
 }
+
+// From the start to the game: the front end's title waiting for a key
+// (src/front.6502's front_title), SPACE pressed for long enough that its
+// scan of the keys, a field apart, sees it, and on to the engine, once a
+// game's start has loaded flight's files back (src/front_main.6502).
+export async function toGame(tm, sym) {
+    await tm.runUntilAddress(sym["front_title.poll"], 60, { bank: sym.BANK_PIC });
+    tm.keyDown("Space");
+    await tm.runFor(0.1 * 2000000);
+    tm.keyUp("Space");
+    await tm.runUntilAddress(sym.engine_run, 60);
+}

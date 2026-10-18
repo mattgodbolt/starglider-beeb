@@ -9,7 +9,7 @@ const jsbeeb = (f) => pathToFileURL(path.join(root, "node_modules/jsbeeb/src", f
 const { TestMachine } = await import(jsbeeb("test-machine.js"));
 const { SoundChip } = await import(jsbeeb("soundchip.js"));
 const { loadSymbols } = await import(pathToFileURL(path.join(root, "tools/beeb.mjs")).href);
-const { loadDisc } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
+const { loadDisc, toGame } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
 
 export const HZ = 2e6;
 export const sym = loadSymbols(path.join(root, "build/starglider.json"));
@@ -39,7 +39,7 @@ export async function machine() {
     await tm.runUntilInput();
     console.log = q;
     loadDisc(tm, path.join(root, "build/starglider.ssd"), sym);
-    await tm.runUntilAddress(sym.engine_run, 60);
+    await toGame(tm, sym);
     const cpu = tm.processor;
     const ram = cpu.ramRomOs;
     ram.set([0x4c, IDLE & 0xff, IDLE >> 8], IDLE);

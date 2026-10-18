@@ -170,7 +170,7 @@ ASSERT LO(edge_mark) = 0 AND LO(v_xlo) = 0
 .win_shown  SKIP 2          ; by screen: the m_iris its missile view's window is for (&FF: none)
     \ the disc (disc.6502): the reader's state, what's left of the file
     \ being read, and the game's files as the catalogue has them
-DISC_MAX = 8
+DISC_MAX = 9
 .fdc_state  SKIP 1          ; 0 idle, 1 seeking, 2 reading
 .fdc_cur    SKIP 1          ; the head's track (&FF: not known)
 .fdc_sect   SKIP 1          ; the sector being read, and its track

@@ -3,19 +3,21 @@
 \
 \ What SG runs once, from start: the disc reader made ready (its NMI
 \ routine into its page, the game's files found in the catalogue), the
-\ files loaded, the screens and the machine set up, and the game's state
-\ as the ST's start-up and title leave it; then play (main.6502), which
-\ begins the game and never comes back. SG holds it past main RAM's
-\ resident code, so it costs that code no room: it may run on over the
-\ lists and the object table (memory.6502), which nothing uses until play
-\ clears the objects. So it must never run with ACCCON's X set, which would
-\ move it to shadow RAM wherever it lies past &3000: what it calls that sets
-\ X (screen_copy, window_clear) clears it again before it returns.
+\ files loaded, the front end in bank 7 among them, the machine set up,
+\ and the game's state as the ST's start-up leaves it; then the front
+\ end's title (front_main.6502's boot_front), which never comes back. SG
+\ holds it past main RAM's resident code, so it costs that code no room:
+\ it may run on over the lists and the object table (memory.6502), which
+\ nothing uses until boot_front clears the objects. So it must never run
+\ with ACCCON's X set, which would move it to shadow RAM wherever it lies
+\ past &3000.
 \ ***************************************************************************
 
 .start
     ZA_ENTRY
     SEI
+    \ black, as the front end's first fade leaves it, while the files load
+    LDA #LO(black_colours) : LDX #HI(black_colours) : JSR palette_set
     \ HAZEL in, and the game's files loaded (disc.6502)
     LDA acccon : AND #NOT(ACCCON_X OR ACCCON_D) AND &FF : ORA #ACCCON_Y : STA acccon
     BANK BANK_SHAPES
@@ -35,28 +37,21 @@
     JSR mul_init
     JSR line_draw
     JSR screen_mode
-    \ the cockpit on both screens, their windows empty (screen.6502, in the
-    \ loading area's bank), their panels to draw
-    BANK BANK_PIC
-    JSR screen_copy
-    STZ draw_bank : JSR window_clear
-    LDA #ACCCON_X : STA draw_bank : JSR window_clear
-    JSR panel_reset
 IF DEFINED(SPLIT_SWEEP)
     JSR split_test
 ENDIF
     \ (on into game)
 
 \ ---------------------------------------------------------------------------
-\ game: the game's state as the ST's start-up and title leave it, then
-\ play's new game (main.6502).
+\ game: the game's state as the ST's start-up leaves it, then the front
+\ end's title (front_main.6502's boot_front).
 SIGHT_CX = 160                      ; the sight's centre (init_resolution's, in colour)
 SIGHT_CY = 68
 .game
 {
     \ the logic's variables 0, in the workspace and in ANDY (with the
-    \ objects' fields there), as the ST's are as it loads (play clears the
-    \ objects' fields in main RAM)
+    \ objects' fields there), as the ST's are as it loads (boot_front
+    \ clears the objects' fields in main RAM)
     LDX #0
 .work
     STZ work_end,X
@@ -64,33 +59,43 @@ SIGHT_CY = 68
     ASSERT logic_work_end - work_end <= 256
     BANK_ANDY BANK_LOGIC
     JSR andy_clear
+    \ the high scores and the game's end in words in ANDY, for the front
+    \ end and the panel (front_andy.6502)
+    LDX #hs_init_end - hs_init - 1
+.scores
+    LDA hs_init,X : STA hs_scores,X
+    DEX : CPX #&FF : BNE scores
+    ASSERT hs_init_end - hs_init = 10 * (4 + NAME_MAX + 1) AND hs_names = hs_scores + 40
+    LDX #GO_POWER_BYTES - 1
+.power
+    LDA go_power_init,X : STA go_power,X
+    DEX : BPL power
+    LDX #GO_SHIELDS_BYTES - 1
+.shields
+    LDA go_shields_init,X : STA go_shields,X
+    DEX : BPL shields
     LDX #pl_roll + 1 - pl_x
 .player
     STZ pl_x,X
     DEX : BPL player
     STZ n_slots : STZ docked : STZ silo_missile : STZ all_faces
     \ what the ST's start-up sets (init_resolution's sight centre, the
-    \ sound on), the beam's colour as the program loads, and what the
-    \ title leaves: the four frame_ends before it waits for a key, and its
-    \ scene's player at y &64 (sub_03B38)
+    \ sound on), and the beam's colour as the program loads; the front
+    \ end's title loop counts its frame_ends from 0 (front.6502)
     LDA #SIGHT_CX : STA sight_cx
     LDA #SIGHT_CY : STA sight_cy
     LDA #&FF : STA sound_on
     LDA #15 : STA beam_colour
-    LDA #4 : STA frame_count
-    LDA #&64 : STA pl_y
     LDX #15
 .colours
     LDA st_colours,X : STA colour_map,X
     DEX : BPL colours
-    \ main RAM's screen shown, and both cleared before they're drawn
-    JSR erase_init
-    STZ draw_buffer : STZ frame_drawn : STZ frame_ready
+    STZ frame_drawn : STZ frame_ready
     JSR input_init
     BANK BANK_LOGIC
     JSR sound_init
     JSR install_irq
-    JMP play
+    JMP boot_front
 }
 
 \ andy_clear: ANDY, paged, all 0.
@@ -112,16 +117,21 @@ SIGHT_CY = 68
     EQUB &00, &0F, &0F, &0F, &0F, &0F, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &FF
 
 \ The files start loads (disc_load: the file, where, its bank), the last
-\ first.
+\ first: the front end in bank 7, where a game's start loads flight's
+\ (front_main.6502's game_start).
 .disc_load_file
-    EQUB DF_SPEECH, DF_WINDOW, DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
+    EQUB DF_FRONT, DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
 .disc_load_lo
-    EQUB LO(&8000), LO(WIN_PIC), LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
+    EQUB LO(&8000), LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
 .disc_load_hi
-    EQUB HI(&8000), HI(WIN_PIC), HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
+    EQUB HI(&8000), HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
 .disc_load_bank
-    EQUB BANK_PIC, BANK_PIC, BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
+    EQUB BANK_PIC, BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
 DISC_LOADS = P% - disc_load_bank
+
+\ The front end's high scores and the game's end in words, for ANDY.
+INCLUDE "../build/gen/front_init.6502"
+INCLUDE "../build/gen/panel_start.6502"
 
 \ ---------------------------------------------------------------------------
 \ install_irq: engine.6502's irq_handler on IRQ1V, and only the vertical
@@ -274,6 +284,8 @@ DF_LOGIC = 5
 DF_WINDOW = 6
     EQUS "SPEECH "
 DF_SPEECH = 7
+    EQUS "FRONT  "
+DF_FRONT = 8
 DISC_FILES = (P% - disc_names) DIV 7
 ASSERT DISC_FILES <= DISC_MAX
 

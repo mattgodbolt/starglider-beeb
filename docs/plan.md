@@ -180,7 +180,8 @@ owns.
 | Bank 4 | the shapes and the type-to-shape table, and past them the draw phase's code that runs only with them paged (`src/shapecode.6502`: far_place's centre and quarters, the box's box_out and box_x) |
 | Bank 5 | the world: below &9000 the list phase, run with ANDY out (its end, `world_list_end`, just short of the sine table's 1K alignment); from &9000 the sine table and the logic that reads it (`world_render`'s, the flight, the handlers), with what only that logic takes (`fmul15`, the handlers' `h_random32`, `animate_shapes`'s lists); and at its end the drawing's products that build_matrix and the ground matrix take (`kmul`, `matrix_heading`) and `ground_camera`, whose callers have the bank paged |
 | Bank 6 | *as built:* the rest of the logic from `world_list_end` (the keys, the laser, collisions, the frame's end, the level change), the logic's drawing records (`src/view.6502`: the bolt and the shots) and the panel (`src/panel.6502`), its data in the gap from &9000 to `world_list_end`. Below &9000 it holds no code (baron#29, our issue #1) and is free for data, readable only with ANDY out |
-| Bank 7 | *as built in flight:* the missile view's window picture and the draw phase's view code (`src/view_under.6502`, `src/mview.6502`), the objects' boxes (`src/box.6502`) and the cockpit's screens' copy and the window's clear, which set ACCCON's X (`src/screen.6502`), the code past `world_list_end`; below &9000 no code, free for data read with ANDY out. *Planned:* flight's speech, which needs a call (the four clips are 13.4K at the ST's rate, and the room with no code in it in banks 6 and 7 adds to about 11.5K); the docked screens and their clip when docked; the front end and the title outside play |
+| Bank 7 | *as built in flight:* the missile view's window picture and the draw phase's view code (`src/view_under.6502`, `src/mview.6502`), the objects' boxes (`src/box.6502`) and the cockpit's screens' copy and the window's clear, which set ACCCON's X (`src/screen.6502`), the code past `world_list_end`; below &9000 no code, free for data read with ANDY out: speech's first area (SPEECH), and its third at WINDOW's tail. *As built out of play:* the front end (FRONT, `src/front.6502`): its data from &8008 (the colour font, the texts, the keys' tables, the packed title), its code past `world_list_end`, its state past &9000; loaded by the start and at a game's end or Esc, and WINDOW and SPEECH loaded back at a game's start (`src/front_main.6502`), no clip of speech playing meanwhile. *Planned:* the docked screens and their clip when docked |
+| ANDY, past the panel's | *as built:* what the front end keeps from game to game (`src/front_andy.6502`): the high scores, the rating's last accuracy, the game's end in words |
 
 The banks' first 4K hold no code until baron#29 is fixed: the rotations'
 annotated jumps fill bank 5 there, and a jump of another bank's at one of
@@ -237,10 +238,10 @@ is about 0.08s a kilobyte, plus 1.3s if the drive has stopped
 
 | Load | When | What covers it in the ST's game | Bytes |
 |---|---|---|---|
-| The cockpit picture and flight's speech, over the front end | the game's start | nothing in the ST's: the game waits, about 1.2s, with the drive still turning if the title song was streaming | ~15K |
+| *Built:* flight's view code, window and speech (WINDOW and SPEECH), over the front end | the game's start | nothing in the ST's: the game waits on black while they load (`tools/frontcheck.mjs` times it) | bank 7's (`make memory`) |
 | The docked screens and the docked clip, over flight's speech | entering a silo | the tunnel's flight in [measured: 89 frames at 3.7 VBLs, about 6.6s on the ST], then the wait for SPACE | ~8K |
 | Flight's speech again | launching from a silo | "LAUNCHING FROM SILO"; speech isn't wanted at once | ~10K |
-| The front end and the title picture | game over | the GAME OVER words turning | ~11K |
+| *Built:* the front end, the title picture packed in it (FRONT) | the game's end; Esc; the start | the game's end's words, the ST's wait over which it loads; Esc waits on black | Front's (`make memory`) |
 | The title song, sampled | while the title plays | streamed, a track at a time | ~55K on the disc (18.2s at 6kHz, 4 bits a sample) |
 
 **Speech** (Matt: loaded, or streamed). Loaded at the game's start, the

@@ -12,7 +12,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 const root = process.cwd();
 const { loadSymbols } = await import(pathToFileURL(path.join(root, "tools/beeb.mjs")).href);
-const { loadDisc } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
+const { loadDisc, toGame } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
 const { TestMachine } = await import(pathToFileURL(path.join(root, "node_modules/jsbeeb/src/test-machine.js")).href);
 const sym = loadSymbols(path.join(root, "build/starglider.json"));
 const tm = new TestMachine("Master");
@@ -27,7 +27,7 @@ const ram = cpu.ramRomOs;
 const axis = [0x8000, 0x8000];
 for (const ch of [0, 1]) cpu.adconverter.setChannelSource(ch, { getValue: (c) => axis[c], dispose() {} });
 loadDisc(tm, path.join(root, "build/starglider.ssd"), sym);
-await tm.runUntilAddress(sym.engine_run, 60);
+await toGame(tm, sym);
 await tm.runFor(2000000);
 
 let bad = 0;

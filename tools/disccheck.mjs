@@ -1,8 +1,10 @@
 // The game's own disc reader (src/disc.6502), on jsbeeb's Master with the
 // disc in the drive: SG loads the game's files with it at start (HAZEL's,
-// the banks, the cockpit, the loading area's WINDOW and SPEECH), each of
-// which must come out the same as the file. Then, as the game plays, the
-// harness has it read TABLES again into the loading area's first 4K
+// the banks, the cockpit, the front end in the loading area), and a game's
+// start loads the loading area's WINDOW and SPEECH over the front end
+// (src/front_main.6502), each of which must come out the same as the file;
+// it says how long each took. Then, as the game plays, the harness has it
+// read TABLES again into the loading area's first 4K
 // (from engine_run's wait, which steps the read on), while the logic
 // runs with ANDY paged and a speech clip plays, its player in that bank
 // (the third clip, whose bytes are the logic bank's, which the read leaves
@@ -39,6 +41,16 @@ const t0 = tm.elapsedCycles;
 await tm.runUntilAddress(sym.start_loaded, 60);
 const loaded = (tm.elapsedCycles - t0) / 2e6;
 const snapshot = Buffer.from(ram);
+// the title, a key, and the game's start's loads, compared once they're in
+await tm.runUntilAddress(sym["front_title.poll"], 60, { bank: sym.BANK_PIC });
+tm.keyDown("Space");
+await tm.runFor(0.1 * 2e6);
+tm.keyUp("Space");
+await tm.runUntilAddress(sym.game_start, 10);
+const g0 = tm.elapsedCycles;
+await tm.runUntilAddress(sym["game_start.loaded"], 30);
+const started = (tm.elapsedCycles - g0) / 2e6;
+const flight = Buffer.from(ram);
 // the game running, then from its wait the read, and a clip
 while (word(sym.frames) < 2) await tm.runFor(500000);
 await tm.runUntilAddress(sym.engine_run, 5);
@@ -81,8 +93,9 @@ const checks = [
     ["WORLD", bank(sym.BANK_WORLD), snapshot],
     ["LOGIC", bank(sym.BANK_LOGIC), snapshot],
     ["COCKPIT", sym.SCREEN, snapshot],
-    ["WINDOW", bank(sym.BANK_PIC) + (sym.WIN_PIC - 0x8000), snapshot],
-    ["SPEECH", bank(sym.BANK_PIC), snapshot],
+    ["FRONT", bank(sym.BANK_PIC), snapshot],
+    ["WINDOW", bank(sym.BANK_PIC) + (sym.WIN_PIC - 0x8000), flight],
+    ["SPEECH", bank(sym.BANK_PIC), flight],
     ["TABLES", area, ram],                              // the read in play
 ];
 let bad = 0;
@@ -107,6 +120,7 @@ if (Math.abs(fields - read * 50.08) > 2) {
     console.log(`disccheck: ${fields} fields in ${read.toFixed(2)}s`);
     bad++;
 }
-console.log(`disccheck: the start's loads in ${loaded.toFixed(2)}s; the read in play done in ${read.toFixed(2)}s, ` +
+console.log(`disccheck: the start's loads in ${loaded.toFixed(2)}s, a game's start's in ${started.toFixed(2)}s; ` +
+    `the read in play done in ${read.toFixed(2)}s, ` +
     `a clip of ${want.toFixed(2)}s played beside it in ${played?.toFixed(3)}s; bytes differing: ${report.join(", ")}`);
 process.exit(bad ? 1 : 0);

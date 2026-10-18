@@ -1,0 +1,196 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the front end's resident part (decision
+\ 12: the front end is loaded from disc when it's wanted)
+\
+\ The front end (front.6502) is the FRONT file, in bank 7 out of play,
+\ where flight's view code, the missile view's window and two of the
+\ speech's areas are in play (WINDOW and SPEECH). The start loads it in
+\ their place; a game's end (game_end) and Esc (to_title) load it over
+\ them; and a game's start (game_start) loads them back, makes the screens
+\ the cockpit's again and plays. Main RAM's screen keeps the cockpit
+\ throughout: the front end shows the shadow screen.
+\ ***************************************************************************
+
+\ boot_front: the start's end, past its code: the objects 0 over it (the
+\ silo's two records with them, which no level's set-up clears, as the
+\ ST's are as it loads), then the title, as the ST's start-up falls into
+\ its title loop.
+.boot_front
+    JSR objects_clear
+    BANK BANK_PIC
+    JMP front_title
+
+\ game_start: the front end's start of a game (the ST's L_01EFE, its fade
+\ out done): flight's files back in bank 7, a read a file; the screens the
+\ start's were, the cockpit on both, their windows empty, their panels to
+\ draw; the cockpit's colours faded in, as the ST's sub_039B2 fades to
+\ them once the cockpit's on both screens; then play. The key that started
+\ it was the front end's, and isn't the game's.
+.game_start
+{
+    LDX #&FF : TXS
+    LDX #FLIGHT_FILES - 1
+.load
+    PHX
+    LDA flight_lo,X : STA fe_dst
+    LDA flight_hi,X : STA fe_dst+1
+    LDA flight_file,X : TAX
+    LDY #BANK_PIC
+    JSR disc_load
+    JSR disc_wait
+    PLX
+    DEX : BPL load
+.loaded                                         ; (tools/disccheck.mjs)
+    BANK BANK_PIC
+    JSR screen_copy
+    STZ draw_bank : JSR window_clear
+    LDA #ACCCON_X : STA draw_bank : JSR window_clear
+    JSR panel_reset
+    JSR erase_init
+    STZ draw_buffer : STZ frame_drawn : STZ frame_ready : STZ flash_pending
+    STZ key_latch
+    LDA #ACCCON_D : TRB acccon                  ; main RAM's screen shown
+    LDA #LO(game_colours) : LDX #HI(game_colours)
+    JSR fade_to
+    LDA #PANEL_COLOUR_3 : LDX #C3_PANEL         ; the split back
+    JSR c3_set
+    \ (on into play)
+}
+
+\ play: a new game as the ST's start_game makes it (L_01EFE), its first
+\ level's start (L_01F06), and the engine (engine.6502), until the game
+\ ends (game_end) or Esc leaves it (to_title).
+.play
+    BANK_ANDY BANK_LOGIC
+    JSR new_game
+    JSR level_start
+    LDA fields : STA stepped
+    JMP engine_run
+
+\ flight's files, which the front end's lies over
+.flight_file
+    EQUB DF_SPEECH, DF_WINDOW
+.flight_lo
+    EQUB LO(&8000), LO(WIN_PIC)
+.flight_hi
+    EQUB HI(&8000), HI(WIN_PIC)
+FLIGHT_FILES = P% - flight_hi
+
+\ The game's colours: logical 0-2 as !BOOT leaves them (black, red, cyan),
+\ 3 the view's above the split (engine.6502); and black, for the fades.
+.game_colours
+    EQUB 0, 1, 6, VIEW_COLOUR_3
+.black_colours
+    EQUB 0, 0, 0, 0
+
+\ game_end: the game's end (the ST's &02160), from the step after the one
+\ that ended it, as the ST runs one more frame whole: once its frame is
+\ up, the words on it (the logic bank's panel_game_over) and colour 0
+\ black; FRONT's read begun; END_WAIT fields, or a key, the keys the game
+\ reads (input.6502's) ending it; then FRONT's rest, its read done.
+END_WAIT = &12C + 1                             ; (the ST's waits end at the first VBL past their count)
+.game_end
+{
+    ZA_AUTO2 left
+    LDX #&FF : TXS
+.shown
+    LDA frame_ready : BNE shown
+    BANK_ANDY BANK_LOGIC
+    JSR panel_game_over
+    FOR e = {0, 1, 4, 5}                        ; logical 0's entries
+        LDA #ula_entry(e, 0) : STA ula_pal
+    NEXT
+    JSR front_load
+    LDA #LO(END_WAIT) : STA left : LDA #HI(END_WAIT) : STA left+1
+.wait
+    LDA fields
+.field
+    PHA : JSR disc_step : PLA
+    CMP fields : BEQ field
+    BANK_ANDY BANK_LOGIC
+    JSR get_key : BNE keyed
+    LDA left : BNE count
+    DEC left+1
+.count
+    DEC left
+    LDA left : ORA left+1 : BNE wait
+.keyed
+    JSR disc_wait
+    BANK BANK_PIC
+    JMP front_game_over
+}
+
+\ to_title: Esc's (logic/keys.6502's quit_to_title), as the ST's &03FF2
+\ leaves the frame for the title loop (L_01E94): once the frame drawn is
+\ up, the colours faded out, FRONT loaded, its title loop (which fades out
+\ again, as the ST's does first, on black).
+.to_title
+{
+    LDX #&FF : TXS
+.shown
+    LDA frame_ready : BNE shown
+    LDA #LO(black_colours) : LDX #HI(black_colours)
+    JSR fade_to
+    JSR front_load
+    JSR disc_wait
+    BANK BANK_PIC
+    JMP front_title
+}
+
+\ front_load: FRONT's read into bank 7 begun, once no clip of speech
+\ plays (its player reads two of its areas there).
+.front_load
+{
+.speaking
+    PHP : SEI                                   ; (the player counts it down: read it whole)
+    LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3
+    PLP : CMP #0 : BNE speaking
+    LDA #LO(&8000) : STA fe_dst : LDA #HI(&8000) : STA fe_dst+1
+    LDX #DF_FRONT : LDY #BANK_PIC
+    JMP disc_load
+}
+
+\ fade_to: the palette to the four physical colours at A (low) and X
+\ (high), as an ST fade of 8 VBLs comes out in the BBC's eight colours,
+\ each at full brightness: the change at the fade's middle.
+.fade_to
+{
+    PHA : PHX
+    LDA #4 : JSR fields_wait
+    PLX : PLA : JSR palette_set
+    LDA #4
+    \ (on into fields_wait)
+}
+
+\ fields_wait: A fields, the disc's read stepped on meanwhile.
+.fields_wait
+{
+    ZA_AUTO1 until
+    CLC : ADC fields : STA until
+.wait
+    JSR disc_step
+    LDA fields : CMP until : BNE wait
+    RTS
+}
+
+\ palette_set: MODE 1's logical colours 0-3 the physical colours at A
+\ (low) and X (high), logical 3's on both sides of the split
+\ (engine.6502), so it doesn't put the game's back.
+.palette_set
+{
+    ZA_AUTO2 p
+    ZA_AUTO1 l
+    STA p : STX p+1
+    LDX #15
+.entry
+    \ entry e's logical colour: bit 0 e's bit 1, bit 1 e's bit 3
+    TXA : LSR A : AND #1 : STA l
+    TXA : LSR A : LSR A : AND #2 : ORA l : TAY
+    LDA (p),Y : EOR #7 : STA l
+    TXA : ASL A : ASL A : ASL A : ASL A : ORA l : STA ula_pal
+    DEX : BPL entry
+    LDY #3 : LDA (p),Y : PHA
+    LDX #C3_VIEW : JSR c3_set
+    PLA : LDX #C3_PANEL
+    JMP c3_set
+}

@@ -49,7 +49,8 @@ make spike      # the spike on every captured scene: checked against the
                 # ST's renderer, and timed (tools/scenecheck.py)
 make check      # sincos against the ST's sine table at every angle, make spike, the
                 # disc's erasing (tools/erasecheck.mjs), its own disc reader
-                # (tools/disccheck.mjs), its controls (tools/inputcheck.mjs)
+                # (tools/disccheck.mjs), its controls (tools/inputcheck.mjs),
+                # its front end's flows (tools/frontcheck.mjs),
                 # make panel, make view and make rot (the rotations against
                 # the ST's exact one and the approximation's model)
 make logic      # the port's game logic against the ST's, routine by routine
@@ -87,8 +88,11 @@ Where things live (`src/memory.6502`): the drawing in main RAM and HAZEL,
 the lists and objects at the top of main RAM, the list phase and the sine
 table in the world's bank (5, `src/world.6502`), the shapes in bank 4,
 the erase lists in shadow RAM below the shadow screen (an object's box, when
-clearing it is cheaper, erased by `src/box.6502` in bank 7: decision 20). The loading area
-(bank 7) holds WINDOW, read with the start's files: the missile view's
+clearing it is cheaper, erased by `src/box.6502` in bank 7: decision 20). Out of
+play the loading area (bank 7) holds the front end (FRONT, `src/front.6502`:
+the title, the credits, the K screen, the game's end; the start loads it,
+and `src/front_main.6502` loads it at a game's end and on Esc, and loads
+WINDOW and SPEECH back at a game's start). In play it holds WINDOW: the missile view's
 window, its picture (`tools/mkcockpit.py --window`) and the draw phase's
 view code (`src/view_under.6502`: the gunsight, the ground dots,
 `src/mview.6502`), which runs there with ANDY paged; the bolt and the

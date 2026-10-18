@@ -7,11 +7,13 @@ isn't here yet.
 **[Run it in jsbeeb](https://bbc.xania.org/?autoboot&model=Master&disc1=github:mattgodbolt/starglider-beeb/starglider.ssd)**
 (a Master 128), or write `starglider.ssd` to a disc and SHIFT-BREAK a
 Master. For now the disc plays the game's world with its panel, its
-sound effects and its speech, but not yet its front end: after loading, a
-game starts at level 1, its logic
-the ST's transcribed exactly, drawn in MODE 1 at the ST's 320 x 200 with
-the cockpit's own colours below the view, double-buffered, the game
-stepping 12.5 times a second as the ST's does in flight.
+sound effects and its speech, and its front end: the title and the
+credits (any key starts a game, K redefines the keys), and at the game's
+end the pilot rating, the high scores and the end screen (Esc in play
+goes back to the title). The game's logic is the ST's transcribed
+exactly, drawn in MODE 1 at the ST's 320 x 200 with the cockpit's own
+colours below the view, double-buffered, the game stepping 12.5 times a
+second as the ST's does in flight. The title song is still to come.
 
 The keys are the ST's: the cursor keys, or X and C, bank; cursor up and
 `;` dive, cursor down and `.` climb; SPACE is faster and `/` slower;
