@@ -49,10 +49,14 @@ make spike      # the spike on every captured scene: checked against the
                 # ST's renderer, and timed (tools/scenecheck.py)
 make check      # sincos against the ST's sine table at every angle, make spike, the
                 # disc's erasing (tools/erasecheck.mjs), its own disc reader
-                # (tools/disccheck.mjs) and its controls (tools/inputcheck.mjs)
+                # (tools/disccheck.mjs), its controls (tools/inputcheck.mjs)
+                # and make panel
 make logic      # the port's game logic against the ST's, routine by routine
                 # and a whole step (tools/logicrun.mjs, on the captures make
                 # steps makes)
+make panel      # the panel drawn from those captures' frames, every pixel
+                # against a model of the ST's formulas (tools/panelcheck.mjs;
+                # --png DIR --at CAPTURE:FRAME renders, --colours an option)
 make memory     # what each region of the memory map holds (src/memory.6502)
 make fps        # the disc's frames and steps a second
 make scenes     # capture the scenes in Hatari (slow; needs ../hatari)
@@ -103,8 +107,16 @@ the ST's mouse moves.
   over its bank's first 4K, so it lives at &9000 up; what only the logic
   reads is in ANDY. Keep the ST's d0 in `rng_d0` wherever a random8 call
   adds it: some callers leave it over from earlier work.
+- The panel (`src/panel.6502`, its data in `src/panel_data.6502`, below
+  the logic in its bank) runs with ANDY paged, called by `panel_draw`
+  (`src/cockpit.6502`) after each frame's 3D. Each screen remembers in
+  ANDY what its panel shows, so only changes are drawn. What the ST
+  prints, the logic records in flags of the port's own (`world_text`,
+  `level_text`, `mine_text`, `dock_text`), which the panel draws.
 - Code that sets ACCCON's X from main RAM must lie below &3000
-  (`src/cockpit.6502`, the interrupt handler): `ASSERT` it.
+  (`src/cockpit.6502`, the interrupt handler): `ASSERT` it. Code in a
+  bank may set it too (the panel), but mustn't read &3000-&7FFF meanwhile:
+  the objects and lists are there.
 `node tools/scenerun.mjs SCENES OUT --profile 37` samples where the cycles
 go.
 
@@ -135,6 +147,11 @@ says how):
   a difference in whichever routine it falls in. Captures crawl, and more
   slowly with several running at once, so a script's waits count frames
   more than seconds: run them one at a time.
+  `st_panel.py run tests/st/panel_X.txt build/stpanel/X ...` captures the
+  state the panel draws from and the screen the ST makes, each frame, for
+  `node tools/panelcheck.mjs --st build/stpanel/X/panel.json` to check its
+  model of the ST's panel against (give Hatari and EmuTOS absolute paths
+  from a worktree).
 - **The Spectrum 128K**: `tools/zx.py`, nm's harness on SkoolKit.
 - **The CPC**: `tools/cpc_emu.py` on the Caprice32 in `../caprice32`.
 - **The C64**: `tools/c64_unfreeze.py` and `tools/c64_run.py` on py65.
@@ -150,8 +167,9 @@ says how):
   indexed access to a `ZA_AUTO` wants its `ZA_INDEXEDBY`; a patched or
   computed jump wants `ZA_CANJUMP`; an array rebuilt by indexed stores
   wants `ZA_DISCARD`.
-- ACCCON's X sends the CPU's own fetches to shadow RAM too: only code in
-  HAZEL may set it (`line_plot`, `screen_clear`).
+- ACCCON's X sends the CPU's own fetches to shadow RAM too: only code
+  outside &3000-&7FFF may set it (HAZEL's `line_plot` and `screen_clear`,
+  main RAM's below &3000, the panel in its bank).
 - A routine that patches code may take X or Y (`line_erase`, `line_draw`):
   reload what you were holding there.
 - `ROL` and `ASL` don't touch V; `BIT abs,Y`, `STY abs,X` and `STA zp,Y`

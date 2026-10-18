@@ -133,8 +133,8 @@ ASSERT irq_handler < &3000
     BRA wait
 }
 
-\ frame: the lists' objects drawn into the screen not shown, for
-\ frame_show to show.
+\ frame: the lists' objects drawn into the screen not shown, and the panel
+\ as the ST's world_render draws it from them, for frame_show to show.
 .frame
 {
 .shown
@@ -145,6 +145,7 @@ ASSERT irq_handler < &3000
     JSR erase_screen
 .erased
     JSR draw_phase
+    JSR panel_draw                              ; (cockpit.6502)
     LDA #&FF : STA frame_drawn
     RTS
 .buffer_bank
@@ -152,13 +153,15 @@ ASSERT irq_handler < &3000
 }
 
 \ frame_show: the frame this step drew, if it drew one, with what the
-\ step's logic draws on it (view_overlays: draw_buffer and draw_bank name
-\ its screen), shown from the next vertical sync.
+\ step's logic draws on it (view_overlays) and the texts the ST prints on
+\ it (panel_texts: draw_buffer and draw_bank name its screen), shown from
+\ the next vertical sync.
 .frame_show
 {
     LDA frame_drawn : BEQ done
     STZ frame_drawn
     JSR view_overlays
+    JSR panel_texts                             ; (cockpit.6502)
     LDA #1 : STA frame_ready
     INC frames : BNE done
     INC frames+1

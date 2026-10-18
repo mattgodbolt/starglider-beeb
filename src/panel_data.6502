@@ -1,0 +1,76 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the panel's data and state (panel.6502
+\ has its code): data only, so it may lie below world_list_end in the
+\ logic's bank, where code mustn't (baron#29, banks.6502)
+\ ***************************************************************************
+
+ASSERT P% >= ANDY_TOP                       ; (ANDY hides the bank's first 4K)
+
+\ scr: the screen byte of pixel (x, y)
+FUNCTION scr(x, y) = SCREEN + (y DIV 8) * SCREEN_ROW + (x DIV 4) * 8 + (y MOD 8)
+\ pixels_before: a MODE 1 byte's bits of its pixels left of pixel p (0-4)
+FUNCTION pixels_before(p) = ((&F0 << (4 - p)) AND &F0) OR ((&0F << (4 - p)) AND &0F)
+\ pixels_from: the bits of pixel x and those right of it in its byte
+FUNCTION pixels_from(x) = pixels_before(4) EOR pixels_before(x AND 3)
+\ pixels_to: of pixel x and those left of it
+FUNCTION pixels_to(x) = pixels_before((x AND 3) + 1)
+
+SCAN_DOTS = 32                              ; each screen's dots remembered: more, and its box is cleared
+
+\ The texts in the view (ps_texts' bits) are world_text's (vars.6502) and
+\ these, in the order the ST prints them.
+TX_MVIEW  = 4                               ; MISSILE VIEW
+TX_REFUEL = 16                              ; ENERGY CELLS REFUELLING
+TX_MINE   = 32                              ; a mine's (mine_text)
+TX_LEVEL  = 64                              ; LEVEL n and YOU NOW HAVE MANUAL CONTROL!
+TX_DOCKED = 128                             ; the docked menu's three lines
+ASSERT ((TX_DOCKING OR TX_LAUNCH OR TX_COUNT) AND (TX_MVIEW OR TX_REFUEL OR TX_MINE OR TX_LEVEL OR TX_DOCKED)) = 0
+
+SECTION PanelAndy, org = logic_andy_end, guard = ANDY_TOP, virtual = TRUE
+    \ by screen s: what it shows (an element's byte i at 2i + s)
+.ps_valid     SKIP 2        ; 0 until its panel is known (panel_fresh)
+.ps_cells     SKIP 2 * 22   ; each cell's glyph (CELLS of them, ASSERTed below)
+.ps_bar       SKIP 2 * 3    ; shields', energy's and laser's lengths (energy's | &80 dimmed)
+.ps_alt       SKIP 2        ; the altitude's red rows (| &80 the warning's colour above)
+.ps_speed     SKIP 2        ; the speed's rows lit
+.ps_tick      SKIP 2        ; the bank ticks' place
+.ps_texts     SKIP 2        ; the texts drawn (TX_*)
+.ps_mine      SKIP 2        ; which mine text (mine_text's)
+.ps_level     SKIP 2        ; the level LEVEL showed
+.ps_count_lo  SKIP 2        ; the countdown shown
+.ps_count_hi  SKIP 2
+.ps_dots_n    SKIP 2        ; the scanner's dots drawn (&FF: its box to clear)
+.ps_dot_lo    SKIP 2 * SCAN_DOTS    ; dot k of screen s at s * SCAN_DOTS + k: its byte
+.ps_dot_hi    SKIP 2 * SCAN_DOTS
+    \ the ST's own, which its new game resets ($266, $268, $27E)
+.wave_left_n  SKIP 1        ; each waveform's step, 0-15
+.wave_right_n SKIP 1
+.energy_dim   SKIP 1        ; 2: the low energy bar dimmed (colour 10); 0: not
+    \ the heading in degrees, for the angle it was last worked out for
+.head_for     SKIP 2
+.head_deg     SKIP 2
+    \ what world_render prints on the frame drawn (texts_note)
+.note_texts   SKIP 1        ; TX_*
+.note_colour  SKIP 1        ; the colour its last print leaves
+.note_count   SKIP 2        ; the countdown's number
+    \ this frame's
+.want         SKIP 22       ; the glyphs the cells should show
+.num_text     SKIP 6        ; a number's digits, as print_string takes them
+.tx_mine_v    SKIP 1        ; the words of the texts being drawn or cleared
+.tx_level     SKIP 1
+.tx_count     SKIP 2
+.panel_andy_end
+ENDSECTION
+
+INCLUDE "../build/gen/panel.6502"
+ASSERT CELLS = 22
+
+\ each scanner row's byte at its left edge
+.scan_row_lo
+FOR dy = 0..31
+    EQUB LO(scr(P_SCANNER_X, P_SCANNER_Y + dy))
+NEXT
+.scan_row_hi
+FOR dy = 0..31
+    EQUB HI(scr(P_SCANNER_X, P_SCANNER_Y + dy))
+NEXT

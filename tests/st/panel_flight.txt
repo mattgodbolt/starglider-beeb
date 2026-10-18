@@ -1,0 +1,27 @@
+# The panel in flight (tools/st_panel.py): from the start, LEVEL 1 and its
+# MANUAL CONTROL showing, then accelerate, turn both ways, climb, dive,
+# brake, fire. (The capture slows Hatari, so each wait covers fewer frames.)
+wait 38
+key 57
+wait 1
+debug parse {arm}
+key 57 6
+wait 4
+down 0x4b
+wait 5
+up 0x4b
+down 0x4d
+wait 5
+up 0x4d
+down 0x48
+wait 5
+up 0x48
+down 0x50
+wait 6
+up 0x50
+key 0x35 3
+down 0x39
+wait 2
+up 0x39
+wait 2
+quit

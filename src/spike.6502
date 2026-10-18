@@ -45,7 +45,7 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 .logic_jump
     JMP (logic_call)
     ZA_CANJUMP animate_shapes, player_flight, random8, random32, world_lists, world_after, world_whole, read_keys, object_handlers, collisions, level_message, frame_end_logic, post_frame, level_start, mine_proximity
-    ZA_CANJUMP new_game, spike_step
+    ZA_CANJUMP new_game, spike_step, panel_frame, panel_messages, panel_init
 
 \ spike_step: a whole step as the disc takes it (step.6502), but for its
 \ frame, which the logic doesn't read, and the disc's controls and frame,

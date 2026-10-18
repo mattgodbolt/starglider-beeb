@@ -66,10 +66,11 @@ SECTION Main, org = &0E00, filename = "SG", guard = MAIN_TOP, cmos = TRUE
     JSR mul_init
     JSR line_draw
     JSR screen_mode
-    \ the cockpit on both screens, their windows empty
+    \ the cockpit on both screens, their windows empty, their panels to draw
     JSR screen_copy
     STZ draw_bank : JSR window_clear
     LDA #ACCCON_X : STA draw_bank : JSR window_clear
+    JSR panel_reset
 IF DEFINED(SPLIT_SWEEP)
     JSR split_test
 ENDIF

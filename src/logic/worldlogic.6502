@@ -36,12 +36,18 @@ PROJ_SHIFT = 7
 \ the missile view's (L_05248).
 .world_lists
 {
+    STZ world_text
     LDA mv_render : BEQ normal
     JMP missile_lists
 .normal
-    \ docked, colour 0 flashes &036 (with the DOCKING message)
+    \ docked, colour 0 flashes &036, and DOCKING, PRESS I FOR INTERROGATE
+    \ shows but at the tunnel's end
     LDA docked : BEQ level_test
     LDA #&36 : STA flash0 : STZ flash0+1
+    LDA launch_state+1 : BNE docking
+    LDA launch_state : CMP #&1E : BEQ level_test
+.docking
+    LDA #TX_DOCKING : TSB world_text
 .level_test
     \ the level up (&0502C): any change in the score's second byte (its
     \ ten-thousands), tested before this frame's add, so a frame late
@@ -54,9 +60,11 @@ PROJ_SHIFT = 7
     LDA level : CMP #&23 : BNE add
     LDA #&22 : STA level
 .add
-    \ the kill's score (&05086): shown as the last kill when non-zero,
-    \ then added, with the X flag clear and the last carry lost; d0 holds
-    \ it, which the gunsight's blit may change
+    \ the kill's score (&05086): shown as the last kill when non-zero (the
+    \ ST prints the last kill before, so a step late: kill_shown), then
+    \ added, with the X flag clear and the last carry lost; d0 holds it,
+    \ which the gunsight's blit may change
+    MOVW kill_shown, last_kill
     LDA pending_score : STA rng_d0 : STA score_addend
     LDA pending_score+1 : STA rng_d0+1 : STA score_addend+1
     STZ score_addend+2 : STZ score_addend+3
@@ -114,10 +122,13 @@ PROJ_SHIFT = 7
     LDA m_iris : CLC : ADC #8 : STA m_iris
     RTS
 .steady
-    LDA m_iris : BEQ open
+    LDA m_iris : BEQ counting
     SEC : SBC #8 : STA m_iris
     BEQ open
     RTS
+.counting
+    \ open since before this step: the countdown shows (&05296)
+    LDA #TX_COUNT : TSB world_text
 .open
     LDA m_heading : STA m_idx : LDA m_heading+1 : AND #&0F : STA m_idx+1
     JSR sincos
@@ -736,6 +747,7 @@ NEXT
     \ LAUNCHING FROM SILO (&0562E): a step of the count, colour 0 a
     \ random word, five off the speed accumulator and effect 3; then the
     \ normal coarse list, even docked
+    LDA #TX_LAUNCH : TSB world_text
     LDA launch_state : BNE count_lo
     DEC launch_state+1
 .count_lo

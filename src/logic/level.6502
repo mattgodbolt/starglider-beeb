@@ -16,12 +16,14 @@
 \ with the ST's d0 in rng_d0 at every random8 call; level_start leaves it
 \ as the ST leaves d0 for the frame after.
 \
-\ The ST's new game also writes what the port keeps nowhere: the model
-\ viewer's eye offset ($288), the panel's waveform state ($266, $268,
-\ $27E), the renderer's angle cache ($180, $184), the table pointers
-\ (&03982), the sound's lockout (&29C), an accumulator nothing reads
-\ (&01846), the always-zero longs after the score (&01510-&0151B) and
-\ the four statistics nothing reads ($B4, $BC, $C8, $CC).
+\ The panel's own state it resets, the waveforms' steps and the energy
+\ bar's dimming ($266, $268, $27E), is panel.6502's (panel_new_game). The
+\ ST's new game also writes what the port keeps nowhere: the model
+\ viewer's eye offset ($288), the renderer's angle cache ($180, $184),
+\ the table pointers (&03982), the sound's lockout (&29C), an accumulator
+\ nothing reads (&01846), the always-zero longs after the score
+\ (&01510-&0151B) and the four statistics nothing reads ($B4, $BC, $C8,
+\ $CC).
 \ ***************************************************************************
 
 \ OBW lo, hi, v: an object field (a word, as its two arrays) of the record
@@ -371,7 +373,7 @@ ENDMACRO
     STZ missile_view : STZ mv_render : STZ docked
     LDA #&FF : STA enemies_active
     STZ cheat_mode
-    RTS
+    JMP panel_new_game
 }
 
 \ random_seed (&0465A): both generators seeded from the word the ST keeps
