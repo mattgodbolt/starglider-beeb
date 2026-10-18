@@ -333,3 +333,74 @@ ENDMACRO
 .approximated
     JMP next
 }
+
+\ ---------------------------------------------------------------------------
+\ kmul: kp = kv (a signed word) by each of the five constants, each
+\ (kv K) >> 14 in magnitude, signed. Each product's bytes 1-3 build in
+\ kq and kp (the lowest byte can't carry into them); every factor is a
+\ sine's size, at most 16384, so the high bytes' products are small
+\ enough that only the last sum into kp carries. It's the draw phase's
+\ (ground_matrix's, render.6502), kept here, out of main RAM, as
+\ ground_matrix pages this bank for the sines before it calls it.
+ZA_AUTO2 kv
+ZA_AUTO 10, kp
+.kmul
+{
+    ZA_AUTO 10, kq              ; each product's byte 1, by 2 k
+    ZA_AUTO1 kneg, tlo
+    LDA kv+1 : STA kneg : BPL positive
+    LDA #0 : SEC : SBC kv : STA kv : LDA #0 : SBC kv+1 : STA kv+1
+.positive
+    LDA kv : MUL_SET
+    ZA_DISCARD kq, kp
+    LDX #8
+.low
+    LDY kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    SEC : LDA (m_sqlo),Y : SBC (m_nglo),Y : LDA (m_sqhi),Y : SBC (m_nghi),Y
+    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDY kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    MUL8 tlo : STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA tlo : CLC : ADC kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    BCC low_carried
+    INC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.low_carried
+    DEX : DEX : BPL low
+    LDA kv+1 : MUL_SET
+    LDX #8
+.high
+    LDY kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    MUL8 tlo
+    CLC : ADC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA tlo : CLC : ADC kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    BCC high_carried
+    INC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.high_carried
+    LDY kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    MUL8 tlo : STA kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA tlo : CLC : ADC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    BCC top_carried
+    INC kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.top_carried
+    \ >> 14: bytes 1-3 shifted left 2, the top two; then signed
+    LDA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ASL A : ROL kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ROL kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ASL A : ROL kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ROL kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    TXA : LSR A : TAY
+    LDA kneg : EOR ksign,Y : ZA_INDEXEDBY 0..4
+    BPL high_next
+    LDA #0 : SEC : SBC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA #0 : SBC kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.high_next
+    DEX : DEX : BMI done
+    JMP high
+.done
+    RTS
+}
