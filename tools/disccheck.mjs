@@ -1,5 +1,5 @@
 // The game's own disc reader (src/disc.6502), on jsbeeb's Master with the
-// disc in the drive: it reads SHAPES into bank 6 as the models turn, which
+// disc in the drive: it reads SHAPES into bank 7 as the models turn, which
 // must come out the same as the file, while the game keeps its pace.
 //
 //   node tools/disccheck.mjs
@@ -23,8 +23,10 @@ const ram = cpu.ramRomOs;
 const bank = (n) => cpu.romOffset + n * 16384;
 loadDisc(tm, disc, sym);
 const shapes = ssdFiles(disc).SHAPES;
+// (bank 7 holds HAZEL's files, staged there as !BOOT leaves them, until the
+// read comes over them: they differ from SHAPES, so a read that never
+// happened still shows)
 const at = bank(sym.BANK_SPARE);
-ram.fill(0xee, at, at + 16384);
 const word = (a) => ram[a] | (ram[a + 1] << 8);
 let t = 0;
 const second = 2000000;
