@@ -236,11 +236,12 @@ PROJ_SHIFT = 7
 
 \ dot_keep: dot X, surely in view with margin dot_mu (the least that z' -
 \ 3, 2z' - |x'|, 2z' - |y'| and 16383 - z' can be), is kept if |dx| + |dy|
-\ + |dz| is at most 16384: in the least class k with the sum at most 512
-\ << k. While its margin lasts the sum stays within twice that (a frame's
-\ move takes at least a third of the drift, and the margin is under twice
-\ the sum), which is what its class's drift is for. The sum is bounded by
-\ dot_approx's e: |d| is within 128 |e| + 64.
+\ + |dz| is at most 16384: in the class c that bounds the sum by 1024 c for
+\ as long as the margin lasts, which is what the class's drift is for. A
+\ step's move takes at least a third of its drift (dot_drift), so while
+\ the margin lasts the camera moves less than mu / 3 and the sum grows by
+\ less; mu / 2 stands in for that. The sum is bounded by dot_approx's e:
+\ |d| is within 128 |e| + 64.
 .dot_keep
 {
     ZA_AUTO2 v
@@ -248,17 +249,17 @@ PROJ_SHIFT = 7
     LDA dot_esum : LSR A : STA v+1
     LDA #0 : ROR A : ORA #127
     CLC : ADC dot_dy : STA v
-    LDA v+1 : ADC dot_dy+1
-    \ v / 256 under 64, or not kept; the class from it
+    LDA v+1 : ADC dot_dy+1 : STA v+1
+    \ v / 256 under 64, or not kept
     CMP #&40 : BCS far
-    LDY #0
-    LSR A
-.class
-    BEQ got
-    INY : LSR A
-    BRA class
-.got
-    TYA : STA dot_cls,X
+    \ the class: (v + 2 + mu / 2, rounded up) / 1024, rounded up
+    LDA dot_mu+1 : LSR A : TAY
+    LDA dot_mu : ROR A                  ; (C: mu's bit 0, which rounds up)
+    ADC v : STA v
+    TYA : ADC v+1 : STA v+1
+    LDA v : CLC : ADC #LO(2 + 1023) : LDA v+1 : ADC #HI(2 + 1023)
+    LSR A : LSR A
+    STA dot_cls,X
     LDA dot_mu : STA dot_rem_lo,X : LDA dot_mu+1 : STA dot_rem_hi,X
     LDA dot_x_lo,X : STA dot_at_xlo,X : LDA dot_x_hi,X : STA dot_at_xhi,X
     LDA dot_z_lo,X : STA dot_at_zlo,X : LDA dot_z_hi,X : STA dot_at_zhi,X
@@ -380,15 +381,21 @@ ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointe
 
 \ dot_drift: by class, the most a frame since the last frame's dots can
 \ have moved 2z' - x', 2z' + x', 2z' - y', 2z' + y', z' or -z' of a dot
-\ whose |dx| + |dy| + |dz| stays within L = 1024 << k: each row of the
-\ matrix moved by at most dm an entry, the camera by dp (|dx| + |dy| + |dz|),
-\ each term's floor by under 1, so 3 dp + 3 dm L / 16384 + 9 (and dp more
-\ when an entry is beyond 16384). Without a last frame in the same view,
-\ or with too much moved, nothing is kept. The frame's camera is kept for
-\ the next.
+\ whose |dx| + |dy| + |dz| stays within L = 1024 c: the camera's move, dp
+\ (|dx| + |dy| + |dz|), by at most 3 dp (and dp more when an entry is
+\ beyond 16384); the matrix's change by at most r L / 16384, r the most
+\ that any column's 2 |dz'| and the larger of |dx'| and |dy'| make (no
+\ test's row combination changes by more in that column); and each term's
+\ floor by under 1: 3 dp + r L / 16384 + 9. Without a last frame in the
+\ same view, or with too much moved, nothing is kept. The frame's camera
+\ is kept for the next.
+DOT_CLASSES = 25                        ; (dot_keep's: 1 to 24, from v and mu under 16384)
 .dot_drift
 {
-    ZA_AUTO2 dm, dp, t, base
+    ZA_AUTO2 dp, t
+    ZA_AUTO 4, br                       ; base, then r
+    base = br
+    r = br + 2
     ZA_AUTO1 wide
     LDA dot_valid : BNE known
 .forget
@@ -397,11 +404,12 @@ ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointe
 .forgot
     STA dot_rem_hi,X
     DEX : BPL forgot
+    STA dot_made+1                      ; (no base is that: the drift's made again)
     JMP keep_camera
 .known
     LDA mv_render : CMP dot_mv_was : BNE forget
-    \ dm, and whether any entry is beyond 16384
-    STZ dm : STZ dm+1 : STZ wide
+    \ each entry's change, and whether any entry is beyond 16384
+    STZ wide
     LDX #16
 .entries
     LDA cam,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
@@ -412,10 +420,8 @@ ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointe
     STA t+1 : LDA #0 : SEC : SBC t : STA t : LDA #0 : SBC t+1
 .moved_pos
     CMP #&20 : BCS forget               ; 8192 up
-    STA t+1
-    LDA dm : CMP t : LDA dm+1 : SBC t+1 : BCS not_most
-    MOVW dm, t
-.not_most
+    STA dot_dm+1,X
+    LDA t : STA dot_dm,X
     \ beyond 16384: below &C000, or above &4000
     LDA cam+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
     BPL m_pos
@@ -430,6 +436,23 @@ ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointe
     LDA #&FF : STA wide
 .m_in
     DEX : DEX : BPL entries
+    \ r, under 24576, by column (X its entry in row x')
+    STZ r : STZ r+1
+    LDX #4
+.columns
+    LDA dot_dm+12,X : ASL A : STA t
+    LDA dot_dm+13,X : ROL A : STA t+1
+    LDA dot_dm,X : CMP dot_dm+6,X : LDA dot_dm+1,X : SBC dot_dm+7,X
+    TXA : BCS x_more
+    ADC #6                              ; (C clear) the entry in row y'
+.x_more
+    TAY
+    LDA t : CLC : ADC dot_dm,Y : STA t
+    LDA t+1 : ADC dot_dm+1,Y : STA t+1
+    LDA t : CMP r : LDA t+1 : SBC r+1 : BCC not_most
+    MOVW r, t
+.not_most
+    DEX : DEX : BPL columns
     \ dp, each of its terms under 4096
     STZ dp : STZ dp+1
     LDX #4
@@ -455,23 +478,43 @@ ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointe
     BCC based
     INC base+1
 .based
-    \ t = 3 dm, under 24576; class 4 takes it whole, 5 twice, 3-0 halved
-    \ and rounded up again and again
-    LDA dm : ASL A : STA t : LDA dm+1 : ROL A : STA t+1
-    ADDW t, dm
-    LDX #4 : JSR class_drift
-    ASL t : ROL t+1
-    LDX #5 : JSR class_drift
-    LSR t+1 : ROR t
+    \ class c's, base + c r16, r16 = r / 16 rounded up (which is r 1024 /
+    \ 16384), each held at &7FFF
+    LDA r : CLC : ADC #15 : STA r
+    BCC r_up
+    INC r+1
+.r_up
+    LSR r+1 : ROR r : LSR r+1 : ROR r
+    LSR r+1 : ROR r : LSR r+1 : ROR r
+    \ the last frame's classes stand if base and r16 are the same (the
+    \ camera flying straight and steady)
     LDX #3
-.halves
-    LSR t+1 : ROR t
-    BCC exact_half
-    INC t : BNE exact_half
-    INC t+1
-.exact_half
-    JSR class_drift
-    DEX : BPL halves
+.same
+    LDA br,X : ZA_INDEXEDBY 0..3
+    CMP dot_made,X : BNE make
+    DEX : BPL same
+    BRA keep_camera
+.make
+    LDX #3
+.making
+    LDA br,X : ZA_INDEXEDBY 0..3
+    STA dot_made,X
+    DEX : BPL making
+    MOVW t, base
+    LDX #1
+.classes
+    LDA t+1 : BMI held                  ; (and so for every class past it)
+    LDA t : CLC : ADC r : STA t
+    LDA t+1 : ADC r+1 : STA t+1         ; (under &8600: no carry)
+    BMI held
+    STA dot_drift_hi,X
+    LDA t : STA dot_drift_lo,X
+    BRA classed
+.held
+    LDA #&FF : STA dot_drift_lo,X
+    LDA #&7F : STA dot_drift_hi,X
+.classed
+    INX : CPX #DOT_CLASSES : BNE classes
 .keep_camera
     LDX #17
 .cam_copy
@@ -484,17 +527,6 @@ ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointe
     DEX : BPL place
     LDA mv_render : STA dot_mv_was
     LDA #1 : STA dot_valid
-    RTS
-\ class_drift: class X's drift, base + t, held at &7FFF.
-.class_drift
-    LDA base : CLC : ADC t : STA dot_drift_lo,X
-    LDA base+1 : ADC t+1 : BCS held
-    BPL kept
-.held
-    LDA #&FF : STA dot_drift_lo,X
-    LDA #&7F
-.kept
-    STA dot_drift_hi,X
     RTS
 }
 
@@ -843,13 +875,16 @@ ENDIF
 \ ---------------------------------------------------------------------------
 \ The dots' cache (ground_dots), in the world bank's own RAM: the last
 \ dots' frame's camera, place and view; by dot its margin (negative: not
-\ kept), class and place when kept; and this frame's drift by class.
+\ kept), class and place when kept; and this frame's drift by class, from
+\ each entry's change in the matrix.
 .dot_valid    EQUB 0                    ; non-zero once dot_cam_was holds a frame's
 .dot_mv_was   EQUB 0
 .dot_cam_was  SKIP 18
 .dot_p_was    SKIP 6
-.dot_drift_lo SKIP 6
-.dot_drift_hi SKIP 6
+.dot_dm       SKIP 18
+.dot_made     EQUW 0, &FFFF             ; the base and r16 the drift was made from (none yet)
+.dot_drift_lo SKIP DOT_CLASSES
+.dot_drift_hi SKIP DOT_CLASSES
 .dot_rem_lo   SKIP 40
 .dot_rem_hi   SKIP 40
 .dot_cls      SKIP 40
