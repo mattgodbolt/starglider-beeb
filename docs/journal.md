@@ -699,3 +699,14 @@ at the routine's entry and compared at its exit, all matching (checked
   seemed unreachable. A list assignment referring forward to a label
   also failed to settle (waitingforvsync/baron#31).
 
+### Nine calls
+
+The transcription and the optimisation rounds left nine places where the
+port would do something the ST doesn't, or where the ST leaves the choice
+open. They went to Matt as one page, each with its options, figures and a
+recommendation, and Matt took every recommendation (2026-10-18):
+decisions 15 to 22. One call kept the ST as it is, so it has no number:
+each step still clears every object's drawn and near flags below the
+slot count, as the ST does, rather than only the last lists' (about 750
+cycles a step, against the object table's exact check).
+
