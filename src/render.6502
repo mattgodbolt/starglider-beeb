@@ -41,11 +41,13 @@ IF DEFINED(SPIKE)
 ENDIF
 
 \ erase_init: both screens' windows to be cleared before they're first
-\ drawn, as if their erase lists had overflowed; and the marks wiped, as
-\ until the first frame their pages hold other things (disc.6502's
-\ catalogue, screen_copy's pages).
+\ drawn, as if their erase lists had overflowed, neither showing the
+\ missile view's window (mview.6502); and the marks wiped, as until the
+\ first frame their pages hold other things (disc.6502's catalogue,
+\ screen_copy's pages).
 .erase_init
     STZ erase_stop : STZ erase_stop+1
+    LDA #&FF : STA win_shown : STA win_shown+1
 \ marks_wipe: every edge's and vertex's mark 0, and stamp, so the next
 \ stamp is on none of them.
 .marks_wipe
@@ -56,9 +58,23 @@ ENDIF
     RTS
 
 \ draw_phase: the draw list's objects into the screen draw_buffer names
-\ (draw_bank set to match), each line onto its erase list (memory.6502):
-\ line_plot's stores moved to that screen's pages.
+\ (draw_bank set to match), each line onto its erase list (memory.6502).
+\ (The disc's frame, engine.6502, draws more between them.)
+IF DEFINED(SPIKE)
 .draw_phase
+    JSR draw_begin
+    JSR draw_objects
+    JMP draw_end
+ENDIF
+
+\ draw_begin: line_plot's stores moved to the erase list of the screen
+\ draw_buffer names (to that screen's pages), from its start; draw_end
+\ keeps where it got to. erase_more carries the list on from there, for
+\ more drawn onto the same frame (view.6502's over_draw), and erase_keep
+\ keeps it again.
+.draw_begin
+    LDA #ERASE_LINES : STA erase_i
+.erase_aim
     LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
     ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
     STA line_plot.f_lo0+2 : STA line_plot.f_lo1+2 : ADC #2
@@ -67,8 +83,13 @@ ENDIF
     STA line_plot.f_dx+2 : ADC #2
     STA line_plot.f_dy0+2 : STA line_plot.f_dy1+2 : ADC #2
     STA line_plot.f_code+2
-    LDA #ERASE_LINES : STA erase_i
-    JSR draw_objects
+    RTS
+.erase_more
+    LDX draw_buffer
+    LDA erase_stop,X : STA erase_i
+    BRA erase_aim
+.draw_end
+.erase_keep
     LDX draw_buffer
     LDA erase_i : STA erase_stop,X
     RTS

@@ -34,8 +34,6 @@ ELSE
     build_stamp = "DEV"
 ENDIF
 
-BANK_SPARE = 7                      ; the loading area (docs/plan.md, section 3)
-
 SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*| STARGLIDER for the BBC Master ", build_stamp, 13
     EQUS "MODE 1", 13
@@ -116,13 +114,13 @@ INCLUDE "disc.6502"
 \ The files start loads (disc_load: the file, where, its bank), the last
 \ first.
 .disc_load_file
-    EQUB DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
+    EQUB DF_WINDOW, DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
 .disc_load_lo
-    EQUB LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
+    EQUB LO(WIN_PIC), LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
 .disc_load_hi
-    EQUB HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
+    EQUB HI(WIN_PIC), HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
 .disc_load_bank
-    EQUB BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
+    EQUB BANK_PIC, BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
 DISC_LOADS = P% - disc_load_bank
 
 \ ---------------------------------------------------------------------------
@@ -166,10 +164,12 @@ SIGHT_CY = 68
     JSR erase_init
     STZ draw_buffer : STZ frame_drawn : STZ frame_ready
     \ The disc reader at work (decision 12): until the game has a file of
-    \ its own to load, SHAPES read again into the loading area as the game
-    \ starts (tools/disccheck.mjs checks it).
-    LDX #DF_SHAPES : LDY #BANK_SPARE
+    \ its own to load as it plays, TABLES read again into the loading area,
+    \ below WINDOW's code and picture there, as the game starts
+    \ (tools/disccheck.mjs checks it).
+    LDX #DF_TABLES : LDY #BANK_PIC
     STZ fe_dst : LDA #&80 : STA fe_dst+1
+    ASSERT CODE2 - TABLES <= WIN_PIC - &8000    ; (TABLES' guard is CODE2)
     JSR disc_load
     JSR input_init
     JSR install_irq

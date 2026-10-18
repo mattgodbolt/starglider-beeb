@@ -9,6 +9,20 @@ INCLUDE "../build/gen/types.6502"
 INCLUDE "logic/random.6502"
 INCLUDE "logic/arith.6502"
 INCLUDE "step.6502"
+
+\ view_under: the draw phase's drawing besides the objects (view_under.6502),
+\ in the loading area's bank, with ANDY paged for what it reads.
+.view_under
+    BANK_ANDY BANK_PIC
+    JMP under_draw
+
+\ dot_exact: rotate_exact for view_under.6502's dots_draw, from the world's
+\ bank, below ANDY's top, and back.
+.dot_exact
+    BANK BANK_WORLD
+    JSR rotate_exact
+    BANK_ANDY BANK_PIC
+    RTS
 INCLUDE "sound.6502"
 
 

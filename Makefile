@@ -39,7 +39,7 @@ ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
 SCENES   = flight towers docked
 SOURCES  = $(wildcard src/*.6502 src/logic/*.6502)
-GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/panel.6502
+GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/sight.6502 build/gen/ground.6502 build/gen/window.6502 build/gen/panel.6502
 
 # A failed step leaves no half-made target behind (asm.sh fails on a
 # warning after baron has written its output).
@@ -51,7 +51,7 @@ BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short 
 TARGET   = build/starglider.ssd
 DISC     = starglider.ssd
 
-.PHONY: all run disc check spike logic panel steps memory fps scenes fetch venv clean
+.PHONY: all run disc check spike logic view panel steps memory fps scenes fetch venv clean
 
 all: $(TARGET) build/spike/SPIKE
 
@@ -96,6 +96,14 @@ build/gen/rotate.6502: tools/mkrotate.py | build/gen
 build/gen/xform.6502: tools/mkxform.py | build/gen
 	python3 -I tools/mkxform.py > $@
 
+# The ground dots' rotation for drawing (src/view.6502).
+build/gen/ground.6502: tools/mkground.py | build/gen
+	python3 -I tools/mkground.py > $@
+
+# The gunsight's pixels, from the ST's STAR.PRG.
+build/gen/sight.6502: $(PRG) tools/mksight.py tools/st_prg.py | build/gen
+	$(PYTHON) -I tools/mksight.py $(PRG) $@
+
 build/gen/objects.6502 build/gen/objects.json &: tools/mkobjects.py | build/gen
 	python3 -I tools/mkobjects.py build/gen
 
@@ -115,6 +123,11 @@ build/gen/panel.6502 build/gen/panel.json &: $(PRG) tools/mkpanel.py tools/mkcoc
 build/gen/cockpit.bin: $(PRG) tools/mkcockpit.py | build/gen
 	$(PYTHON) -I tools/mkcockpit.py build/st/disc/RESULT.TRA --screen $@
 
+# The missile view's window, from the same picture (and unpacked, for
+# tools/viewrun.mjs).
+build/gen/window.6502 build/gen/window.raw &: $(PRG) tools/mkcockpit.py | build/gen
+	$(PYTHON) -I tools/mkcockpit.py build/st/disc/RESULT.TRA --window build/gen/window.6502 build/gen/window.raw
+
 build/spike/SPIKE: $(SOURCES) $(GEN) | build/spike
 	$(ASM) --warn 2 -p build/spike --symbols build/spike/symbols.json src/spike.6502
 
@@ -125,7 +138,7 @@ build/st build/gen build/spike:
 build/scenes/%/beeb.json: build/scenes/%/scenes.json $(PRG) tools/mkscene.py tools/st_render.py
 	$(PYTHON) -I tools/mkscene.py $(PRG) $< $@
 
-check: build/spike/SPIKE spike panel $(TARGET)
+check: build/spike/SPIKE spike panel view $(TARGET)
 	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike
 	node tools/erasecheck.mjs
 	node tools/disccheck.mjs
@@ -147,6 +160,13 @@ logic: build/spike/SPIKE
 	    [ -f build/steps/$$s/steps.json ] || { echo "no build/steps/$$s: make steps"; exit 1; }; \
 	    node tools/logicrun.mjs build/steps/$$s/steps.json $$r || exit 1; \
 	done; done
+
+# The view's drawing besides the objects (src/view.6502: the gunsight, the
+# ground dots, the bolt, the shots) against the ST's on every capture, and
+# the shots' formula against the scenes' own lines (tools/viewrun.mjs).
+view: build/spike/SPIKE
+	node tools/viewrun.mjs $(STEPS:%=build/steps/%/steps.json)
+	@for s in $(SCENES); do node tools/viewrun.mjs --scenes build/scenes/$$s/scenes.json || exit 1; done
 
 # The panel on every capture's frames (tools/panelcheck.mjs).
 panel: build/spike/SPIKE build/gen/panel.json

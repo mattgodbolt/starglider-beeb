@@ -16,7 +16,8 @@
 \ the frame is shown only then (frame_show).
 \
 \ The game supplies step_lists and step_logic, which calls frame_show once
-\ its frame's logic is done.
+\ its frame's logic is done, and view_under: the draw phase's drawing
+\ besides the objects (the gunsight, the ground dots).
 \ ***************************************************************************
 
 STEP_FIELDS = 4                     ; decision 4: 12.5 steps a second
@@ -144,7 +145,10 @@ ASSERT irq_handler < &3000
     TAX : LDA buffer_bank,X : STA draw_bank
     JSR erase_screen
 .erased
-    JSR draw_phase
+    JSR draw_begin
+    JSR view_under
+    JSR draw_objects
+    JSR draw_end
     JSR panel_draw                              ; (cockpit.6502)
     LDA #&FF : STA frame_drawn
     RTS

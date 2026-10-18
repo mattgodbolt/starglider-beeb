@@ -195,5 +195,20 @@ free_top = free_n           ; {ST $09C(a6) index &94C 4} (the ST's pointer past 
 .ram_obj      SKIP 1        ; {ST $0AC(a6) slot} what was rammed
 .refuel_latch SKIP 1        ; {ST $2C4(a6) byte} the refuelling test is made for this contact
 
+    \ what the ST draws in the middle of the logic, kept by the logic for
+    \ the drawing to draw (view.6502): the port's own, all of it, each the
+    \ last step's
+.dots_ran     SKIP 1        ; non-zero when ground_dots ran (world_lists)
+.dot_seen     SKIP 40       ; by dot: non-zero if ground_dots found it in view, so plotted it
+.bolt_shown   SKIP 1        ; non-zero when player_laser drew the bolt (world_after)
+SHOTS = 4                   ; the enemies' laser shots a step kept: no more are drawn
+.shot_n       SKIP 1        ; the shots (enemy_laser) ...
+.shot_x_lo    SKIP SHOTS    ; ... each from the attacker's gun, in camera space ...
+.shot_x_hi    SKIP SHOTS
+.shot_y_lo    SKIP SHOTS
+.shot_y_hi    SKIP SHOTS
+.shot_z_lo    SKIP SHOTS
+.shot_z_hi    SKIP SHOTS
+.shot_end     SKIP SHOTS    ; ... to this x on the window's bottom edge
 .logic_andy_end             ; (the panel's follow: src/panel.6502)
 ENDSECTION

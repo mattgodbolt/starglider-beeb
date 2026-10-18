@@ -845,3 +845,44 @@ The colours are each ST colour to the nearest of its band's four. The
 scanner's dots take their objects' lines' colours, so the white things
 are the only blue dots.
 
+### The view besides the objects
+
+The gunsight, the ground dots, the player's bolt, the enemies' laser
+lines and the missile view's window are drawn as the ST draws them. The
+ST draws the dots, the bolt and the lines from inside its logic. Here the
+logic records them instead (which dots `ground_dots` kept in view, that
+`player_laser` drew the bolt, each shot's gun and end), in variables the
+checks don't map, and the drawing draws from those records. The sight and
+the dots go in the draw phase; the bolt and the lines go after the step's
+logic, onto the same frame (decision 16).
+
+- **The dots cost the most.** Each one in view is rotated into camera
+  space, exactly when it's near and otherwise by a rotation made only for
+  the ground, good to a pixel. Then it's projected and plotted as &0976E
+  plots it: about 66K cycles a frame in flight (measured 2026-10-18).
+- **The missile view's window** is the cockpit picture sliding over the
+  view as the ST copies it, a whole character row at a time, since
+  m_iris steps by 8. Once open, it's put back after an erase. It lives in
+  bank 7 with the code that draws it, which also holds the draw phase's
+  other view code, since the panel filled the logic bank. Drawing it
+  whole costs about 200K cycles a frame while it slides.
+
+`make view` (now part of `make check`) checks all of it against the ST
+on the 25 captures:
+
+- the dots against &047AA run on each capture's state: 95% at the ST's
+  pixel, the rest within one, none missing, none stray;
+- the sight, the bolt and the shots exactly, the shots' ends from the
+  ST's own random numbers replayed;
+- the window's whole screen on 449 frames;
+- every frame erased back to the cockpit.
+
+With everything in, the disc draws 5.1 frames a second flying straight,
+holding 12.5 steps (`make fps`, 2026-10-18): the dots and the panel took
+it from 8.5.
+
+Baron#29 struck again in bank 7: with the window's code first, at &9000
+below `world_list_end`, the build ran out of zero page for routines that
+never meet it. The picture now goes first, so the code starts past the
+rotations' chain.
+

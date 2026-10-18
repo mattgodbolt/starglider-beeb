@@ -50,13 +50,17 @@ make spike      # the spike on every captured scene: checked against the
 make check      # sincos against the ST's sine table at every angle, make spike, the
                 # disc's erasing (tools/erasecheck.mjs), its own disc reader
                 # (tools/disccheck.mjs), its controls (tools/inputcheck.mjs)
-                # and make panel
+                # make panel and make view
 make logic      # the port's game logic against the ST's, routine by routine
                 # and a whole step (tools/logicrun.mjs, on the captures make
                 # steps makes)
 make panel      # the panel drawn from those captures' frames, every pixel
                 # against a model of the ST's formulas (tools/panelcheck.mjs;
                 # --png DIR --at CAPTURE:FRAME renders, --colours an option)
+make view       # the view besides the objects (the gunsight, the ground dots,
+                # the bolt, the shots, the missile view's window) against the
+                # ST's on those captures, and the shots against the scenes'
+                # own lines (tools/viewrun.mjs)
 make memory     # what each region of the memory map holds (src/memory.6502)
 make fps        # the disc's frames and steps a second
 make scenes     # capture the scenes in Hatari (slow; needs ../hatari)
@@ -78,7 +82,13 @@ use to put the ST's records into it and read them back.
 Where things live (`src/memory.6502`): the drawing in main RAM and HAZEL,
 the lists and objects at the top of main RAM, the list phase and the sine
 table in the world's bank (5, `src/world.6502`), the shapes in bank 4,
-the erase lists in shadow RAM below the shadow screen. `src/engine.6502`
+the erase lists in shadow RAM below the shadow screen. The loading area
+(bank 7) holds WINDOW, read with the start's files: the missile view's
+window, its picture (`tools/mkcockpit.py --window`) and the draw phase's
+view code (`src/view_under.6502`: the gunsight, the ground dots,
+`src/mview.6502`), which runs there with ANDY paged; the bolt and the
+shots (`src/view.6502`) run from the logic bank after the step's logic,
+from what the logic records for them. `src/engine.6502`
 is the frame: the interrupt, the fixed step, the flip (decision 14).
 `src/step.6502` is a step of the game in the ST's order (`step_lists`,
 `step_logic`), which `make logic` checks whole against the ST's too;

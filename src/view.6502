@@ -1,0 +1,117 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - what the view shows from the step's logic
+\
+\ The player's laser bolt and the enemies' laser lines (st.md,
+\ st-logic.md), each where the ST draws it and in its colour, onto the
+\ frame the step drew and onto its erase list, as the objects' lines are
+\ (decision 14). The ST draws them as its logic runs; the port, after the
+\ step's logic, onto the same frame, before it's shown (call 2's option
+\ B), from what the logic records (bolt_shown, the shots).
+\
+\ In the logic's bank, with ANDY paged, beside box_div (laser.6502):
+\ overlays.6502's view_overlays calls over_draw. (view_under.6502 has what
+\ the draw phase draws besides the objects.)
+\ ***************************************************************************
+
+\ over_draw: the bolt and the shots onto the frame the draw phase drew, its
+\ erase list carried on.
+.over_draw
+    JSR erase_more
+    JSR bolt_draw
+    JSR shots_draw
+    JMP erase_keep
+
+\ ---------------------------------------------------------------------------
+\ bolt_draw (&087FA): the bolt, when this step's player_laser drew it: from
+\ each of (384, 150), (384, 170), (-64, 150) and (-64, 170) (the ST's
+\ $2A8-$2AE), the quarter of the way to the target that the bolt's count
+\ has reached, cut to the window as the ST cuts it, in the ST's colour 6.
+\ The ST's arithmetic: the offset's low two bits on the start, a quarter
+\ (asr 2) (4 - the count) times on, and the line back by one quarter.
+.bolt_draw
+{
+    ZA_AUTO1 i
+    ZA_AUTO2 qx, qy
+    LDA bolt_shown : BNE shown
+    RTS
+.shown
+    LDA colour_map+6 : JSR set_colour
+    LDA #6 : STA ocolour
+    LDX #3
+.each
+    STX i
+    LDA bolt_target_x : SEC : SBC bolt_ox_lo,X : STA qx
+    LDA bolt_target_x+1 : SBC bolt_ox_hi,X : STA qx+1
+    LDA bolt_target_y : SEC : SBC bolt_oy,X : STA qy
+    LDA bolt_target_y+1 : SBC #0 : STA qy+1
+    LDA qx : AND #3 : CLC : ADC bolt_ox_lo,X : STA cx0
+    LDA bolt_ox_hi,X : ADC #0 : STA cx0+1
+    LDA qy : AND #3 : CLC : ADC bolt_oy,X : STA cy0
+    LDA #0 : ADC #0 : STA cy0+1
+    ASRW qx : ASRW qx
+    ASRW qy : ASRW qy
+    LDA #4 : SEC : SBC bolt_timer : TAY : BEQ far
+.quarter
+    ADDW cx0, qx
+    ADDW cy0, qy
+    DEY : BNE quarter
+.far
+    LDA cx0 : SEC : SBC qx : STA cx1
+    LDA cx0+1 : SBC qx+1 : STA cx1+1
+    LDA cy0 : SEC : SBC qy : STA cy1
+    LDA cy0+1 : SBC qy+1 : STA cy1+1
+    LDA #VIEW_BOLT : STA slot
+    STX edge_i
+    JSR clip_line
+    LDX i : DEX : BMI done
+    JMP each
+.done
+    RTS
+}
+.bolt_ox_lo
+    EQUB LO(384), LO(384), LO(-64), LO(-64)
+.bolt_ox_hi
+    EQUB HI(384), HI(384), HI(-64), HI(-64)
+.bolt_oy
+    EQUB 150, 170, 150, 170
+
+\ The slots the spike's line log gives the bolt's and the shots' lines
+\ (render.6502's clip_line logs the slot): none of the objects'.
+VIEW_BOLT = &FE
+VIEW_SHOT = &FD
+ASSERT VIEW_SHOT >= SLOTS + 2
+
+\ ---------------------------------------------------------------------------
+\ shots_draw (&07E6E): each enemy laser shot this step's handlers recorded
+\ (enemy_laser), from the attacker's gun in camera space, projected as the
+\ ST projects it (box_div: << 7, divs, its overflow kept), to its end on
+\ the window's bottom edge, cut to the window, in the ST's colour 1.
+.shots_draw
+{
+    ZA_AUTO1 i
+    LDA shot_n : BEQ done
+    LDA colour_map+1 : JSR set_colour       ; (which may take X)
+    LDA #1 : STA ocolour
+    LDX shot_n
+.each
+    DEX : STX i
+    LDA shot_z_lo,X : STA div_d : LDA shot_z_hi,X : STA div_d+1
+    LDA shot_x_hi,X : PHA : LDA shot_x_lo,X : PLX
+    JSR box_div
+    LDA div_q : CLC : ADC #LO(VIEW_CX) : STA cx0
+    LDA div_q+1 : ADC #HI(VIEW_CX) : STA cx0+1
+    LDX i
+    LDA shot_y_hi,X : PHA : LDA shot_y_lo,X : PLX
+    JSR box_div
+    LDA div_q : CLC : ADC #LO(VIEW_CY) : STA cy0
+    LDA div_q+1 : ADC #HI(VIEW_CY) : STA cy0+1
+    LDX i
+    LDA shot_end,X : STA cx1 : STZ cx1+1
+    LDA #VIEW_YMAX : STA cy1 : STZ cy1+1
+    LDA #VIEW_SHOT : STA slot
+    STX edge_i
+    JSR clip_line
+    LDX i : BNE each
+.done
+    RTS
+}

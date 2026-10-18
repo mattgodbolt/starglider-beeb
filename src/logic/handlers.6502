@@ -13,7 +13,8 @@
 \ In the world's bank, for the sine table; ANDY paged. X is the slot; a
 \ handler may take Y, and after any call reloads X from h_slot. What the
 \ ST draws or prints here (the enemies' laser lines, the mines' warnings)
-\ is the drawing's, and isn't here.
+\ is the drawing's, and isn't here: the laser lines are recorded for it
+\ (enemy_laser).
 \ ***************************************************************************
 
 ZA_AUTO1 h_slot             ; the slot being handled
@@ -41,6 +42,7 @@ ENDMACRO
 
 .object_handlers
 {
+    STZ shot_n                  ; (for the drawing: this step's shots, enemy_laser's)
     LDX #0
     LDA n_slots : BEQ done
 .each
@@ -425,8 +427,11 @@ ENDMACRO
 \ enemy_laser (&07E18): if it's drawn and the player is neither docked nor
 \ in the missile view, the shields lose 100 on level 1, else the type's
 \ (the same for all). At camera z 0 that's all; otherwise the line to
-\ the view's bottom edge (the drawing's) takes a random number for its
-\ end, and there's a flash, a sound and a hit counted.
+\ the view's bottom edge takes a random number for its end, and there's a
+\ flash, a sound and a hit counted. The ST draws the line here: the
+\ drawing (view.6502's shots_draw) is given it, the gun's camera-space
+\ place (the type's gun height on y) and the end's x ((the number & &7F)
+\ + &60), up to SHOTS a step.
 .enemy_laser
 {
     ZA_AUTO2 damage
@@ -446,6 +451,7 @@ ENDMACRO
 .shielded
     LDA ob_cz_lo,X : ORA ob_cz_hi,X : BEQ done
     JSR random32
+    JSR shot_record
     LDA #LO(&20) : STA flash0 : LDA #HI(&20) : STA flash0+1
     LDA #0 : LDX #1
     JSR sfx_start
@@ -455,6 +461,23 @@ ENDMACRO
     INC hits_taken+2 : BNE done
     INC hits_taken+3
 .done
+    RTS
+}
+
+\ shot_record: slot X's shot, its end from the number random32 left, for
+\ the drawing (view.6502's shots_draw), unless SHOTS are kept already.
+.shot_record
+{
+    LDY shot_n : CPY #SHOTS : BCS full
+    LDA rng_d0 : AND #&7F : CLC : ADC #&60 : STA shot_end,Y
+    LDA ob_cx_lo,X : STA shot_x_lo,Y : LDA ob_cx_hi,X : STA shot_x_hi,Y
+    LDA ob_cz_lo,X : STA shot_z_lo,Y : LDA ob_cz_hi,X : STA shot_z_hi,Y
+    LDA ob_cy_lo,X : STA shot_y_lo,Y : LDA ob_cy_hi,X : STA shot_y_hi,Y
+    LDA ob_type,X : TAX
+    LDA shot_y_lo,Y : CLC : ADC gun_y_lo,X : STA shot_y_lo,Y
+    LDA shot_y_hi,Y : ADC gun_y_hi,X : STA shot_y_hi,Y
+    INC shot_n
+.full
     RTS
 }
 

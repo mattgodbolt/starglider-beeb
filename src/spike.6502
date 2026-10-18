@@ -63,6 +63,27 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
     ZA_ENTRY
     JMP erase_screen
 
+\ spike_under, spike_over: the view's drawing besides the objects
+\ (view_under.6502, view.6502), for tools/viewrun.mjs: logic_call's routine (world_lists,
+\ which makes the camera the drawing reads), then what the draw phase
+\ draws before the objects, from a fresh erase list; and what's drawn
+\ after the step's logic, onto it, each line clip_line passes logged as
+\ render logs them.
+.spike_under
+    ZA_ENTRY
+    LDA logic_bank : STA bank_now : STA romsel
+    JSR logic_jump
+.spike_under_draw                               ; (the harness times from here)
+    JSR draw_begin
+    JSR view_under
+    JMP draw_end
+.spike_over
+    ZA_ENTRY
+    STZ log_n : STZ log_n+1
+    LDA log_base : STA log_ptr : LDA log_base+1 : STA log_ptr+1
+    BANK_ANDY BANK_LOGIC                        ; (as frame_show calls view_overlays)
+    JMP over_draw
+
 \ spike_sines: sincos at every angle, the sine and cosine (4 bytes) for
 \ each into the log's bank in turn, for tools/sinecheck.py.
 .spike_sines

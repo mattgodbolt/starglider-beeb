@@ -10,6 +10,6 @@
 
 \ view_overlays: frame_show's (engine.6502), with draw_buffer and draw_bank
 \ naming the screen drawn, from main RAM with the logic's bank and ANDY
-\ paged. A layer to come.
+\ paged: the bolt and the shots (view.6502's over_draw).
 .view_overlays
-    RTS
+    JMP over_draw

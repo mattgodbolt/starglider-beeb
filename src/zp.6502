@@ -155,6 +155,7 @@ ASSERT LO(edge_mark) = 0 AND LO(v_xlo) = 0
 .frames     SKIP 2          ; frames drawn
 .steps      SKIP 2          ; steps taken
 .erase_stop SKIP 2          ; by screen: its erase list's next free index (0: full, so cleared whole)
+.win_shown  SKIP 2          ; by screen: the m_iris its missile view's window is for (&FF: none)
     \ the disc (disc.6502): the reader's state, what's left of the file
     \ being read, and the game's files as the catalogue has them
 DISC_MAX = 8
