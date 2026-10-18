@@ -557,17 +557,34 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     BRA each
 }
 
+\ TO_PIXELS q, centre, lo, hi: the word q, quarters of a pixel from the
+\ view's centre, to pixels truncated towards zero, as the ST's divs
+\ truncates (a negative q is (q + 3) >> 2), into lo and hi at Y.
+MACRO TO_PIXELS q, centre, lo, hi
+    LDA q+1 : BPL positive
+    LDA q : CLC : ADC #3 : STA q
+    LDA q+1 : ADC #0
+    CMP #&80 : ROR A : ROR q
+    CMP #&80 : ROR A : ROR q
+    BRA shifted
+.positive
+    LSR A : ROR q : LSR A : ROR q
+.shifted
+    TAX
+    LDA q : CLC : ADC #LO(centre) : STA lo,Y
+    TXA : ADC #HI(centre) : STA hi,Y
+ENDMACRO
+
 \ vertex_far: vertex A of a far object onto the screen; once an object.
 .vertex_far
 {
     ZA_AUTO1 vtx
-    TAX
-    LDA vert_mark,X : CMP stamp : BNE new
+    TAY
+    LDA vert_mark,Y : CMP stamp : BNE new
     RTS
 .new
-    LDA stamp : STA vert_mark,X
-    STX vtx
-    TXA : TAY
+    LDA stamp : STA vert_mark,Y
+    STY vtx
     CPY sh_nstill : BCS moving
     LDA (sh_vx),Y : EOR #&80 : STA xf_u
     LDA (sh_vy),Y : EOR #&80 : STA xf_u+1
@@ -578,31 +595,13 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA (fr_vy),Y : EOR #&80 : STA xf_u+1
     LDA (fr_vz),Y : EOR #&80 : STA xf_u+2
 .got
-    JSR screen_vertex
-    \ the centre's quarters added, then truncated towards zero to pixels,
-    \ as the ST's divs truncates
-    LDY vtx
-    LDA sc_acc : CLC : ADC sc_x0q : STA sc_acc : LDA sc_acc+1 : ADC sc_x0q+1
-    JSR to_pixels
-    LDA sc_acc : CLC : ADC #LO(VIEW_CX) : STA v_sxlo,Y
-    LDA sc_acc+1 : ADC #HI(VIEW_CX) : STA v_sxhi,Y
-    LDA sc_acc+2 : CLC : ADC sc_y0q : STA sc_acc : LDA sc_acc+3 : ADC sc_y0q+1
-    JSR to_pixels
-    LDA sc_acc : CLC : ADC #LO(VIEW_CY) : STA v_sylo,Y
-    LDA sc_acc+1 : ADC #HI(VIEW_CY) : STA v_syhi,Y
-    RTS
-\ to_pixels: sc_acc (its low byte; the high byte in A) / 4, truncated
-\ towards zero, into sc_acc.
-.to_pixels
-    BPL quarter
-    EOR #&FF : STA sc_acc+1 : LDA sc_acc : EOR #&FF : CLC : ADC #1 : STA sc_acc
-    LDA sc_acc+1 : ADC #0
-    LSR A : ROR sc_acc : LSR A : ROR sc_acc
-    EOR #&FF : STA sc_acc+1 : LDA sc_acc : EOR #&FF : CLC : ADC #1 : STA sc_acc
-    LDA sc_acc+1 : ADC #0 : STA sc_acc+1
-    RTS
-.quarter
-    LSR A : ROR sc_acc : LSR A : ROR sc_acc : STA sc_acc+1
+.screen
+    JMP screen_vertex                       ; or screen8_vertex (screen_setup's), back to back
+    ZA_CANJUMP screen_vertex, screen8_vertex
+.back
+    LDY vtx                                 ; from the centre's quarters
+    TO_PIXELS sc_acc, VIEW_CX, v_sxlo, v_sxhi
+    TO_PIXELS sc_acc+2, VIEW_CY, v_sylo, v_syhi
     RTS
 }
 
@@ -710,14 +709,13 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 .vertex
 {
     ZA_AUTO1 vtx
-    ZA_AUTO2 cvx, cvy, cvz
-    TAX
-    LDA vert_mark,X : CMP stamp : BNE new
+    ZA_AUTO2 cvy
+    TAY
+    LDA vert_mark,Y : CMP stamp : BNE new
     RTS
 .new
-    LDA stamp : STA vert_mark,X
-    STX vtx
-    TXA : TAY
+    LDA stamp : STA vert_mark,Y
+    STY vtx
     CPY sh_nstill : BCS moving
     LDA (sh_vx),Y : EOR #&80 : STA xf_u
     LDA (sh_vy),Y : EOR #&80 : STA xf_u+1
@@ -728,17 +726,20 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA (fr_vy),Y : EOR #&80 : STA xf_u+1
     LDA (fr_vz),Y : EOR #&80 : STA xf_u+2
 .got
-    JSR xform_vertex
-    WORLD xf_acc, tx, cvx
-    WORLD xf_acc+2, ty, cvy
-    WORLD xf_acc+4, tz, cvz
+    JMP xform_vertex                        ; which comes back to back
+.back
     LDY vtx
-    LDA cvx : STA v_xlo,Y : LDA cvx+1 : STA v_xhi,Y
-    LDA cvy : STA v_ylo,Y : LDA cvy+1 : STA v_yhi,Y
-    LDA cvz : STA v_zlo,Y : LDA cvz+1 : STA v_zhi,Y
-    CMPS16 cvz, #NEAR_Z : BMI behind
-    MOVW pz, cvz : JSR proj_z
-    MOVW px, cvx : JSR proj_x
+    WORLD xf_acc, tx, px, v_xlo, v_xhi
+    WORLD xf_acc+2, ty, cvy, v_ylo, v_yhi
+    WORLD xf_acc+4, tz, pz, v_zlo, v_zhi
+    \ behind the near plane if z < NEAR_Z (a byte), from z's high byte
+    ASSERT NEAR_Z < 256
+    BMI behind
+    BNE front
+    LDA pz : CMP #NEAR_Z : BCC behind
+.front
+    JSR proj_z
+    JSR proj_x
     LDY vtx
     LDA pq : CLC : ADC #LO(VIEW_CX) : STA v_sxlo,Y
     LDA pq+1 : ADC #HI(VIEW_CX) : STA v_sxhi,Y
@@ -751,39 +752,42 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 }
 
 \ proj_z: ready proj_x for the depth pz (2 or more): the reciprocal's
-\ bytes patched into proj_x's reads, and its shift (recip.6502).
-ZA_AUTO1 proj_shift
+\ bytes patched into proj_x's reads, and its shift S (recip.6502) as
+\ where proj_x jumps to make it.
 .proj_z
 {
     ZA_AUTO1 m
     LDA pz+1 : BNE big
     LDX pz
     LDY zsmall_idx,X
-    LDA zsmall_sh,X : STA proj_shift
+    LDA zsmall_sh,X : TAX
+    LDA proj_x.shift_lo-10,X : STA proj_x.shift+1
+    LDA proj_x.shift_hi-10,X : STA proj_x.shift+2
     BRA exact
 .big
     TAX
-    LDA zhigh_sh,X : TAX
-    CLC : ADC #17 : STA proj_shift
+    LDY zhigh_sh,X                          ; S = 17 + Y
+    LDA proj_x.shift_lo+7,Y : STA proj_x.shift+1
+    LDA proj_x.shift_hi+7,Y : STA proj_x.shift+2
     LDA pz : STA m
     LDA pz+1
-    CPX #0 : BEQ shifted
+    CPY #0 : BEQ shifted
 .shift
     LSR A : ROR m
-    DEX : BNE shift
+    DEY : BNE shift
     LDY m
-    LDA rcp_lo,Y : PHA : LDA rcp_hi,Y : TAY : PLA
+    LDA rcp_lo,Y : LDX rcp_hi,Y
     BRA got
 .shifted
     LDY m
 .exact
-    LDA rcpx_lo,Y : PHA : LDA rcpx_hi,Y : TAY : PLA
+    LDA rcpx_lo,Y : LDX rcpx_hi,Y
 .got
-    \ A, Y: R's low and high bytes
+    \ A, X: R's low and high bytes
     STA proj_x.a+1 : STA proj_x.g+1 : STA proj_x.i+1
     EOR #&FF
     STA proj_x.b+1 : STA proj_x.h+1 : STA proj_x.j+1
-    TYA
+    TXA
     STA proj_x.c+1 : STA proj_x.e+1 : STA proj_x.k+1 : STA proj_x.m+1
     EOR #&FF
     STA proj_x.d+1 : STA proj_x.f+1 : STA proj_x.l+1 : STA proj_x.n+1
@@ -795,34 +799,47 @@ ZA_AUTO1 proj_shift
 \ |x| >= 256 z) it's the ST's result instead, the low word of x << 7.
 .proj_x
 {
-    ZA_AUTO1 xl, xh, t, u0, u1, w0, p1, p2, p3
+    ZA_AUTO1 xl, xh, u0, u1, w0, p1
     LDA px+1 : BPL pos
     LDA #0 : SEC : SBC px : STA xl
     LDA #0 : SBC px+1 : STA xh
     BRA magnitude
 .pos
     STA xh : LDA px : STA xl
+    ORA xh : BEQ zero
 .magnitude
     LDA pz+1 : BNE fits
     LDA xh : CMP pz : BCC fits
     LDA px+1 : LSR A : LDA px : ROR A : STA pq+1
     LDA #0 : ROR A : STA pq
     RTS
+.zero
+    STZ pq : STZ pq+1
+    RTS
 .fits
-    \ |x| R: R's low byte by x's low (its high byte), then the rest
+    \ |x| R >> 8 into A:pq:p1: x's low byte by R's high byte and by its low
+    \ byte (that one's high byte only), then x's high byte by R, if it
+    \ isn't zero. Each product's high byte leaves C set, as a product
+    \ isn't negative.
     LDY xl
-    SEC
-.a  LDA sqr_hi,Y
-.b  SBC neg_hi,Y
-    STA t
     SEC
 .c  LDA sqr_lo,Y
 .d  SBC neg_lo,Y
     STA p1
 .e  LDA sqr_hi,Y
 .f  SBC neg_hi,Y
-    STA p2
-    LDY xh
+    STA pq
+.a  LDA sqr_hi,Y
+.b  SBC neg_hi,Y
+    \ that + p1, carrying into pq (a product's high byte, below 255)
+    CLC : ADC p1 : STA p1
+    BCC c1
+    INC pq
+.c1
+    LDY xh : BNE high
+    TYA
+    BRA shift
+.high
     SEC
 .g  LDA sqr_lo,Y
 .h  SBC neg_lo,Y
@@ -830,46 +847,88 @@ ZA_AUTO1 proj_shift
 .i  LDA sqr_hi,Y
 .j  SBC neg_hi,Y
     STA u1
-    SEC
 .k  LDA sqr_lo,Y
 .l  SBC neg_lo,Y
     STA w0
 .m  LDA sqr_hi,Y
 .n  SBC neg_hi,Y
-    STA p3
-    CLC
-    LDA p1 : ADC t : STA p1
-    LDA p2 : ADC u1 : STA p2
-    BCC c1
-    INC p3
-.c1
-    CLC
-    LDA p1 : ADC u0 : STA p1
-    LDA p2 : ADC w0 : STA p2
+    TAX
+    \ p1 + u0, carrying into pq + u1 + w0, carrying into X
+    CLC : LDA p1 : ADC u0 : STA p1
+    LDA pq : ADC u1
     BCC c2
-    INC p3
+    INX
+    CLC
 .c2
-    \ >> S: p3:p2:p1 is the product >> 8
-    LDA proj_shift : SEC : SBC #16 : BCC under16
-    TAX : BEQ word
-.shift16
-    LSR p3 : ROR p2
-    DEX : BNE shift16
-.word
-    LDA p2 : STA pq : LDA p3 : STA pq+1
+    ADC w0 : STA pq
+    BCC c3
+    INX
+.c3
+    TXA
+    \ >> S, unrolled: each S has its own way in (shift_lo, shift_hi),
+    \ which shifts A:pq:p1 left or right, whichever is fewer bits
+.shift
+    JMP right0                              ; patched by proj_z
+    ZA_CANJUMP right24_2, right24_3, right24_4, left24_3, left24_2, left24_1, right0, right16_1, right16_2, right16_3, right16_4, right16_5, left16_2, left16_1
+\ S = 10-12: right 2-4, the low word
+.right24_4
+    LSR A : ROR pq : ROR p1
+.right24_3
+    LSR A : ROR pq : ROR p1
+.right24_2
+    LSR A : ROR pq : ROR p1
+    LSR A : ROR pq : ROR p1
+    LDA pq : STA pq+1 : LDA p1 : STA pq
     BRA sign
-.under16
-    ADC #8 : TAX                    ; S - 8, 2 to 7 (C = 0)
-.shift24
-    LSR p3 : ROR p2 : ROR p1
-    DEX : BNE shift24
-    LDA p1 : STA pq : LDA p2 : STA pq+1
+\ S = 13-15: left 3-1, the middle word
+.left24_3
+    ASL p1 : ROL pq : ROL A
+.left24_2
+    ASL p1 : ROL pq : ROL A
+.left24_1
+    ASL p1 : ROL pq : ROL A
+    STA pq+1
+    BRA sign
+\ S = 22, 23: left 2, 1, the high word
+.left16_2
+    STZ pq+1
+    ASL pq : ROL A : ROL pq+1
+    ASL pq : ROL A : ROL pq+1
+    STA pq
+    BRA sign
+.left16_1
+    STZ pq+1
+    ASL pq : ROL A : ROL pq+1
+    STA pq
+    BRA sign
+\ S = 16-21: right 0-5, the high word
+.right16_5
+    LSR A : ROR pq
+.right16_4
+    LSR A : ROR pq
+.right16_3
+    LSR A : ROR pq
+.right16_2
+    LSR A : ROR pq
+.right16_1
+    LSR A : ROR pq
+.right0
+    STA pq+1
 .sign
     BIT px+1 : BPL done
     LDA #0 : SEC : SBC pq : STA pq
     LDA #0 : SBC pq+1 : STA pq+1
 .done
     RTS
+\ the ways in, by S from 10
+.shift_lo
+    EQUB LO(right24_2), LO(right24_3), LO(right24_4), LO(left24_3), LO(left24_2), LO(left24_1)
+    EQUB LO(right0), LO(right16_1), LO(right16_2), LO(right16_3), LO(right16_4), LO(right16_5)
+    EQUB LO(left16_2), LO(left16_1)
+.shift_hi
+    EQUB HI(right24_2), HI(right24_3), HI(right24_4), HI(left24_3), HI(left24_2), HI(left24_1)
+    EQUB HI(right0), HI(right16_1), HI(right16_2), HI(right16_3), HI(right16_4), HI(right16_5)
+    EQUB HI(left16_2), HI(left16_1)
 }
 
 \ edge (&04D66): the edge from vertex va to vb, clipped at z = 2 if it
