@@ -1,0 +1,101 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the draw phase's code in the shapes' bank
+\
+\ Render.6502's routines that run only with the shapes' bank paged, in
+\ its room past the shapes: what far_place calls (draw_shape pages the
+\ bank before it), and what the vertices call to take them into their
+\ object's box (edges and edges_far run with it paged). They read only
+\ zero page, the workspace and main RAM meanwhile.
+\ ***************************************************************************
+
+\ quarters: pq = 512 px / pz, in quarters of a pixel, as precisely as
+\ px allows (proj_z's depth): 128 (4 px) / pz, or 2 px when 4 px won't
+\ fit a word, or px. C = 1 if 4 px fitted.
+.quarters
+{
+    \ px << 2 fits a word if px's top three bits agree, << 1 if two do
+    LDA px+1 : ASL A : EOR px+1 : BMI unshifted
+    ASL A : BMI once
+    ASL px : ROL px+1 : ASL px : ROL px+1
+    JSR proj_x
+    SEC : RTS
+.once
+    ASL px : ROL px+1
+    JSR proj_x
+    ASL pq : ROL pq+1
+    CLC : RTS
+.unshifted
+    JSR proj_x
+    ASL pq : ROL pq+1 : ASL pq : ROL pq+1
+    CLC : RTS
+}
+
+\ centre: the centre on the screen on axis X (0 x, 2 y): sc_0q,X = 512 t /
+\ pz (quarters) and sc_0,X = 128 t / pz as proj_x has it, t = tpos,X. When
+\ 4 t fitted, sc_0 is sc_0q / 4 truncated, as proj_x truncates: but not
+\ below a depth of 256, where proj_x's overflow can come into sc_0q and
+\ not sc_0.
+.centre
+{
+    ZA_AUTO1 axis
+    STX axis
+    LDA tpos,X : ZA_INDEXEDBY {0, 2}
+    STA px
+    LDA tpos+1,X : ZA_INDEXEDBY {0, 2}
+    STA px+1
+    JSR quarters
+    LDX axis
+    LDA pq : STA sc_0q,X : ZA_INDEXEDBY {0, 2}
+    LDA pq+1 : STA sc_0q+1,X : ZA_INDEXEDBY {0, 2}
+    BCC by_proj
+    LDA pz+1 : BEQ by_proj
+    LDA pq+1 : BPL positive
+    LDA pq : CLC : ADC #3 : STA sc_0,X : ZA_INDEXEDBY {0, 2}
+    LDA pq+1 : ADC #0
+    CMP #&80 : ROR A : ROR sc_0,X : ZA_INDEXEDBY {0, 2}
+    CMP #&80 : ROR A : ROR sc_0,X : ZA_INDEXEDBY {0, 2}
+    STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    RTS
+.positive
+    LSR A : ROR pq : LSR A : ROR pq
+    STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    LDA pq : STA sc_0,X : ZA_INDEXEDBY {0, 2}
+    RTS
+.by_proj
+    LDA tpos,X : ZA_INDEXEDBY {0, 2}
+    STA px
+    LDA tpos+1,X : ZA_INDEXEDBY {0, 2}
+    STA px+1
+    JSR proj_x
+    LDX axis
+    LDA pq : STA sc_0,X : ZA_INDEXEDBY {0, 2}
+    LDA pq+1 : STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    RTS
+}
+
+\ box_out: the box's part of vertex Y, past the window by its outcode A:
+\ the edges it's past noted, and its line or column where that's within
+\ the window (render.6502's BOX_Y).
+.box_out
+{
+    TSB box_codes
+    AND #5 : BNE y_past                     ; above (1) or below (4)
+    LDA v_sylo,Y
+    BOX_Y
+.y_past
+    LDA v_code,Y : AND #10 : BEQ box_x      ; within it across: not left (2) or right (8)
+    RTS
+}
+\ box_x: the box taken to vertex Y's column, within the window (its x a
+\ word below 512 there).
+.box_x
+{
+    LDA v_sxhi,Y : LSR A : LDA v_sxlo,Y : ROR A : LSR A
+    CMP box_c0 : BCS low_in
+    STA box_c0
+.low_in
+    CMP box_c1 : BCC high_in
+    STA box_c1
+.high_in
+    RTS
+}

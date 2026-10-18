@@ -20,9 +20,12 @@ ENDSECTION
 \ A bank's first bytes are where the OS looks for a ROM's header: a zero
 \ there (no copyright string at &8000) keeps it from taking the data for
 \ one after a BREAK.
-SECTION Shapes, org = &8000, filename = "SHAPES", guard = &C000
+SECTION Shapes, org = &8000, filename = "SHAPES", guard = &C000, cmos = TRUE
     EQUD 0, 0
 INCLUDE "../build/gen/shapes.6502"
+\ and past them the draw phase's code that runs only with them paged
+\ (whose jumps have no annotation: baron#29, below)
+INCLUDE "shapecode.6502"
 ENDSECTION
 
 \ The world's bank: the list phase, which runs with the bank alone; then,
