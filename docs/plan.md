@@ -73,7 +73,12 @@ phase is in each step, not each frame.*
 A step (list phase and logic) is about 80,000 cycles, 12.5 a second:
 about half the CPU, leaving room for **about 5 frames a second** at 210,000
 each. If the pass halves the list phase and takes 30% off the drawing,
-about **8** [inferred]. The ST: 12.5 in flight, 9 near the towers
+about **8** [inferred].
+
+*After the optimisation pass (2026-10-18, `make spike`):* the list phase
+is 34,600 cycles a step in flight, and a frame's objects, lines and erase
+116,400. With about 20,000 of logic a step and 30,000 of dots and panel a
+frame, that's **about 9 frames a second** in flight [inferred]. The ST: 12.5 in flight, 9 near the towers
 [measured, docs/research/st.md]. Memory spent on speed (section 2) is the
 pass's to use.
 

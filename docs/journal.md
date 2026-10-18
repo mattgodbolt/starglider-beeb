@@ -372,3 +372,49 @@ byte, as it lands, and the background read after it.
 
 It makes the boot depend on the game's reader, which so far has only run
 in jsbeeb (as CE2's has); a real Master is the test that counts.
+
+### The optimisation pass
+
+Five agents worked on the renderer, each in its own worktree and owning
+one area: the list phase, each object's set-up, the vertices and the
+projection, the faces and the window clip, and drawing and erasing lines.
+Each was gated by `make check` and a byte allowance, and none could change
+a decision's terms. All five branches merged, with conflicts only where
+main had moved on since they started:
+- the sine table has to stay above &9000 for the logic, where the lists
+  branch had moved it to &8400;
+- the lines branch's overflow clear wiped the whole screen, cockpit and
+  all, and now clears the window.
+
+Mean cycles a frame, `make spike`, before and after:
+
+| | Flight | The towers | The silo tunnel |
+|---|---|---|---|
+| A step's list phase (camera and lists) | 57,900 → 34,600 | 42,300 → 16,100 | 10,900 → 1,300 |
+| A frame's objects and lines | 166,700 → 108,100 | 292,200 → 181,200 | 214,600 → 136,800 |
+| Erasing | 15,800 → 8,300 | 40,000 → 20,200 | 61,400 → 45,700 |
+
+The drawing is unchanged to the pixel on every captured frame, and the
+lists and the exactly rotated positions are still exact. The main moves:
+- **The list phase.** The camera is built only when the player turns.
+  Both rotations chain patched jumps through only the terms the matrix
+  has, with the signs fixed at the camera's set-up. Column y is skipped
+  while dy is small, and the coarse scan tests a single high byte.
+- **Each object's set-up.** Ground matrices are kept while the camera
+  holds its pitch, and the products are cheaper.
+- **The vertices and projection.** Far vertices go straight from the
+  centre's quarters; the transforms skip zero terms.
+- **Faces and clipping.** Cheaper face tests, and the edge loops count
+  down.
+- **Lines.** The erase lists hold each line's set-up, so the erase skips
+  it, and they take 3K of shadow RAM where they took 4.4K.
+
+All five agents pushed their branches to GitHub. Matt's "commit and push"
+message during the run had reached them, though the brief said not to
+push. Once the branches were merged, those copies were deleted.
+
+With logic of about 20,000 cycles a step on top of the list phase, a
+frame in flight now comes to about 9 a second at the ST's pace, against
+its 12.5. The agents left ideas for a second round. Some need decisions
+(erasing small objects by clearing their boxes, leaving y' out of the
+approximate rotation, 8-bit products for far objects); most don't.
