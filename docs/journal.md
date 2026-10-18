@@ -352,3 +352,23 @@ ground dots' respawning among it), the keys and commands, the object
 handlers, collisions with the frame's end and the post-frame tests, and
 the level change with the new game. Each writes captures for its own
 branches.
+
+### Loading
+
+Matt suggested `*SRLOAD`'s Q option, which loads through main RAM. In
+jsbeeb it nearly halved the time from `*EXEC !BOOT` to SG starting, from
+34.0 seconds to 21.8. But the `*SRLOAD`s were still most of the boot:
+without them SG started 4.6 seconds in, while `*LOAD` brought in the 16K
+cockpit in about 1.8 seconds.
+
+So `!BOOT` now sets the mode and palette and runs SG, which loads the
+rest with the game's own reader, a track a read: HAZEL's files straight
+into HAZEL (the filing system's workspace until then), the shapes and the
+world into their banks, the cockpit into the screen. The first frame now
+comes 10.35 seconds after `*EXEC !BOOT`, where the `*SRLOAD`s gave 36.1
+without Q and about 23 with it. The staging of HAZEL's files in bank 7 is
+gone. `tools/disccheck.mjs` checks every file the start loads, byte for
+byte, as it lands, and the background read after it.
+
+It makes the boot depend on the game's reader, which so far has only run
+in jsbeeb (as CE2's has); a real Master is the test that counts.

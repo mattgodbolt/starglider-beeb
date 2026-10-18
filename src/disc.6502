@@ -94,12 +94,11 @@ ASSERT vert_mark = edge_mark + 256
     RTS
 }
 
-\ disc_load: file X's read begun, to page A of bank Y, from its start;
+\ disc_load: file X's read begun, from its start, to fe_dst in bank Y;
 \ disc_step moves it on.
 .disc_load
 {
     ZA_AUTO2 rem
-    STA fe_dst+1 : STZ fe_dst
     STY fe_bank
     LDA df_len_lo,X : STA fe_len
     LDA df_len_hi,X : STA fe_len+1
@@ -272,5 +271,13 @@ ENDSECTION
 .disc_names
     EQUS "SHAPES "
 DF_SHAPES = 0
+    EQUS "WORLD  "
+DF_WORLD = 1
+    EQUS "TABLES "
+DF_TABLES = 2
+    EQUS "CODE2  "
+DF_CODE2 = 3
+    EQUS "COCKPIT"
+DF_COCKPIT = 4
 DISC_FILES = (P% - disc_names) DIV 7
 ASSERT DISC_FILES <= DISC_MAX

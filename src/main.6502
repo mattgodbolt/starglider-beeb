@@ -5,12 +5,13 @@
 \ another, as its Interrogate screen shows them, drawn by the port's
 \ renderer into a double-buffered MODE 1 screen at the ST's 320 x 200.
 \
-\ !BOOT (*EXEC'd) sets the mode and palette through BASIC and the OS, puts
-\ the shapes and the world into sideways RAM (*SRLOAD), leaves the files
-\ bound for HAZEL in bank 7 (the filing system keeps its workspace in
-\ HAZEL, so they can't go there until it's done with), and loads the
-\ cockpit into the screen. SG copies them into HAZEL, the cockpit into the
-\ shadow screen, and makes no OS call after.
+\ !BOOT (*EXEC'd) sets the mode and palette through BASIC and the OS and
+\ runs SG, which makes no OS call: it loads the rest itself, with its own
+\ disc reader (disc.6502, decision 12), a track a revolution: HAZEL's
+\ files into HAZEL (the filing system's workspace until then), the shapes
+\ and the world into their banks, and the cockpit into the screen, which
+\ it copies into the shadow screen. (*SRLOAD, Q or no, loaded the banks
+\ at a fraction of the speed: docs/journal.md, 2026-10-18.)
 \ ***************************************************************************
 
 INCLUDE "defs.6502"
@@ -29,22 +30,12 @@ ELSE
     build_stamp = "DEV"
 ENDIF
 
-\ Where !BOOT leaves the HAZEL files: bank 7, the loading area (docs/plan.md,
-\ section 3), free until the game loads into it.
-BANK_STAGE = 7
-BANK_SPARE = 7                      ; the loading area, free once HAZEL's files are copied
-TABLES_AT = &8000
-CODE2_AT  = &9000
+BANK_SPARE = 7                      ; the loading area (docs/plan.md, section 3)
 
 SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*| STARGLIDER for the BBC Master ", build_stamp, 13
     EQUS "MODE 1", 13
     EQUS "VDU 19,2,6;0;", 13                    ; logical 2 is cyan
-    EQUS "*SRLOAD SHAPES 8000 ", AS_STRING(BANK_SHAPES), 13
-    EQUS "*SRLOAD WORLD 8000 ", AS_STRING(BANK_WORLD), 13
-    EQUS "*SRLOAD TABLES ", ~TABLES_AT, " ", AS_STRING(BANK_STAGE), 13
-    EQUS "*SRLOAD CODE2 ", ~CODE2_AT, " ", AS_STRING(BANK_STAGE), 13
-    EQUS "*LOAD COCKPIT ", ~SCREEN, 13
     EQUS "*RUN SG", 13
 ENDSECTION
 
@@ -52,12 +43,22 @@ SECTION Main, org = &0E00, filename = "SG", guard = MAIN_TOP, cmos = TRUE
 .start
     ZA_ENTRY
     SEI
-    \ HAZEL in, and its files copied from where !BOOT left them
+    \ HAZEL in, and the game's files loaded (disc.6502)
     LDA acccon : AND #NOT(ACCCON_X OR ACCCON_D) AND &FF : ORA #ACCCON_Y : STA acccon
-    BANK BANK_STAGE
-    LDA #HI(TABLES_AT) : LDX #HI(TABLES) : JSR copy_4k
-    LDA #HI(CODE2_AT) : LDX #HI(CODE2) : JSR copy_4k
+    BANK BANK_SHAPES
     JSR disc_init
+    LDX #DISC_LOADS - 1
+.load
+    PHX
+    LDA disc_load_lo,X : STA fe_dst
+    LDA disc_load_hi,X : STA fe_dst+1
+    LDY disc_load_bank,X
+    LDA disc_load_file,X : TAX
+    JSR disc_load
+    JSR disc_wait
+    PLX
+    DEX : BPL load
+.start_loaded                                   ; (tools/disccheck.mjs)
     JSR mul_init
     JSR line_draw
     JSR screen_mode
@@ -105,20 +106,18 @@ INCLUDE "engine.6502"
 INCLUDE "cockpit.6502"
 INCLUDE "disc.6502"
 
-\ copy_4k: 4K from page A to page X.
-.copy_4k
-{
-    ZA_AUTO2 from, to
-    STA from+1 : STX to+1 : STZ from : STZ to
-    LDX #&10
-    LDY #0
-.copy
-    LDA (from),Y : STA (to),Y
-    INY : BNE copy
-    INC from+1 : INC to+1
-    DEX : BNE copy
-    RTS
-}
+
+\ The files start loads (disc_load: the file, where, its bank), the last
+\ first.
+.disc_load_file
+    EQUB DF_COCKPIT, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
+.disc_load_lo
+    EQUB LO(SCREEN), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
+.disc_load_hi
+    EQUB HI(SCREEN), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
+.disc_load_bank
+    EQUB BANK_SHAPES, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
+DISC_LOADS = P% - disc_load_bank
 
 \ ---------------------------------------------------------------------------
 \ models: each type with a model in turn, turning, two radii from the
@@ -154,7 +153,8 @@ MODELS = P% - model_types
     \ The disc reader at work (decision 12): until the game has a file of
     \ its own to load, SHAPES read again into the loading area as the
     \ models turn (tools/disccheck.mjs checks it).
-    LDX #DF_SHAPES : LDA #&80 : LDY #BANK_SPARE
+    LDX #DF_SHAPES : LDY #BANK_SPARE
+    STZ fe_dst : LDA #&80 : STA fe_dst+1
     JSR disc_load
     JSR install_irq
     JMP engine_run

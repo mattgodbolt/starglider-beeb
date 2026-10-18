@@ -5,8 +5,8 @@
 //
 // It loads build/starglider.ssd's files where !BOOT leaves them (as
 // tools/erasecheck.mjs does), runs from start, and reads the engine's
-// counters (frames, steps) after six seconds settling (start-up and the
-// disc reader's first read) and again at
+// counters (frames, steps) after fourteen seconds settling (SG loading the
+// game's files, then the disc reader's background read) and again at
 // the end.
 import fs from "node:fs";
 import path from "node:path";
@@ -29,7 +29,7 @@ loadDisc(tm, path.join(root, "build/starglider.ssd"), sym);
 const word = (a) => ram[a] | (ram[a + 1] << 8);
 const read = () => ({ frames: word(sym.frames), steps: word(sym.steps) });
 const secs = Number(process.argv[2] ?? 20);
-await tm.runFor(6 * 2000000);
+await tm.runFor(14 * 2000000);
 const a = read();
 await tm.runFor(secs * 2000000);
 const b = read();

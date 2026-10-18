@@ -22,6 +22,7 @@ const bank = (n) => cpu.romOffset + n * 16384;
 const { loadDisc } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
 loadDisc(tm, path.join(root, "build/starglider.ssd"), sym);
 const erased = sym["frame.erased"];
+await tm.runUntilAddress(sym.start_loaded, 60);     // SG loading the game's files
 let bad = 0;
 const frames = Number(process.argv[2] ?? 700);
 for (let f = 0; f < frames; f++) {
