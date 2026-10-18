@@ -351,12 +351,34 @@ OM_SIZE = 6 + 18
 .draw_shape
 {
     ZA_AUTO1 shape, nmove, nturn, row_i, u_lo, h0, l0, far
-    ZA_AUTO2 fr, t16
+    ZA_AUTO2 fr, t16, hp
     LDX otype
     LDA type_shape,X : CMP #SHAPES : BCC known
     RTS
 .known
     STA shape
+    \ Far enough away (16 radii or more), the perspective is linear across
+    \ the object, to within half a pixel: its vertices go straight onto
+    \ the screen (decision 10). Its centre and its vertices' reach there
+    \ come first (far_place), from its position and its radius (in its
+    \ header, in the shapes' bank): a reach wholly outside the window holds
+    \ every vertex, so the object draws nothing, and goes no further, not
+    \ even to its matrix.
+    TAX
+    BANK BANK_SHAPES
+    LDA shape_lo,X : STA hp : LDA shape_hi,X : STA hp+1
+    STZ far
+    LDY #sh_radius - sh
+    LDA (hp),Y : STA sh_radius : STA t16
+    INY : LDA (hp),Y : STA sh_radius+1
+    ASL t16 : ROL A : ASL t16 : ROL A : ASL t16 : ROL A : ASL t16 : ROL A
+    STA t16+1
+    CMPS16 tz, t16 : BMI reaches
+    JSR far_place : BCC far_in
+    RTS
+.far_in
+    DEC far                             ; (bit 7: far)
+.reaches
     \ An object with no pitch of its own has the camera's pitch and roll,
     \ and the camera in its space comes from the world's positions.
     LDA ang_p : CMP pl_pitch : BNE pitched
@@ -419,21 +441,6 @@ NEXT
 .header_b
     LDA &8000,X : STA sh,X : ZA_INDEXEDBY 0..HDR_BYTES + HDR_WORDS * 2 - 1
     DEX : BPL header
-    \ Far enough away (16 radii or more), the perspective is linear across
-    \ the object, to within half a pixel: its vertices go straight onto
-    \ the screen (decision 10). Its centre and its vertices' reach there
-    \ come first (far_place): a reach wholly outside the window holds every
-    \ vertex, so the object draws nothing, and goes no further.
-    STZ far
-    LDA sh_radius : STA t16 : LDA sh_radius+1
-    ASL t16 : ROL A : ASL t16 : ROL A : ASL t16 : ROL A : ASL t16 : ROL A
-    STA t16+1
-    CMPS16 tz, t16 : BMI reaches
-    JSR far_place : BCC far_in
-    RTS
-.far_in
-    DEC far                             ; (bit 7: far)
-.reaches
     \ The frame: the animation's, by shape.
     LDX shape : LDA anim_frame,X : ASL A : TAY
     LDA (sh_frames),Y : STA fr : INY : LDA (sh_frames),Y : STA fr+1
