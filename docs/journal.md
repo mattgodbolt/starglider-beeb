@@ -324,10 +324,21 @@ view, the sight on a word's edge, and a target the laser can't hurt.
   depends only on the sight's x mod 16 (the table is the bitmap's, checked
   for every shift), a projected dot leaves the projection's shift, a
   respawn its own random word, and the missile view the window's step.
-- **The cone's decision is exact.** The dots are rotated approximately
-  first, as decision 11 rotates objects, and exactly only within the
-  approximation's bound of the cone's edges, the bound taken from each
-  frame's matrix.
+- **The cone's decision is exact, and cheaper than rotating every dot.**
+  As decision 11 does for objects, a dot is rotated approximately, and
+  exactly only within the approximation's bound of the cone's edges. The
+  approximation is the dots' own: the ground's column of the matrix exact
+  (its dy is every dot's), the other two by products of signed bytes, each
+  entry and offset / 128 rounded, read from the quarter-square tables as
+  f(q + e) - f(q - e), with a bound per dot. And a dot found surely in view
+  keeps its decision, unrotated, while a margin lasts: each frame takes off
+  the most the camera's move and turn can have shifted the cone's tests
+  for a dot that far away (in six distance classes), and its place must
+  not have changed. On the flight capture, of 40 dots a frame 17.8 are
+  rotated and 2.8 of those exactly, and the dots cost about 35K cycles a
+  step, from 58K rotating each with the list phase's rotate_approx
+  (measured 2026-10-18). A bound per dot from its own running distance,
+  not its class's, would leave about 12 a frame to rotate (modelled).
 - **The drawing's leftovers.** The draw loop's object matrices leave the
   last one built's sines in the logic's trig_sin and trig_cos, and a
   matrix is built only when an object's angles differ from the last's
