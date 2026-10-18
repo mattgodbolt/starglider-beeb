@@ -114,7 +114,7 @@ NEXT
     MOVW build_matrix.m_d6, cam_d6
     MOVW mat+2, cam_kept+2 : MOVW mat+8, cam_kept+8 : MOVW mat+14, cam_kept+14
     MOVW mul_x, build_matrix.m_c1
-    JSR build_matrix.heading
+    JSR matrix_heading
     JSR ground_kept
     JMP made
 }
