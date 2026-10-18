@@ -1,7 +1,7 @@
 // Run scenes through the port's renderer on jsbeeb's Master, and record
 // what it makes of them and how long each part takes.
 //
-//   node tools/scenerun.mjs SCENES.json OUT.json [--build build/spike] [--frames A-B]
+//   node tools/scenerun.mjs SCENES.json OUT.json [--build build/spike] [--frames A-B] [--profile N]
 //
 // SCENES.json is tools/mkscene.py's: each frame's objects, inputs and
 // animation frames. The build directory holds the spike's binaries
@@ -10,6 +10,11 @@
 // cycles are jsbeeb's own count between the phases' labels (render,
 // render_lists, render_objects, render_done). tools/scenecheck.py
 // compares OUT.json with the ST's renderer.
+//
+// --profile N samples the program counter every N cycles instead of
+// timing the phases, and prints each routine's share: the routine is the
+// nearest label before the sample that isn't inside a scope, and the line
+// drawer's labels count as one.
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -25,6 +30,7 @@ const opt = (name, dflt) => {
 };
 const build = opt("--build", "build/spike");
 const frameRange = opt("--frames", null);
+const profileEvery = Number(opt("--profile", 0));
 const [scenesPath, outPath] = args;
 if (!scenesPath || !outPath) {
     console.error("usage: node tools/scenerun.mjs SCENES.json OUT.json [--build DIR] [--frames A-B]");
@@ -62,7 +68,50 @@ const STUB = 0x0140;
 const STUB_DONE = STUB + 4;
 ram.set([0x78, 0x20, 0, 0, 0x4c, STUB_DONE & 0xff, STUB_DONE >> 8], STUB);
 
+// The routines by address, for the profile.
+function routines() {
+    const all = JSON.parse(fs.readFileSync(path.join(build, "symbols.json"), "utf8"));
+    const out = [];
+    for (const a of all.assemblies)
+        for (const sec of a.sections) {
+            if (sec.name !== "Spike") continue;
+            for (const [name, v] of Object.entries(sec.labels ?? {})) {
+                if (name.includes(".") || name.includes("@")) continue;
+                out.push({ at: v.value, name: /line\.6502$/.test(v.source ?? "") ? "line" : name });
+            }
+        }
+    return out.sort((x, y) => x.at - y.at);
+}
+const profile = new Map();
+let samples = 0;
+const table = profileEvery ? routines() : [];
+function sample(pc) {
+    let lo = 0,
+        hi = table.length - 1,
+        found = "?";
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (table[mid].at <= pc) {
+            found = table[mid].name;
+            lo = mid + 1;
+        } else hi = mid - 1;
+    }
+    profile.set(found, (profile.get(found) ?? 0) + 1);
+    samples++;
+}
+
 async function run(entry, marks = []) {
+    if (profileEvery && marks.length) {
+        ram[STUB + 2] = entry & 0xff;
+        ram[STUB + 3] = entry >> 8;
+        cpu.pc = STUB;
+        cpu.s = 0xff;
+        while (cpu.pc !== STUB_DONE) {
+            cpu.execute(profileEvery);
+            sample(cpu.pc);
+        }
+        return marks.map(() => 0).concat([0]);
+    }
     ram[STUB + 2] = entry & 0xff;
     ram[STUB + 3] = entry >> 8;
     cpu.pc = STUB;
@@ -76,6 +125,8 @@ async function run(entry, marks = []) {
     return times.slice(1).map((t, i) => t - times[i]);
 }
 
+// HAZEL (&C000-&DFFF, paged by the spike) is at &9000 in jsbeeb's array.
+const where = (a) => (a >= 0xc000 && a < 0xe000 ? 0x9000 + (a - 0xc000) : a);
 const peek = (a) => ram[a];
 const peekw = (a) => ram[a] | (ram[a + 1] << 8);
 const pokew = (a, v) => {
@@ -120,7 +171,7 @@ for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
     }
     const lines = [];
     const logN = peekw(need("log_n"));
-    for (let i = 0, a = need("line_log"); i < Math.min(logN, need("LOG_LINES")); i++, a += need("LOG_ENTRY")) {
+    for (let i = 0, a = where(need("line_log")); i < Math.min(logN, need("LOG_LINES")); i++, a += need("LOG_ENTRY")) {
         lines.push([ram[a], ram[a + 1], peekw(a + 2), ram[a + 4], peekw(a + 5), ram[a + 7], ram[a + 8]]);
     }
     out.push({
@@ -132,6 +183,10 @@ for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
         lines,
         logged: logN,
     });
+}
+if (profileEvery) {
+    const rows = [...profile.entries()].sort((a, b) => b[1] - a[1]);
+    for (const [name, n] of rows) console.log(`${((100 * n) / samples).toFixed(1).padStart(5)}%  ${name}`);
 }
 fs.writeFileSync(outPath, JSON.stringify({ frames: out, first: lo }));
 console.log(`${outPath}: ${out.length} frames`);

@@ -122,10 +122,10 @@ SECTION Work, org = WORK, guard = &0E00, virtual = TRUE
 ENDSECTION
 
 \ Every line drawn, for the harness: slot, edge, x0 (word), y0, x1 (word),
-\ y1, colour.
-LOG = &3800
+\ y1, colour. In HAZEL, which the spike pages in (it makes no OS calls).
+LOG = &C000
 LOG_ENTRY = 9
-LOG_LINES = 200
-SECTION Log, org = LOG, guard = SCREEN, virtual = TRUE
+LOG_LINES = 400
+SECTION Log, org = LOG, guard = &E000, virtual = TRUE
 .line_log   SKIP LOG_ENTRY * LOG_LINES
 ENDSECTION

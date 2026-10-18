@@ -11,9 +11,10 @@
 INCLUDE "defs.6502"
 INCLUDE "zp.6502"
 
-SECTION Spike, org = &0E00, filename = "SPIKE", guard = LOG, cmos = TRUE
+SECTION Spike, org = &0E00, filename = "SPIKE", guard = SCREEN, cmos = TRUE
 .spike_init
     ZA_ENTRY
+    LDA acccon : ORA #ACCCON_Y : STA acccon      ; HAZEL, for line_log
     JSR mul_init
     JSR line_draw
     JSR screen_mode
@@ -29,6 +30,7 @@ INCLUDE "maths.6502"
 INCLUDE "render.6502"
 INCLUDE "screen.6502"
 INCLUDE "../build/gen/line.6502"
+INCLUDE "../build/gen/rotate.6502"
 INCLUDE "../build/gen/types.6502"
 
 \ each object's record's address, by slot

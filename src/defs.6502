@@ -8,6 +8,7 @@ crtc_reg   = &FE00
 crtc_data  = &FE01
 romsel     = &FE30          ; the sideways bank at &8000
 acccon     = &FE34          ; the Master's: X (bit 2) draws in shadow RAM, D (bit 0) shows it
+ACCCON_Y   = 8              ; ... and Y pages HAZEL's RAM in at &C000-&DFFF
 
 \ --- The screen -----------------------------------------------------------
 \ MODE 1 at the ST's 320 x 200 (decision 3): MODE 1's 80 columns and 25 of

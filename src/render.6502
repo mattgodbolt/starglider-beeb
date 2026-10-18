@@ -155,7 +155,7 @@ ENDMACRO
     STA cam,X : ZA_INDEXEDBY 0..17
     DEX : BPL camera_copy
     STZ mat_valid                       ; mat no longer holds an object's
-    RTS
+    JMP rotate_setup
 
 \ sincos: m_sin, m_cos = the sine table at m_idx (0-4095) and 1024 on.
 \ The sine bank must be paged.
@@ -273,9 +273,9 @@ ENDMACRO
 \ pushed in that order.
 .rotate_lists
 {
-    ZA_AUTO1 list_i, row_i
-    ZA_AUTO2 dx, dy, dz, cx, cy, cz, z2, nz2, t16
-    ZA_AUTO 18, rx              ; x', y', z' at +0, +6, +12
+    ZA_AUTO1 list_i
+    ZA_AUTO2 cx, cy, cz, z2, nz2, t16
+    ZA_AUTO 14, rx              ; x', y', z' at +0, +6, +12
     STZ near_n : STZ draw_n
     LDX coarse_n : BNE each
     RTS
@@ -286,38 +286,16 @@ ENDMACRO
     LDY #OB_TYPE : LDA (rec),Y : STA otype : INY : ORA (rec),Y : BNE live
     JMP next
 .live
-    LDY #OB_X : LDA (rec),Y : SEC : SBC pl_x : STA dx
-    INY : LDA (rec),Y : SBC pl_x+1 : STA dx+1
-    LDY #OB_Y : LDA (rec),Y : SEC : SBC pl_y : STA dy
-    INY : LDA (rec),Y : SBC pl_y+1 : STA dy+1
-    LDY #OB_Z : LDA (rec),Y : SEC : SBC pl_z : STA dz
-    INY : LDA (rec),Y : SBC pl_z+1 : STA dz+1
-    \ x' = cam_xx dx + cam_xy dy + cam_xz dz, and so on
-    ZA_DISCARD rx
-    LDX #0
-.row
-    STX row_i
-    LDA cam,X : ZA_INDEXEDBY {0, 6, 12}
-    STA mul_x : LDA cam+1,X : ZA_INDEXEDBY {0, 6, 12}
-    STA mul_x+1
-    MOVW mul_y, dx : JSR fmul16 : MOVW acc, mul_r
-    LDX row_i
-    LDA cam+2,X : ZA_INDEXEDBY {0, 6, 12}
-    STA mul_x : LDA cam+3,X : ZA_INDEXEDBY {0, 6, 12}
-    STA mul_x+1
-    MOVW mul_y, dy : JSR fmul16 : ADDW acc, mul_r
-    LDX row_i
-    LDA cam+4,X : ZA_INDEXEDBY {0, 6, 12}
-    STA mul_x : LDA cam+5,X : ZA_INDEXEDBY {0, 6, 12}
-    STA mul_x+1
-    MOVW mul_y, dz : JSR fmul16 : ADDW acc, mul_r
-    LDX row_i
-    LDA acc : STA rx,X : ZA_INDEXEDBY {0, 6, 12}
-    LDA acc+1 : STA rx+1,X : ZA_INDEXEDBY {0, 6, 12}
-    TXA : CLC : ADC #6 : TAX
-    CPX #18 : BEQ rows_done
-    JMP row
-.rows_done
+    LDY #OB_X : LDA (rec),Y : SEC : SBC pl_x : STA rot_d
+    INY : LDA (rec),Y : SBC pl_x+1 : STA rot_d+1
+    LDY #OB_Y : LDA (rec),Y : SEC : SBC pl_y : STA rot_d+2
+    INY : LDA (rec),Y : SBC pl_y+1 : STA rot_d+3
+    LDY #OB_Z : LDA (rec),Y : SEC : SBC pl_z : STA rot_d+4
+    INY : LDA (rec),Y : SBC pl_z+1 : STA rot_d+5
+    JSR rotate_exact
+    MOVW rx, rot_acc
+    MOVW rx+6, rot_acc+2
+    MOVW rx+12, rot_acc+4
     LDY #OB_CX : LDA rx : STA (rec),Y : INY : LDA rx+1 : STA (rec),Y
     LDY #OB_CY : LDA rx+6 : STA (rec),Y : INY : LDA rx+7 : STA (rec),Y
     LDY #OB_CZ : LDA rx+12 : STA (rec),Y : INY : LDA rx+13 : STA (rec),Y
@@ -834,10 +812,8 @@ ENDMACRO
     RTS
 .accept
     \ the log: slot, edge, x0, y0, x1, y1, colour
-    LDA log_n+1 : BNE full
-    LDA log_n : CMP #LOG_LINES : BCC room
-.full
-    JMP draw
+    LDA log_n : CMP #LO(LOG_LINES) : LDA log_n+1 : SBC #HI(LOG_LINES) : BCC room
+    JMP draw                            ; full
 .room
     LDY #0
     LDA slot : STA (log_ptr),Y : INY
