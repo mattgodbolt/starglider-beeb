@@ -73,3 +73,23 @@ its wireframe as it is, MODE 1 at the ST's own 320 x 200 (the two
 machines' pixels are the same size), a fixed game step at the ST's mean
 frame time, and the sound options. Its first step is a speed spike on
 scenes captured from the ST.
+
+## 2026-10-18
+
+### The decisions, and the renderer modelled
+
+Matt took the brief's recommendations as they stood: decisions 1-8.
+
+Before writing the Master's renderer, the ST's was modelled in Python,
+exactly: `tools/st_scenes.py` captures scenes in Hatari (each frame's
+variables, the object table and the shape table, then every line the
+ST draws, by object), and `tools/st_render.py` rebuilds every line from
+the state alone. It matches the ST on every camera-space position, list
+and line of three captures (flight, the towers, the silo tunnel), quirks
+included: the near clip's doubled fraction and the projection's divide
+overflows both show in the tunnel. So the port's renderer can be checked
+against the model on any scene, without Hatari.
+
+The capture also measured what the brief had to guess: about 40 objects
+pass the coarse test each frame and are rotated into camera space, not
+15, because the test keeps the whole band in z whatever x is.

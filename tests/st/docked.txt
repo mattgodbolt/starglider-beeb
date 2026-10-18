@@ -1,0 +1,13 @@
+# Teleported into a silo's box (x &1C30, z &DC60, heading &C10): the
+# tunnel, flying in.
+wait 38
+key 57
+wait 4
+debug w w $5c02e $1c30 $ffd0 $dc60
+debug w w $5c03c $0c10
+wait 0.3
+debug parse {arm}
+debug echo \nSEG docked\n
+wait 8
+debug echo \nSEG end\n
+quit

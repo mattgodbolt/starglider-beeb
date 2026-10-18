@@ -27,6 +27,8 @@ The tools (all in `tools/`, all run with `.venv/bin/python -I`):
 | `st_samples.py` | the embedded samples: table, and WAV export |
 | `st_hatari.py` | drives a headless Hatari through its command FIFO (keys, mouse, screenshots, debugger) |
 | `st_workload.py` | counts lines, pixels, vertices, objects and dots per rendered frame in Hatari, and reports their distributions |
+| `st_scenes.py` | captures scenes in Hatari: each frame's variables, objects and shape table, and every line drawn, by object (scripts in `tests/st/`) |
+| `st_render.py` | a model of the renderer, exact to the 68000's arithmetic, checked against the captured lines |
 
 ## Summary for the port
 
@@ -302,6 +304,19 @@ What the figures show [measured] from the table:
    |x|, |y| <= 2z [measured] &0581C-&05860. There's no depth sort:
    objects are drawn in list order, which works because every line is ORed.
 
+Because the coarse test keeps the whole band within &2020 in z, whatever
+x is, **about 40 objects are rotated into camera space every frame in
+flight** (mean 40.1, median 40, at most 53, over 496 frames), for a draw
+list of 4.4 [measured 2026-10-18: `tools/st_render.py` on a flight
+captured by `tools/st_scenes.py`]. About 10 of the 40 are more than
+24,600 units off in x, too far ever to be drawn; 16 are within 12,000.
+
+What reads the camera-space positions (+28/+2A/+2C) [measured] the
+disassembly: the draw loop (&0511C) and the missile view's (&05462), the
+scanner (&05E1C, and the mono one at &06920), the mines' handler
+(&07ACC-&07B3C), enemy fire's line (&07E6E), the collisions (&08442),
+refuelling (&0854E-&0857E) and the laser's hit test (&08738).
+
 ### Drawing an object (&04B1C)
 
 1. Type to shape through &0AC76; the shape's entry at &0AF4E + 16 x shape
@@ -329,6 +344,23 @@ manual's "Enhanced Vision System" describes.
 
 The near-plane clipper has code for the four side planes, but it's jumped
 over (&0A378, &0A3A6), so only z = 2 is clipped in 3D [measured].
+
+**The near clip's arithmetic** (&0A4DC) [measured: `tools/st_render.py`
+reproduces it, and the tunnel's lines with it]: for an edge from p (z < 2)
+to q, it divides (2 - z_p) << 16 by z_q - z_p into a 16-bit quotient,
+then adds (dx x quotient x 2) >> 16 to x_p, and the same to y_p, as if
+the quotient had 15 bits. So the clipped point is twice as far along the
+edge as the plane is; and when the plane is half way along or more, the
+quotient overflows, `divs` leaves its operand alone, its low word is 0,
+and the point stays where it was with z set to 2. When it's q that is
+behind, the two points are swapped first and stay swapped. Flying down
+the silo tunnel (106 frames) clipped 586 edges, 384 of them by the
+overflow; flight clipped 2.
+
+**The projection's divides overflow too**: x << 7 / z with the result
+past 16 bits leaves the shifted x, whose low word becomes the screen
+coordinate (768 times in the tunnel's 106 frames, 4 in flight). The 2D
+clip then cuts whatever line that makes.
 
 The projection centre x = 143 is the middle of a 288-pixel window starting
 at x = 0; the window starts at x = 16, and the gunsight is at `$204` = 160.

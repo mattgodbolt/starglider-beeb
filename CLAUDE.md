@@ -50,7 +50,10 @@ says how):
   (`../hatari/emutos`). Use the `.stx`: the clean `.st` halts at the
   protection. `tools/st_disasm.py` with `tools/st_star.ctl` is the
   disassembly; `st_shapes.py`, `st_tra.py` and `st_samples.py` pull out
-  the shapes, pictures and samples.
+  the shapes, pictures and samples. `st_scenes.py run tests/st/X.txt
+  build/scenes/X ...` captures scenes (each frame's state and its lines);
+  `st_render.py PRG SCENES` is the renderer modelled exactly, checked
+  against them: the port's drawing is checked against the model.
 - **The Spectrum 128K**: `tools/zx.py`, nm's harness on SkoolKit.
 - **The CPC**: `tools/cpc_emu.py` on the Caprice32 in `../caprice32`.
 - **The C64**: `tools/c64_unfreeze.py` and `tools/c64_run.py` on py65.
