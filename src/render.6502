@@ -1004,7 +1004,7 @@ MACRO OUTCODE x, y
     LDA x+1 : BNE x_high
     LDA x : CMP #VIEW_XMIN
     LDA #0 : BCS x_done
-    LDA #2 : BRA x_done
+    BCC x_left
 .x_high
     BMI x_left
     CMP #HI(VIEW_XMAX + 1) : BNE x_right
