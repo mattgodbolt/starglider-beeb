@@ -14,6 +14,7 @@ INCLUDE "zp.6502"
 INCLUDE "macros.6502"
 INCLUDE "../build/gen/objects.6502"
 INCLUDE "memory.6502"
+INCLUDE "vars.6502"
 
 SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 .spike_init
@@ -33,6 +34,17 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
     JSR render
 .spike_done
     RTS
+
+\ spike_logic: logic_call's routine, with logic_bank paged, for
+\ tools/logicrun.mjs.
+.spike_logic
+    ZA_ENTRY
+    LDA logic_bank : STA bank_now : STA romsel
+    JSR logic_jump
+    RTS
+.logic_jump
+    JMP (logic_call)
+    ZA_CANJUMP animate_shapes, player_flight, random8, random32
 
 \ spike_erase: the last frame's lines erased (from its erase list), as the
 \ disc erases a screen before drawing it again.
@@ -71,3 +83,9 @@ INCLUDE "code.6502"
 ENDSECTION
 
 INCLUDE "banks.6502"
+
+\ The harness's (tools/logicrun.mjs).
+SECTION SpikeWork, org = logic_work_end, guard = NMI_PAGE, virtual = TRUE
+.logic_bank SKIP 1
+.logic_call SKIP 2
+ENDSECTION

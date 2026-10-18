@@ -24,11 +24,20 @@ SECTION Shapes, org = &8000, filename = "SHAPES", guard = &C000
 INCLUDE "../build/gen/shapes.6502"
 ENDSECTION
 
-\ The world's bank: the list phase, and the sine table its camera and the
-\ objects' matrices read.
+\ The world's bank: the list phase, which runs with the bank alone; then,
+\ from where ANDY ends (the logic runs with ANDY paged over the bank's
+\ first 4K: docs/plan.md), the sine table the camera, the objects' matrices
+\ and the logic read, and the logic.
 SECTION WorldBank, org = &8000, filename = "WORLD", guard = &C000, cmos = TRUE
     EQUD 0, 0
 INCLUDE "world.6502"
 INCLUDE "../build/gen/rotate.6502"
+IF P% < ANDY_TOP
+    SKIP ANDY_TOP - P%
+ENDIF
 INCLUDE "sine.6502"
+INCLUDE "logic/animate.6502"
+IF DEFINED(SPIKE)                   ; (on the disc with the flight layer)
+INCLUDE "logic/flight.6502"
+ENDIF
 ENDSECTION

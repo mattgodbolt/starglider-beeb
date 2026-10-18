@@ -36,8 +36,8 @@ adds to its state: some callers leave it over from earlier work) and the
 caller, so a transcription can see what it must reproduce.
 
 steps.json: {"regions": [[name, address, length]...], "points": [...],
-"frames": [{"vbl", "segment", "points": {point: {region: hex}}, "rng":
-[[routine, d0, caller]...]}]}.
+"frames": [{"vbl", "segment", "points": {point: {region: hex}}, "d0":
+{point: d0.w}, "rng": [[routine, d0, caller]...]}]}.
 """
 import json
 import os
@@ -86,7 +86,7 @@ def setup(d):
     dumps = [f"m ${a:x}-${a + n:x}" for _, a, n in REGIONS]
     arm = []
     for i, (name, off) in enumerate(POINTS):
-        (d / f"{name}.ini").write_text("\n".join([f"e ${TAG_POINT + i:x}", "e VBL"] + dumps) + "\n")
+        (d / f"{name}.ini").write_text("\n".join([f"e ${TAG_POINT + i:x}", "e VBL", "e d0&$ffff"] + dumps) + "\n")
         arm.append(f"b pc = ${BASE + off:x} :trace :quiet :file {d / (name + '.ini')}")
     for tag, off, name in ((TAG_RANDOM8, RANDOM8, "random8"), (TAG_RANDOM32, RANDOM32, "random32")):
         (d / f"{name}.ini").write_text(f"e ${tag:x}\ne d0&$ffff\ne (a7).l\n")
@@ -130,13 +130,14 @@ def parse(path):
             continue
         pending.append(int(m.group(1)))
         tag = pending[0]
-        if TAG_POINT <= tag < TAG_POINT + len(POINTS) and len(pending) == 2:
+        if TAG_POINT <= tag < TAG_POINT + len(POINTS) and len(pending) == 3:
             close_point()
             name = POINTS[tag - TAG_POINT][0]
             if name == "top":
                 if cur is not None:
                     frames.append(cur)
-                cur = {"segment": segment, "vbl": pending[1], "points": {}, "rng": []}
+                cur = {"segment": segment, "vbl": pending[1], "points": {}, "d0": {}, "rng": []}
+            cur["d0"][name] = pending[2] & 0xFFFF
             point, mem, pending = name, {}, []
         elif tag in (TAG_RANDOM8, TAG_RANDOM32) and len(pending) == 3:
             if cur is not None:

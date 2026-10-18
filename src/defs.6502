@@ -39,3 +39,10 @@ BANK_LOG     = 7                    ; the spike's line log
 SLOTS        = 140
 SLOT_TUNNEL  = SLOTS
 SLOT_MISSILE = SLOTS + 1
+
+\ --- ANDY -------------------------------------------------------------------
+\ The Master's 4K of RAM over the first 4K of the sideways banks while
+\ ROMSEL's bit 7 is set: the logic's data (docs/plan.md, section 3).
+ANDY     = &8000
+ANDY_TOP = &9000
+ROMSEL_ANDY = &80

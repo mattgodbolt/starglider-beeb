@@ -85,3 +85,15 @@ ENDMACRO
 MACRO BANK n
     LDA #n : STA bank_now : STA romsel
 ENDMACRO
+
+\ ASRW v: the word v one bit right, as the 68000's asr: its sign kept.
+MACRO ASRW v
+    LDA v+1 : CMP #&80 : ROR A : STA v+1
+    ROR v
+ENDMACRO
+
+\ NEGW v: the word v negated.
+MACRO NEGW v
+    LDA #0 : SEC : SBC v : STA v
+    LDA #0 : SBC v+1 : STA v+1
+ENDMACRO

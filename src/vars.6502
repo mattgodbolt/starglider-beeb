@@ -1,0 +1,84 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the game logic's variables
+\
+\ Each is the ST's (docs/research/st-logic.md, "Every variable"), named
+\ here, with where it is on the ST in braces: {ST address kind}. The
+\ address is $nnn(a6) (the variable block), &nnn (low RAM) or P&nnnnn (the
+\ program's own data); the kind is byte, word (the ST's big-endian word,
+\ kept little-endian), word8 (a word whose high byte is always 0, kept as
+\ its low byte), long, raw N (N bytes as they are), slot (the ST's pointer
+\ to an object record, kept as the slot: &FF for none), or for an array
+\ wlo N S / whi N S / barr N S (N words' low or high bytes, or N bytes, S
+\ bytes apart on the ST). tools/stmap.py reads them, and the harness
+\ translates the ST's state into the port's and back by them
+\ (tools/logicrun.mjs). Variables declared elsewhere carry the same braces
+\ (the player, in zp.6502).
+\
+\ What any code may read, the drawing's included, is in the workspace;
+\ what only the logic reads is in ANDY, after the logic's object fields
+\ (objects.6502), paged with the logic's banks.
+\ ***************************************************************************
+
+SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
+    \ the random numbers (logic/random.6502)
+.rng_lag      SKIP 6        ; {ST $05C(a6) raw 6} random8's state; random32 adds its first four
+.rng32        SKIP 4        ; {ST $064(a6) long} random32's state
+.rng_out      SKIP 2        ; {ST $21A(a6) raw 2} random8's last two bytes
+.rng_d0       SKIP 2        ; the caller's d0, which random8 adds: a hidden input on the ST
+    \ the inputs: the accumulators the keys (and the ST's mouse) drive
+.mouse_x      SKIP 2        ; {ST P&01842 word} the turn: roll is -(it asr 4)
+.mouse_y      SKIP 2        ; {ST P&01844 word} the climb
+.speed_acc    SKIP 2        ; {ST P&01848 word} the speed, negated
+.logic_work_end
+ENDSECTION
+
+\ Animation frames (zp.6502's anim_frame, by shape), as the ST's frame
+\ lists number them: list &0D6CE drives shapes 1 and 10.
+anim_s7  = anim_frame + 7           ; {ST P&0C17E word8}
+anim_s1  = anim_frame + 1           ; {ST P&0D6CE word8}
+anim_s10 = anim_frame + 10          ; {ST P&0D6CE word8}
+anim_s15 = anim_frame + 15          ; {ST P&0FD4C word8}
+anim_s11 = anim_frame + 11          ; {ST P&0D99C word8}
+anim_s18 = anim_frame + 18          ; {ST P&10768 word8}
+anim_s26 = anim_frame + 26          ; {ST P&11C18 word8}
+anim_s27 = anim_frame + 27          ; {ST P&1204C word8}
+
+SECTION LogicAndy, org = ANDY_OBJECTS_END, guard = ANDY_TOP, virtual = TRUE
+    \ the player (logic/flight.6502)
+.speed        SKIP 2        ; {ST $21E(a6) word}
+.climb        SKIP 2        ; {ST $23A(a6) word} this frame's climb rate
+.pl_vx        SKIP 2        ; {ST $140(a6) word} the move: written, never read
+.pl_vz        SKIP 2        ; {ST $144(a6) word}
+.trig_sin     SKIP 2        ; {ST $1CE(a6) word} the heading's sine and cosine
+.trig_cos     SKIP 2        ; {ST $1D0(a6) word}
+.jolt         SKIP 2        ; {ST $280(a6) word} the roll's jolt, settling to 0
+.launch_state SKIP 2        ; {ST $292(a6) word} &1E at the tunnel's end; &1D on counts the launch
+    \ the sight
+.sight_cx     SKIP 2        ; {ST $204(a6) word} its centre
+.sight_cy     SKIP 2        ; {ST $206(a6) word}
+.sight_x      SKIP 2        ; {ST $244(a6) word} where it is
+.sight_y      SKIP 2        ; {ST $246(a6) word}
+.sight_dx     SKIP 2        ; {ST $248(a6) word} written, never read
+.sight_dy     SKIP 2        ; {ST $24A(a6) word}
+.sight_fixed  SKIP 1        ; {ST $2C1(a6) byte} F's
+    \ the missile view (the missile the player launched, flown from its nose)
+.missile_view SKIP 1        ; {ST $2C8(a6) byte}
+.mv_render    SKIP 1        ; {ST $2C9(a6) byte}
+.m_x          SKIP 2        ; {ST $26A(a6) word}
+.m_y          SKIP 2        ; {ST $26C(a6) word}
+.m_z          SKIP 2        ; {ST $26E(a6) word}
+.m_pitch      SKIP 2        ; {ST $270(a6) word}
+.m_heading    SKIP 2        ; {ST $272(a6) word}
+.m_roll       SKIP 2        ; {ST $274(a6) word}
+.m_life       SKIP 2        ; {ST $276(a6) word}
+.m_roll_aim   SKIP 2        ; {ST $27A(a6) word}
+    \ the ground dots, and the copy the missile view keeps
+.dot_x_lo     SKIP 40       ; {ST $80C(a6) wlo 40 4}
+.dot_x_hi     SKIP 40       ; {ST $80C(a6) whi 40 4}
+.dot_z_lo     SKIP 40       ; {ST $80E(a6) wlo 40 4}
+.dot_z_hi     SKIP 40       ; {ST $80E(a6) whi 40 4}
+.dots_x_lo    SKIP 40       ; {ST $8AC(a6) wlo 40 4}
+.dots_x_hi    SKIP 40       ; {ST $8AC(a6) whi 40 4}
+.dots_z_lo    SKIP 40       ; {ST $8AE(a6) wlo 40 4}
+.dots_z_hi    SKIP 40       ; {ST $8AE(a6) whi 40 4}
+ENDSECTION

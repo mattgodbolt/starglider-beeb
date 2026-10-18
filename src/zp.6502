@@ -16,17 +16,17 @@ SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
 .m_nglo     SKIP 2
 .m_nghi     SKIP 2
     \ the frame's inputs, which the game (for now the scene harness) sets
-.pl_x       SKIP 2          ; the player ($12E-$132(a6))
-.pl_y       SKIP 2
-.pl_z       SKIP 2
-.pl_pitch   SKIP 2          ; ($13A-$13E)
-.pl_heading SKIP 2
-.pl_roll    SKIP 2
+.pl_x       SKIP 2          ; {ST $12E(a6) word} the player
+.pl_y       SKIP 2          ; {ST $130(a6) word}
+.pl_z       SKIP 2          ; {ST $132(a6) word}
+.pl_pitch   SKIP 2          ; {ST $13A(a6) word}
+.pl_heading SKIP 2          ; {ST $13C(a6) word}
+.pl_roll    SKIP 2          ; {ST $13E(a6) word}
 .n_slots    SKIP 1          ; the slots the coarse list looks at ($1D8)
-.docked     SKIP 1          ; non-zero in the silo ($2CA)
+.docked     SKIP 1          ; {ST $2CA(a6) byte} non-zero in the silo
 .silo_missile SKIP 1        ; non-zero while the silo's missile is there
 .all_faces  SKIP 1          ; &80: every face visible (the Interrogate screen's H, $2BD)
-.beam_colour SKIP 1         ; the beam's colour, which animate_shapes cycles
+.beam_colour SKIP 1         ; {ST P&0D97E word8} the beam's colour, which animate_shapes cycles
 .bank_now   SKIP 1          ; the sideways bank paged, as BANK pages it
 .draw_bank  SKIP 1          ; the screen drawn into: 0 main RAM's, ACCCON_X shadow's
 .log_base   SKIP 2          ; where render logs its lines (in BANK_LOG)

@@ -1,0 +1,64 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the random numbers (the ST's &046B2, &04692)
+\
+\ Both exactly the ST's (docs/research/st-logic.md, "The player's flight,
+\ the shapes' animation and the random numbers"). Both add the turn
+\ accumulator, mouse_x; random8 adds its caller's d0 too, which the port
+\ keeps in rng_d0 wherever the ST's d0 is one a random8 call adds. Each
+\ leaves its result in rng_d0, as the ST's leaves it in d0. In main RAM,
+\ so the logic in any bank can call them.
+\ ***************************************************************************
+
+\ random8 (&046B2): rng_d0 = the next two bytes of the lagged sum.
+.random8
+{
+    \ The word at $5C ($5C its high byte) += d0 + the turn; its carry is
+    \ the X that chains through all four byte adds below.
+    LDA rng_d0 : CLC : ADC mouse_x : TAX
+    LDA rng_d0+1 : ADC mouse_x+1 : TAY
+    TXA : CLC : ADC rng_lag+1 : STA rng_lag+1
+    TYA : ADC rng_lag : STA rng_lag
+    JSR round : STA rng_out
+    JSR round : STA rng_out+1
+    STA rng_d0
+    LDA rng_out : STA rng_d0+1
+    RTS
+\ round: $5C = $5C + $60 + X + $61 + X (two addx), then $61-$5D each
+\ the one before ($5D the new $5C); A is it, carry the X.
+.round
+    LDA rng_lag : ADC rng_lag+4 : ADC rng_lag+5
+    STA rng_lag
+    LDX rng_lag+4 : STX rng_lag+5
+    LDX rng_lag+3 : STX rng_lag+4
+    LDX rng_lag+2 : STX rng_lag+3
+    LDX rng_lag+1 : STX rng_lag+2
+    STA rng_lag+1
+    RTS
+}
+
+\ random32 (&04692): rng_d0 = the high word of the next state.
+.random32
+{
+    \ doubled, and if the bit out was 1 or the result 0, EORed with
+    \ &1D872B41 (the ST's bhi round it)
+    ASL rng32 : ROL rng32+1 : ROL rng32+2 : ROL rng32+3
+    BCS flip
+    LDA rng32 : ORA rng32+1 : ORA rng32+2 : ORA rng32+3 : BNE kept
+.flip
+    LDA rng32 : EOR #&41 : STA rng32
+    LDA rng32+1 : EOR #&2B : STA rng32+1
+    LDA rng32+2 : EOR #&87 : STA rng32+2
+    LDA rng32+3 : EOR #&1D : STA rng32+3
+.kept
+    \ the turn added to the low word (its carry lost), then the long at
+    \ $5C ($5C its most significant byte)
+    LDA rng32 : CLC : ADC mouse_x : STA rng32
+    LDA rng32+1 : ADC mouse_x+1 : STA rng32+1
+    LDA rng32 : CLC : ADC rng_lag+3 : STA rng32
+    LDA rng32+1 : ADC rng_lag+2 : STA rng32+1
+    LDA rng32+2 : ADC rng_lag+1 : STA rng32+2
+    LDA rng32+3 : ADC rng_lag : STA rng32+3
+    LDA rng32+2 : STA rng_d0
+    LDA rng32+3 : STA rng_d0+1
+    RTS
+}

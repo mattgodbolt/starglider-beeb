@@ -151,14 +151,26 @@ const stubCost = (await run(need("spike_done")))[0];
 const scenes = JSON.parse(fs.readFileSync(scenesPath, "utf8")).frames;
 let [lo, hi] = [0, scenes.length - 1];
 if (frameRange) [lo, hi] = frameRange.split("-").map(Number);
-// The object table's arrays, and how a record's bytes go into them.
+// The object table's fields in main RAM (the renderer's), and how a
+// record's bytes go into them. tools/mkscene.py's records have the ST's
+// words little-endian but for the bytes at +22 to +25, so a byte field
+// elsewhere sits at its offset with the low bit flipped.
 const layout = JSON.parse(fs.readFileSync("build/gen/objects.json", "utf8"));
-const arrays = layout.arrays.map((a) => ({ at: need(a.name), st: a.st }));
+const fields = layout.fields.filter((f) => f.where === "main");
 function putObjects(records) {
     for (let slot = 0; slot < layout.slots; slot++) {
         const rec = records.subarray(64 * slot, 64 * slot + 64);
         if (rec[1] !== 0) throw new Error(`slot ${slot}: type ${rec[0] | (rec[1] << 8)} doesn't fit a byte`);
-        for (const a of arrays) ram[a.at + slot] = a.st === null ? 0 : rec[a.st];
+        for (const f of fields) {
+            const at = f.arrays.map(need);
+            if (f.kind === "port") ram[at[0] + slot] = 0;
+            else if (f.kind === "byte") ram[at[0] + slot] = rec[f.st >= 0x22 && f.st < 0x26 ? f.st : f.st ^ 1];
+            else if (f.kind === "word8") ram[at[0] + slot] = rec[f.st];
+            else if (f.kind === "word") {
+                ram[at[0] + slot] = rec[f.st];
+                ram[at[1] + slot] = rec[f.st + 1];
+            }
+        }
     }
 }
 const word = (lo, hi, slot) => ram[need(lo) + slot] | (ram[need(hi) + slot] << 8);

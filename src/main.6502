@@ -18,6 +18,7 @@ INCLUDE "zp.6502"
 INCLUDE "macros.6502"
 INCLUDE "../build/gen/objects.6502"
 INCLUDE "memory.6502"
+INCLUDE "vars.6502"
 
 \ The build stamp comes from the Makefile (-D BUILD="date time sha"), so a
 \ disc says what it is: *TYPE !BOOT shows it. A + after the sha means the
@@ -159,18 +160,15 @@ MODELS = P% - model_types
     JMP engine_run
 }
 
-\ step_logic (the engine's): turn it, step its animation, and after a
-\ while the next model.
+\ step_logic (the engine's): turn it, step the animations as the ST's
+\ frame does (animate_shapes, in the world's bank), and after a while the
+\ next model.
 .step_logic
 {
     LDA ob_heading_lo : CLC : ADC #LO(TURN) : STA ob_heading_lo
     LDA ob_heading_hi : ADC #HI(TURN) : STA ob_heading_hi
-    LDA model_t : LSR A : LDX model_shape
-.wrap
-    CMP model_frames : BCC framed
-    SBC model_frames : BRA wrap
-.framed
-    STA anim_frame,X
+    BANK BANK_WORLD
+    JSR animate_shapes
     INC model_t : BNE same_model
     INC model_t+1
 .same_model
@@ -192,7 +190,6 @@ MODELS = P% - model_types
     BANK BANK_SHAPES
     LDX model_shape
     LDA shape_lo,X : STA set_ptr : LDA shape_hi,X : STA set_ptr+1
-    LDY #5 : LDA (set_ptr),Y : STA model_frames     ; its animation's length
     LDY #8 : LDA (set_ptr),Y : STA model_z : INY : LDA (set_ptr),Y : STA model_z+1
     ASL model_z : ROL model_z+1                     ; two radii
     LDA model_type : STA ob_type
@@ -216,11 +213,10 @@ INCBIN "../build/gen/cockpit.bin"
 ENDSECTION
 
 \ The models' own state, in the workspace.
-SECTION ModelWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
+SECTION ModelWork, org = logic_work_end, guard = NMI_PAGE, virtual = TRUE
 .model_i      SKIP 1
 .model_type   SKIP 1
 .model_shape  SKIP 1
-.model_frames SKIP 1
 .model_t      SKIP 2
 .model_z      SKIP 2
 ENDSECTION

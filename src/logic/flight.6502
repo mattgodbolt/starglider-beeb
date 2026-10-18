@@ -1,0 +1,176 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - player_flight (the ST's &077B4)
+\
+\ The player's move, by the speed and heading the last step left, then its
+\ turn, climb and speed from the accumulators, the altitude's limits and
+\ the sight; or in the missile view, the missile flown instead, the player
+\ frozen. Exactly the ST's (docs/research/st-logic.md): every shift an asr,
+\ every compare signed, the heading never masked. The ST's mono path isn't
+\ here: the Master's screen is the colour one. Leaves rng_d0 as the ST
+\ leaves d0, which a later random8 may add.
+\ ***************************************************************************
+
+.player_flight
+{
+    ZA_AUTO2 t
+    \ the move: floor(speed S / 32768) by the heading's sine and cosine
+    LDA pl_heading : STA m_idx : LDA pl_heading+1 : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+    MOVW mul_x, speed : MOVW mul_y, trig_sin : JSR fmul15 : MOVW pl_vx, mul_r
+    MOVW mul_x, speed : MOVW mul_y, trig_cos : JSR fmul15 : MOVW pl_vz, mul_r
+    LDA missile_view : BNE turn
+    ADDW pl_x, pl_vx
+    ADDW pl_z, pl_vz
+.turn
+    \ the turn within &1F0 either way, and the roll from it
+    CLAMP mouse_x, -&1F0, &1F0
+    MOVW t, mouse_x
+    ASRW t : ASRW t : ASRW t : ASRW t
+    NEGW t
+    MOVW pl_roll, t
+    \ the climb within &140 either way, and the climb rate from it, 0
+    \ within &30
+    CLAMP mouse_y, -&140, &140
+    MOVW t, mouse_y
+    CMPS16 t, #&31 : BPL climbing
+    CMPS16 t, #-&30 : BMI climbing
+    STZ t : STZ t+1
+.climbing
+    ASRW t : ASRW t : ASRW t : ASRW t
+    NEGW t
+    MOVW climb, t
+    LDA missile_view : BEQ speed_in
+    JMP missile_step
+.speed_in
+    \ the speed accumulator within -479 to 0; docked, 10 down the tunnel or
+    \ 0 at its end
+    CMPS16 speed_acc, #-478 : BPL not_fastest
+    LDA #LO(-479) : STA speed_acc : LDA #HI(-479) : STA speed_acc+1
+    BRA speed_kept
+.not_fastest
+    CMPS16 speed_acc, #1 : BMI speed_kept
+    STZ speed_acc : STZ speed_acc+1
+.speed_kept
+    LDA docked : BEQ speed_set
+    LDA launch_state+1 : BNE in_tunnel
+    LDA launch_state : CMP #&1E : BNE in_tunnel
+    STZ speed_acc : STZ speed_acc+1
+    BRA speed_set
+.in_tunnel
+    LDA #LO(-10) : STA speed_acc : LDA #HI(-10) : STA speed_acc+1
+.speed_set
+    LDA #0 : SEC : SBC speed_acc : STA speed
+    LDA #0 : SBC speed_acc+1 : STA speed+1
+    \ the turn and the climb, but not docked
+    LDA docked : BNE turned
+    SUBW pl_heading, pl_roll
+    ADDW pl_y, climb
+.turned
+    \ the jolt (a ram's) on the roll, 2 nearer 0 each step
+    ADDW pl_roll, jolt
+    LDA jolt : ORA jolt+1 : BEQ jolted
+    LDA jolt+1 : BMI rising
+    LDA jolt : SEC : SBC #2 : STA jolt
+    BCS jolted
+    DEC jolt+1
+    BRA jolted
+.rising
+    LDA jolt : CLC : ADC #2 : STA jolt
+    BCC jolted
+    INC jolt+1
+.jolted
+    \ the altitude between -1800 and -20, the climb pushed back at each
+    CMPS16 pl_y, #-20 : BMI below_top
+    LDA #LO(-20) : STA pl_y : LDA #HI(-20) : STA pl_y+1
+    LDA mouse_y : CLC : ADC #8 : STA mouse_y
+    BCC levelled
+    INC mouse_y+1
+    BRA levelled
+.below_top
+    CMPS16 pl_y, #-1800 : BPL levelled
+    LDA mouse_y : SEC : SBC #8 : STA mouse_y
+    BCS bottomed
+    DEC mouse_y+1
+.bottomed
+    LDA #LO(-1800) : STA pl_y : LDA #HI(-1800) : STA pl_y+1
+.levelled
+    MOVW t, mouse_y
+    ASRW t
+    MOVW pl_pitch, t
+    MOVW rng_d0, t                              ; (the ST's d0: the pitch)
+    JMP place_sight
+}
+
+\ missile_step (&07938): the missile flown, after a 32-step ramp of its
+\ roll from where the launch left it; its life counted down each step.
+.missile_step
+{
+    \ the ramp, while m_roll - m_roll_aim is negative (its N flag alone)
+    MOVW rng_d0, m_roll                         ; (the ST's d0)
+    LDA m_roll : SEC : SBC m_roll_aim
+    LDA m_roll+1 : SBC m_roll_aim+1 : BPL flown
+    LDA m_roll : CLC : ADC #&10 : STA m_roll
+    BCC ramped
+    INC m_roll+1
+.ramped
+    JMP counted
+.flown
+    SUBW m_heading, pl_roll
+    MOVW m_roll, pl_roll
+    MOVW m_roll_aim, pl_roll
+    MOVW m_pitch, mouse_y
+    ASRW m_pitch
+    \ on at 400 by its heading's sine and cosine
+    LDA m_heading : STA m_idx : LDA m_heading+1 : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+    LDA #LO(400) : STA mul_x : LDA #HI(400) : STA mul_x+1
+    MOVW mul_y, trig_sin : JSR fmul15 : ADDW m_x, mul_r
+    LDA #LO(400) : STA mul_x : LDA #HI(400) : STA mul_x+1
+    MOVW mul_y, trig_cos : JSR fmul15 : ADDW m_z, mul_r
+    \ and the climb, kept only while it leaves the missile above the ground
+    ADDW m_y, climb
+    BMI climbed
+    SUBW m_y, climb
+.climbed
+    MOVW rng_d0, climb                          ; (the ST's d0)
+.counted
+    LDA m_life : BNE live
+    DEC m_life+1
+.live
+    DEC m_life
+    LDA m_life : ORA m_life+1 : BNE place_sight
+    \ the end of the view (&07A3C): the ground dots as they were at the
+    \ launch, and effect 2
+    STZ missile_view : STZ mv_render
+    LDX #39
+.restore
+    LDA dots_x_lo,X : STA dot_x_lo,X
+    LDA dots_x_hi,X : STA dot_x_hi,X
+    LDA dots_z_lo,X : STA dot_z_lo,X
+    LDA dots_z_hi,X : STA dot_z_hi,X
+    DEX : BPL restore
+    LDA #2 : LDX #0
+    JSR sfx_start
+    LDA #2 : STA rng_d0 : STZ rng_d0+1          ; (the ST's d0)
+}
+\ place_sight (&079BC): the sight by the accumulators, or at its centre
+\ when fixed (F).
+.place_sight
+{
+    LDA sight_fixed : BEQ moving
+    STZ sight_dx : STZ sight_dx+1 : STZ sight_dy : STZ sight_dy+1
+    MOVW sight_x, sight_cx
+    MOVW sight_y, sight_cy
+    RTS
+.moving
+    MOVW sight_dx, mouse_x
+    ASRW sight_dx : ASRW sight_dx
+    MOVW sight_x, sight_cx : ADDW sight_x, sight_dx
+    LDA #0 : SEC : SBC mouse_y : STA sight_dy
+    LDA #0 : SBC mouse_y+1 : STA sight_dy+1
+    ASRW sight_dy : ASRW sight_dy : ASRW sight_dy
+    MOVW sight_y, sight_cy : ADDW sight_y, sight_dy
+    RTS
+}

@@ -1,0 +1,10 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the sound effects (decision 5)
+\
+\ The sound layer is to come; the logic calls sfx_start as the ST's does.
+\ ***************************************************************************
+
+\ sfx_start (the ST's &00110): effect A, with X the ST's d1. It changes no
+\ state the game's logic reads (docs/research/st-logic.md).
+.sfx_start
+    RTS

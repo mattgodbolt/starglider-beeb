@@ -1,0 +1,29 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - animate_shapes (the ST's &043EE)
+\
+\ Each of the seven frame lists one frame on, back to the first after its
+\ last; then the energy beam's colour one on (its face's colour on the ST,
+\ which the scanner's dot for the beam copies). Once a step, as the ST's
+\ is once a frame. The lists are the ST's (tools/mkshapes.py's
+\ anim_shape, anim_also and anim_last).
+\ ***************************************************************************
+
+.animate_shapes
+{
+    LDX #ANIM_LISTS - 1
+.list
+    LDY anim_shape,X
+    LDA anim_frame,Y : CMP anim_last,X : BEQ wrap
+    INC A
+    BRA store
+.wrap
+    LDA #0
+.store
+    STA anim_frame,Y
+    LDY anim_also,X : BMI next                  ; a second shape on the list
+    STA anim_frame,Y
+.next
+    DEX : BPL list
+    LDA beam_colour : INC A : AND #15 : STA beam_colour
+    RTS
+}

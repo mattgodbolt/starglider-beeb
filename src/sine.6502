@@ -11,7 +11,7 @@
 ; negates, 1 - v, since truncating x + 0.5 takes a negative value's half
 ; towards zero), but for the entries sine_bits marks, which are one more
 ; than that in the second and third quarters and one less in the fourth
-; and fifth. sincos (render.6502) puts them together, and
+; and fifth. sincos (below) puts them together, and
 ; tools/sinecheck.py checks it against the ST's table for every angle.
 SINE_ENTRIES = 5120
 SINE_QUARTER = 1024
@@ -64,3 +64,118 @@ FOR k = 0..<(SINE_ENTRIES - SINE_QUARTER) DIV 8
 NEXT
 .sine_mask
     EQUB 1, 2, 4, 8, 16, 32, 64, 128
+
+\ sincos: m_sin, m_cos = the ST's sine table at m_idx (0-4095) and 1024
+\ on, from its first quarter and the entries symmetry misses (above).
+\ The sine bank must be paged.
+.sincos
+{
+    ZA_AUTO2 p, near, far       ; the quarter at r and at 1024 - r
+    ZA_AUTO1 q, rhi
+    STZ p
+    \ m_idx's quarter, and r, its place in it
+    LDA m_idx+1 : LSR A : LSR A : AND #3 : STA q
+    LDA m_idx+1 : AND #3 : STA rhi
+    ASSERT (HI(sine_qlo) AND 3) = 0 AND sine_qhi = sine_qlo + SINE_QUARTER AND LO(sine_bits) = 0
+    ORA #HI(sine_qlo) : STA p+1
+    LDY m_idx
+    LDA (p),Y : STA near
+    LDA p+1 : CLC : ADC #HI(SINE_QUARTER) : STA p+1
+    LDA (p),Y : STA near+1
+    \ 1024 - r: the quarter's last entry, 16384, isn't kept
+    LDA #0 : SEC : SBC m_idx : TAY
+    LDA #HI(SINE_QUARTER) : SBC rhi
+    CMP #HI(SINE_QUARTER) : BNE in_quarter
+    STZ far : LDA #HI(16384) : STA far+1
+    BRA got
+.in_quarter
+    ORA #HI(sine_qlo) : STA p+1
+    LDA (p),Y : STA far
+    LDA p+1 : CLC : ADC #HI(SINE_QUARTER) : STA p+1
+    LDA (p),Y : STA far+1
+.got
+    \ The sine is in quarter q, the cosine in q + 1: near in the even
+    \ quarters, far in the odd, negated in the third and fourth.
+    LDX q
+    LDA sin_far,X : BMI odd
+    MOVW m_sin, near : MOVW m_cos, far
+    BRA assigned
+.odd
+    MOVW m_sin, far : MOVW m_cos, near
+.assigned
+    LDA sin_neg,X : BPL sin_done
+    LDX #0
+    JSR negate
+.sin_done
+    LDX q
+    LDA cos_neg,X : BPL cos_done
+    LDX #m_cos - m_sin
+    JSR negate
+.cos_done
+    \ The entries symmetry misses: the cosine's is entry m_idx + 1024,
+    \ bit m_idx; the sine's, from the second quarter, bit m_idx - 1024.
+    LDA m_idx : LDX m_idx+1
+    JSR missed : BEQ cos_kept
+    LDA m_idx+1 : CMP #HI(2 * SINE_QUARTER)    ; +1 below entry 3072, -1 from it
+    LDX #m_cos - m_sin
+    JSR nudge
+.cos_kept
+    LDA q : BEQ sin_kept                        ; nothing missed in the first quarter
+    LDA m_idx+1 : SEC : SBC #HI(SINE_QUARTER) : TAX
+    LDA m_idx
+    JSR missed : BEQ sin_kept
+    LDA m_idx+1 : CMP #HI(3 * SINE_QUARTER)
+    LDX #0
+    JSR nudge
+.sin_kept
+    RTS
+\ negate: the word at m_sin + X, if it isn't 0, to 1 - it (the ST's
+\ rounding of the negative half).
+.negate
+    LDA m_sin,X : ZA_INDEXEDBY {0, 2}
+    ORA m_sin+1,X : ZA_INDEXEDBY {0, 2}
+    BEQ negated
+    LDA #1 : SEC : SBC m_sin,X : ZA_INDEXEDBY {0, 2}
+    STA m_sin,X : ZA_INDEXEDBY {0, 2}
+    LDA #0 : SBC m_sin+1,X : ZA_INDEXEDBY {0, 2}
+    STA m_sin+1,X : ZA_INDEXEDBY {0, 2}
+.negated
+    RTS
+\ missed: Z clear if entry 1024 + k (k: A low, X high, 0-4095) is one
+\ symmetry misses.
+.missed
+    STA p
+    AND #7 : TAY
+    TXA
+    LSR A : ROR p : LSR A : ROR p : LSR A : ROR p
+    CLC : ADC #HI(sine_bits) : STA p+1
+    LDA sine_mask,Y : STA rhi
+    LDY p : STZ p
+    LDA (p),Y : AND rhi
+    RTS
+\ nudge: the word at m_sin + X one more if carry is clear, one less if
+\ it's set.
+.nudge
+    BCS down
+    INC m_sin,X : ZA_INDEXEDBY {0, 2}
+    BNE nudged
+    INC m_sin+1,X : ZA_INDEXEDBY {0, 2}
+.nudged
+    RTS
+.down
+    LDA m_sin,X : ZA_INDEXEDBY {0, 2}
+    BNE low
+    DEC m_sin+1,X : ZA_INDEXEDBY {0, 2}
+.low
+    DEC m_sin,X : ZA_INDEXEDBY {0, 2}
+    RTS
+\ by the sine's quarter: whether it's from far (the odd quarters), and
+\ whether the sine and the cosine are negated
+.sin_far
+    EQUB 0, &80, 0, &80
+.sin_neg
+    EQUB 0, 0, &80, &80
+.cos_neg
+    EQUB 0, &80, &80, 0
+}
+

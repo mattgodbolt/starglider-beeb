@@ -10,6 +10,10 @@
 #                 reader (tools/disccheck.mjs)
 #   make spike    the spike on every captured scene, checked against the
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
+#   make logic    the port's game logic against the ST's, routine by
+#                 routine, on every capture in build/steps (tools/logicrun.mjs)
+#   make steps    capture the ST's logic in Hatari (tests/st/steps_*.txt;
+#                 slow, needs Hatari)
 #   make memory   what each region of the memory map holds (tools/memmap.py)
 #   make fps      the disc's frames and steps a second (tools/fps.mjs)
 #   make scenes   capture the scenes in Hatari (tests/st/*.txt; needs
@@ -43,7 +47,7 @@ BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short 
 TARGET   = build/starglider.ssd
 DISC     = starglider.ssd
 
-.PHONY: all run disc check spike memory fps scenes fetch venv clean
+.PHONY: all run disc check spike logic steps memory fps scenes fetch venv clean
 
 all: $(TARGET) build/spike/SPIKE
 
@@ -111,6 +115,23 @@ spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	    node tools/scenerun.mjs build/scenes/$$s/beeb.json build/scenes/$$s/run.json > /dev/null && \
 	    $(PYTHON) -I tools/scenecheck.py build/scenes/$$s/beeb.json build/scenes/$$s/run.json --tolerance 8 || exit 1; \
 	done
+
+# The logic's routines, each on every capture (tools/logicrun.mjs's ROUTINES).
+LOGIC    = animate flight
+STEPS    = $(patsubst tests/st/steps_%.txt,%,$(wildcard tests/st/steps_*.txt))
+
+logic: build/spike/SPIKE
+	@for s in $(STEPS); do for r in $(LOGIC); do \
+	    [ -f build/steps/$$s/steps.json ] || { echo "no build/steps/$$s: make steps"; exit 1; }; \
+	    node tools/logicrun.mjs build/steps/$$s/steps.json $$r || exit 1; \
+	done; done
+
+steps:
+	mkdir -p build/steps
+	@for s in $(STEPS); do \
+	    $(PYTHON) -I tools/st_steps.py run tests/st/steps_$$s.txt build/steps/$$s \
+	        --disk "$(ST_STX)" --hatari $(HATARI) --tos $(HATARI_TOS) > build/steps/$$s.log 2>&1 & \
+	done; wait; tail -n1 build/steps/*.log
 
 memory: $(TARGET)
 	python3 -I tools/memmap.py build/starglider.json
