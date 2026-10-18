@@ -157,48 +157,77 @@ ZA_AUTO 5, ksign            ; ... and signs
     RTS
 }
 
+\ ground_camera: objc, the camera in the object's space, for an object
+\ with no pitch of its own. Its matrix is the camera's turned by its own
+\ heading h, so the camera is the object's offset from the player turned
+\ back by h alone and negated: x -(cos h dx + sin h dz), y -dy, z sin h
+\ dx - cos h dz. From the world's positions, it takes four products where
+\ the rotated position and the matrix take nine.
+.ground_camera
+{
+    ZA_AUTO2 dx, dz
+    BANK BANK_WORLD
+    LDX slot
+    LDA ob_heading_lo,X : STA m_idx : LDA ob_heading_hi,X : AND #&0F : STA m_idx+1
+    JSR sincos
+    LDX slot
+    LDA ob_x_lo,X : SEC : SBC pl_x : STA dx : LDA ob_x_hi,X : SBC pl_x+1 : STA dx+1
+    LDA pl_y : SEC : SBC ob_y_lo,X : STA objc+2 : LDA pl_y+1 : SBC ob_y_hi,X : STA objc+3
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA dz : LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
+    FMUL m_cos, dx : LDA #0 : SEC : SBC mul_r : STA objc : LDA #0 : SBC mul_r+1 : STA objc+1
+    FMUL m_sin, dz : SUBW objc, mul_r
+    FMUL m_sin, dx : MOVW objc+4, mul_r
+    FMUL m_cos, dz : SUBW objc+4, mul_r
+    RTS
+}
+
 \ kmul: kp = kv (a signed word) by each of the five constants, each
-\ (kv K) >> 14 in magnitude, signed.
+\ (kv K) >> 14 in magnitude, signed. Each product's bytes 1-3 build in
+\ kq and kp (the lowest byte can't carry into them); every factor is a
+\ sine's size, at most 16384, so the high bytes' products are small
+\ enough that only the last sum into kp carries.
 ZA_AUTO2 kv
 ZA_AUTO 10, kp
 .kmul
 {
-    ZA_AUTO 20, ka              ; each product, 32 bits
+    ZA_AUTO 5, kq               ; each product's byte 1
     ZA_AUTO1 kneg, tlo
     LDA kv+1 : STA kneg : BPL positive
     LDA #0 : SEC : SBC kv : STA kv : LDA #0 : SBC kv+1 : STA kv+1
 .positive
     LDA kv : MUL_SET
 FOR k = 0..4
-    LDY kmag + 2 * k : MUL8 ka + 4 * k : STA ka + 4 * k + 1
-    LDY kmag + 2 * k + 1 : MUL8 tlo : STA ka + 4 * k + 2
-    LDA ka + 4 * k + 1 : CLC : ADC tlo : STA ka + 4 * k + 1
-    LDA ka + 4 * k + 2 : ADC #0 : STA ka + 4 * k + 2
-    STZ ka + 4 * k + 3
+    LDY kmag + 2 * k
+    SEC : LDA (m_sqlo),Y : SBC (m_nglo),Y : LDA (m_sqhi),Y : SBC (m_nghi),Y
+    STA kq + k
+    LDY kmag + 2 * k + 1 : MUL8 tlo : STA kp + 2 * k
+    LDA tlo : CLC : ADC kq + k : STA kq + k
+    BCC carried
+    INC kp + 2 * k
+.carried
 NEXT
     LDA kv+1 : MUL_SET
 FOR k = 0..4
     LDY kmag + 2 * k : MUL8 tlo
-    CLC : ADC ka + 4 * k + 2 : STA ka + 4 * k + 2
-    LDA ka + 4 * k + 3 : ADC #0 : STA ka + 4 * k + 3
-    LDA ka + 4 * k + 1 : CLC : ADC tlo : STA ka + 4 * k + 1
-    LDA ka + 4 * k + 2 : ADC #0 : STA ka + 4 * k + 2
-    LDA ka + 4 * k + 3 : ADC #0 : STA ka + 4 * k + 3
-    LDY kmag + 2 * k + 1 : MUL8 tlo
-    CLC : ADC ka + 4 * k + 3 : STA ka + 4 * k + 3
-    LDA ka + 4 * k + 2 : CLC : ADC tlo : STA ka + 4 * k + 2
-    LDA ka + 4 * k + 3 : ADC #0 : STA ka + 4 * k + 3
+    CLC : ADC kp + 2 * k : STA kp + 2 * k
+    LDA tlo : CLC : ADC kq + k : STA kq + k
+    BCC carried1
+    INC kp + 2 * k
+.carried1
+    LDY kmag + 2 * k + 1 : MUL8 tlo : STA kp + 2 * k + 1
+    LDA tlo : CLC : ADC kp + 2 * k : STA kp + 2 * k
+    BCC carried2
+    INC kp + 2 * k + 1
+.carried2
 NEXT
 FOR k = 0..4
     \ >> 14: bytes 1-3 shifted left 2, the top two
-    ASL ka + 4 * k + 1 : ROL ka + 4 * k + 2 : ROL ka + 4 * k + 3
-    ASL ka + 4 * k + 1 : ROL ka + 4 * k + 2 : ROL ka + 4 * k + 3
-    LDA kneg : EOR ksign + k : BMI negative
-    LDA ka + 4 * k + 2 : STA kp + 2 * k : LDA ka + 4 * k + 3 : STA kp + 2 * k + 1
-    BRA done
-.negative
-    LDA #0 : SEC : SBC ka + 4 * k + 2 : STA kp + 2 * k
-    LDA #0 : SBC ka + 4 * k + 3 : STA kp + 2 * k + 1
+    LDA kq + k
+    ASL A : ROL kp + 2 * k : ROL kp + 2 * k + 1
+    ASL A : ROL kp + 2 * k : ROL kp + 2 * k + 1
+    LDA kneg : EOR ksign + k : BPL done
+    LDA #0 : SEC : SBC kp + 2 * k : STA kp + 2 * k
+    LDA #0 : SBC kp + 2 * k + 1 : STA kp + 2 * k + 1
 .done
 NEXT
     RTS
@@ -248,14 +277,60 @@ NEXT
     RTS
 .known
     STA shape
-    \ An object with no pitch of its own has the camera's pitch and roll.
+    \ An object with no pitch of its own has the camera's pitch and roll,
+    \ and the camera in its space comes from the world's positions.
     LDA ang_p : CMP pl_pitch : BNE pitched
     LDA ang_p+1 : CMP pl_pitch+1 : BNE pitched
     JSR ground_matrix
-    BRA got_matrix
+    JSR ground_camera
+    JMP got_camera
 .pitched
     JSR build_matrix
-.got_matrix
+    \ The camera in object space, in world units: c = -(mat transposed) t.
+    ZA_DISCARD objc
+    LDX #0
+.cam_axis
+    STX row_i
+    LDA mat,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x : LDA mat+1,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x+1
+    MOVW mul_y, tx : JSR fmul16 : MOVW acc, mul_r
+    LDX row_i
+    LDA mat+6,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x : LDA mat+7,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x+1
+    MOVW mul_y, ty : JSR fmul16 : ADDW acc, mul_r
+    LDX row_i
+    LDA mat+12,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x : LDA mat+13,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x+1
+    MOVW mul_y, tz : JSR fmul16 : ADDW acc, mul_r
+    LDX row_i
+    LDA #0 : SEC : SBC acc : STA objc,X : ZA_INDEXEDBY {0, 2, 4}
+    LDA #0 : SBC acc+1 : STA objc+1,X : ZA_INDEXEDBY {0, 2, 4}
+    INX : INX : CPX #6 : BEQ got_camera
+    JMP cam_axis
+.got_camera
+    \ as magnitudes and signs, for the faces' products
+    ZA_DISCARD objc_mag, objc_sign
+    LDX #0
+.c_mag
+    TXA : LSR A : TAY
+    LDA objc+1,X : ZA_INDEXEDBY {0, 2, 4}
+    AND #&80 : STA objc_sign,Y : ZA_INDEXEDBY 0..2
+    BMI c_neg
+    LDA objc,X : ZA_INDEXEDBY {0, 2, 4}
+    STA objc_mag,X : ZA_INDEXEDBY {0, 2, 4}
+    LDA objc+1,X : ZA_INDEXEDBY {0, 2, 4}
+    STA objc_mag+1,X : ZA_INDEXEDBY {0, 2, 4}
+    BRA c_next
+.c_neg
+    LDA #0 : SEC : SBC objc,X : ZA_INDEXEDBY {0, 2, 4}
+    STA objc_mag,X : ZA_INDEXEDBY {0, 2, 4}
+    LDA #0 : SBC objc+1,X : ZA_INDEXEDBY {0, 2, 4}
+    STA objc_mag+1,X : ZA_INDEXEDBY {0, 2, 4}
+.c_next
+    INX : INX : CPX #6 : BNE c_mag
     BANK BANK_SHAPES
     LDX shape
     LDA shape_lo,X : STA hdr : LDA shape_hi,X : STA hdr+1
@@ -318,51 +393,6 @@ NEXT
     INC xf_amag+1,X : ZA_INDEXEDBY 0..16
 .scale_next
     INX : INX : CPX #18 : BNE scale_term
-    \ The camera in object space, in world units: c = -(mat transposed) t.
-    ZA_DISCARD objc
-    LDX #0
-.cam_axis
-    STX row_i
-    LDA mat,X : ZA_INDEXEDBY {0, 2, 4}
-    STA mul_x : LDA mat+1,X : ZA_INDEXEDBY {0, 2, 4}
-    STA mul_x+1
-    MOVW mul_y, tx : JSR fmul16 : MOVW acc, mul_r
-    LDX row_i
-    LDA mat+6,X : ZA_INDEXEDBY {0, 2, 4}
-    STA mul_x : LDA mat+7,X : ZA_INDEXEDBY {0, 2, 4}
-    STA mul_x+1
-    MOVW mul_y, ty : JSR fmul16 : ADDW acc, mul_r
-    LDX row_i
-    LDA mat+12,X : ZA_INDEXEDBY {0, 2, 4}
-    STA mul_x : LDA mat+13,X : ZA_INDEXEDBY {0, 2, 4}
-    STA mul_x+1
-    MOVW mul_y, tz : JSR fmul16 : ADDW acc, mul_r
-    LDX row_i
-    LDA #0 : SEC : SBC acc : STA objc,X : ZA_INDEXEDBY {0, 2, 4}
-    LDA #0 : SBC acc+1 : STA objc+1,X : ZA_INDEXEDBY {0, 2, 4}
-    INX : INX : CPX #6 : BEQ axes_done
-    JMP cam_axis
-.axes_done
-    \ as magnitudes and signs, for the faces' products
-    ZA_DISCARD objc_mag, objc_sign
-    LDX #0
-.c_mag
-    TXA : LSR A : TAY
-    LDA objc+1,X : ZA_INDEXEDBY {0, 2, 4}
-    AND #&80 : STA objc_sign,Y : ZA_INDEXEDBY 0..2
-    BMI c_neg
-    LDA objc,X : ZA_INDEXEDBY {0, 2, 4}
-    STA objc_mag,X : ZA_INDEXEDBY {0, 2, 4}
-    LDA objc+1,X : ZA_INDEXEDBY {0, 2, 4}
-    STA objc_mag+1,X : ZA_INDEXEDBY {0, 2, 4}
-    BRA c_next
-.c_neg
-    LDA #0 : SEC : SBC objc,X : ZA_INDEXEDBY {0, 2, 4}
-    STA objc_mag,X : ZA_INDEXEDBY {0, 2, 4}
-    LDA #0 : SBC objc+1,X : ZA_INDEXEDBY {0, 2, 4}
-    STA objc_mag+1,X : ZA_INDEXEDBY {0, 2, 4}
-.c_next
-    INX : INX : CPX #6 : BNE c_mag
     \ A new stamp marks this object's edges and vertices.
     INC stamp : BNE stamped
     LDX #0
@@ -419,33 +449,29 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     CLC : RTS
 }
 
-\ centre: pq = 128 px / pz as proj_x has it, and cq the same in quarters
-\ of a pixel (quarters). When 4 px fitted, pq is cq / 4 truncated, as
-\ proj_x truncates: but not below a depth of 256, where proj_x's overflow
-\ can come into cq and not pq.
-ZA_AUTO2 cq
-.centre
-{
-    ZA_AUTO2 t
-    MOVW t, px
-    JSR quarters : MOVW cq, pq
+\ CENTRE t, q, p: q = 512 t / pz (quarters) and p = 128 t / pz as proj_x
+\ has it. When 4 t fitted, p is q / 4 truncated, as proj_x truncates: but
+\ not below a depth of 256, where proj_x's overflow can come into q and
+\ not p.
+MACRO CENTRE t, q, p
+    MOVW px, t : JSR quarters : MOVW q, pq
     BCC by_proj
     LDA pz+1 : BEQ by_proj
-    LDA pq+1 : BPL q_pos
-    LDA pq : CLC : ADC #3 : STA pq
+    LDA pq+1 : BPL positive
+    LDA pq : CLC : ADC #3 : STA p
     LDA pq+1 : ADC #0
-    CMP #&80 : ROR A : ROR pq
-    CMP #&80 : ROR A : ROR pq
-    STA pq+1
-    RTS
-.q_pos
+    CMP #&80 : ROR A : ROR p
+    CMP #&80 : ROR A : ROR p
+    STA p+1
+    BRA done
+.positive
     LSR A : ROR pq : LSR A : ROR pq
-    STA pq+1
-    RTS
+    STA p+1 : LDA pq : STA p
+    BRA done
 .by_proj
-    MOVW px, t
-    JMP proj_x
-}
+    MOVW px, t : JSR proj_x : MOVW p, pq
+.done
+ENDMACRO
 
 .far_setup
 {
@@ -453,8 +479,8 @@ ZA_AUTO2 cq
     ZA_AUTO2 xs, d
     ZA_AUTO 3, d24
     MOVW pz, tz : JSR proj_z
-    MOVW px, tx : JSR centre : MOVW sc_x0, pq : MOVW sc_x0q, cq
-    MOVW px, ty : JSR centre : MOVW sc_y0, pq : MOVW sc_y0q, cq
+    CENTRE tx, sc_x0q, sc_x0
+    CENTRE ty, sc_y0q, sc_y0
     \ B by term (3 row + j): d = A_row - X0 A_z / 128 (X0 or Y0), the
     \ product rounded down as the 68000's shifts would, then 128 d / tz
     ZA_DISCARD sc_bmag, sc_bsign
