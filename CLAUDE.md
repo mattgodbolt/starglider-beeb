@@ -51,7 +51,8 @@ make check      # sincos against the ST's sine table at every angle, make spike,
                 # disc's erasing (tools/erasecheck.mjs) and its own disc reader
                 # (tools/disccheck.mjs)
 make logic      # the port's game logic against the ST's, routine by routine
-                # (tools/logicrun.mjs, on the captures make steps makes)
+                # and a whole step (tools/logicrun.mjs, on the captures make
+                # steps makes)
 make memory     # what each region of the memory map holds (src/memory.6502)
 make fps        # the disc's frames and steps a second
 make scenes     # capture the scenes in Hatari (slow; needs ../hatari)
@@ -75,8 +76,9 @@ the lists and objects at the top of main RAM, the list phase and the sine
 table in the world's bank (5, `src/world.6502`), the shapes in bank 4,
 the erase lists in shadow RAM below the shadow screen. `src/engine.6502`
 is the frame: the interrupt, the fixed step, the flip (decision 14).
-`src/main.6502` steps the game in the ST's order (`step_lists`,
-`step_logic`); `src/input.6502` is the controls (decision 6): the
+`src/step.6502` is a step of the game in the ST's order (`step_lists`,
+`step_logic`), which `make logic` checks whole against the ST's too;
+`src/input.6502` is the controls (decision 6): the
 vertical sync's interrupt reads the keys into the ST's `key_state` and
 `key_latch`, and each step adds the joystick's move to the accumulators
 the ST's mouse moves.

@@ -194,51 +194,6 @@ SIGHT_CY = 68
     RTS
 }
 
-\ step_lists (the engine's): world_render's logic up to the lists, the
-\ step's frame to be drawn from them.
-.step_lists
-    BANK_ANDY BANK_WORLD
-    JMP world_lists
-
-\ step_logic (the engine's): the rest of the ST's frame (docs/research/
-\ st-logic.md, "The main loop"), each routine in its bank with ANDY: the
-\ rest of world_render's logic; read_keys, the stick's move taken first,
-\ as the ST's mouse's would be there with the keys'; player_flight,
-\ object_handlers, animate_shapes, collisions, level_message and
-\ frame_end's logic; the step's frame shown, if it drew one; then the
-\ post-frame tests, which may go on to a level's change or, the game
-\ over, to the next game (at once, until the front end is in).
-.step_logic
-{
-    BANK_ANDY BANK_LOGIC
-    JSR world_after
-    JSR input_step
-    JSR read_keys
-    BANK_ANDY BANK_WORLD
-    JSR player_flight
-    JSR object_handlers
-    JSR animate_shapes
-    BANK_ANDY BANK_LOGIC
-    JSR collisions
-    JSR level_message
-    JSR frame_end_logic
-    JSR frame_show
-    \ the post-frame tests (&01F30): a level change first; then a game
-    \ that ended in an earlier step ends here, as the ST runs one more
-    \ frame whole before it ends
-    BANK_ANDY BANK_LOGIC
-    LDA game_over : ORA game_over+1 : PHA
-    JSR post_frame
-    PLA : TAX
-    LDA level_changed : BNE level
-    TXA : BEQ playing
-    JSR new_game
-.level
-    JMP level_start
-.playing
-    RTS
-}
-
 \ The ST's colours, for now: reds colour 1 (red), blues and cyans colour 2
 \ (cyan), white colour 3 (decision 3 leaves the choice to make).
 .st_colours

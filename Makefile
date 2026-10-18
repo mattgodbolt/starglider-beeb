@@ -11,7 +11,8 @@
 #   make spike    the spike on every captured scene, checked against the
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
 #   make logic    the port's game logic against the ST's, routine by
-#                 routine, on every capture in build/steps (tools/logicrun.mjs)
+#                 routine and a whole step, on every capture in build/steps
+#                 (tools/logicrun.mjs)
 #   make steps    capture the ST's logic in Hatari (tests/st/steps_*.txt;
 #                 slow, needs Hatari)
 #   make memory   what each region of the memory map holds (tools/memmap.py)
@@ -129,7 +130,7 @@ spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	done
 
 # The logic's routines, each on every capture (tools/logicrun.mjs's ROUTINES).
-LOGIC    = animate flight keys handlers world world_after world_whole collide message frame_end post mine level newgame
+LOGIC    = animate flight keys handlers world world_after world_whole collide message frame_end post mine level newgame step
 STEPS    = $(patsubst tests/st/steps_%.txt,%,$(wildcard tests/st/steps_*.txt))
 
 logic: build/spike/SPIKE
