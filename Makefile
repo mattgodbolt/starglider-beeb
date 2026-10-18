@@ -21,7 +21,7 @@ ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
 SCENES   = flight towers docked
 SOURCES  = $(wildcard src/*.6502)
-GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/rotate.6502
+GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/rotate.6502 build/gen/xform.6502
 
 # A failed step leaves no half-made target behind (asm.sh fails on a
 # warning after baron has written its output).
@@ -47,6 +47,9 @@ build/gen/line.6502: tools/mkline.py | build/gen
 build/gen/rotate.6502: tools/mkrotate.py | build/gen
 	python3 -I tools/mkrotate.py > $@
 
+build/gen/xform.6502: tools/mkxform.py | build/gen
+	python3 -I tools/mkxform.py > $@
+
 build/spike/SPIKE: $(SOURCES) $(GEN) | build/spike
 	$(ASM) --warn 2 -p build/spike --symbols build/spike/symbols.json src/spike.6502
 
@@ -64,7 +67,7 @@ spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	@for s in $(SCENES); do \
 	    echo "== $$s"; \
 	    node tools/scenerun.mjs build/scenes/$$s/beeb.json build/scenes/$$s/run.json > /dev/null && \
-	    $(PYTHON) -I tools/scenecheck.py build/scenes/$$s/beeb.json build/scenes/$$s/run.json --tolerance 1 || exit 1; \
+	    $(PYTHON) -I tools/scenecheck.py build/scenes/$$s/beeb.json build/scenes/$$s/run.json --tolerance 4 || exit 1; \
 	done
 
 # Capturing is slow (Hatari runs in real time) and needs Hatari, so it's

@@ -126,6 +126,7 @@ ENDSECTION
 LOG = &C000
 LOG_ENTRY = 9
 LOG_LINES = 400
-SECTION Log, org = LOG, guard = &E000, virtual = TRUE
+TABLES = &D000
+SECTION Log, org = LOG, guard = TABLES, virtual = TRUE
 .line_log   SKIP LOG_ENTRY * LOG_LINES
 ENDSECTION

@@ -13,8 +13,8 @@
 //
 // --profile N samples the program counter every N cycles instead of
 // timing the phases, and prints each routine's share: the routine is the
-// nearest label before the sample that isn't inside a scope, and the line
-// drawer's labels count as one.
+// nearest label before the sample that isn't inside a scope, and each
+// generated file's labels (line, rotate, xform) count as one.
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -55,11 +55,14 @@ const cpu = tm.processor;
 const ram = cpu.ramRomOs;
 const bank = (n) => cpu.romOffset + n * 16384;
 
+// HAZEL (&C000-&DFFF, paged by the spike) is at &9000 in jsbeeb's array.
+const where = (a) => (a >= 0xc000 && a < 0xe000 ? 0x9000 + (a - 0xc000) : a);
 const load = (file, at) => {
     const data = fs.readFileSync(path.join(build, file));
     ram.set(data, at);
 };
 load("SPIKE", need("spike_init"));
+load("TABLES", where(need("TABLES")));
 load("SHAPES", bank(need("BANK_SHAPES")));
 load("SINE", bank(need("BANK_SINE")));
 
@@ -77,7 +80,9 @@ function routines() {
             if (sec.name !== "Spike") continue;
             for (const [name, v] of Object.entries(sec.labels ?? {})) {
                 if (name.includes(".") || name.includes("@")) continue;
-                out.push({ at: v.value, name: /line\.6502$/.test(v.source ?? "") ? "line" : name });
+                // the generated files' labels count as their file's
+                const gen = /gen\/(\w+)\.6502$/.exec(a.sources[v.source] ?? "");
+                out.push({ at: v.value, name: gen ? `${gen[1]} (generated)` : name });
             }
         }
     return out.sort((x, y) => x.at - y.at);
@@ -125,8 +130,6 @@ async function run(entry, marks = []) {
     return times.slice(1).map((t, i) => t - times[i]);
 }
 
-// HAZEL (&C000-&DFFF, paged by the spike) is at &9000 in jsbeeb's array.
-const where = (a) => (a >= 0xc000 && a < 0xe000 ? 0x9000 + (a - 0xc000) : a);
 const peek = (a) => ram[a];
 const peekw = (a) => ram[a] | (ram[a + 1] << 8);
 const pokew = (a, v) => {

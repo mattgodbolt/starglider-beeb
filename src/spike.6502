@@ -31,6 +31,7 @@ INCLUDE "render.6502"
 INCLUDE "screen.6502"
 INCLUDE "../build/gen/line.6502"
 INCLUDE "../build/gen/rotate.6502"
+INCLUDE "../build/gen/xform.6502"
 INCLUDE "../build/gen/types.6502"
 
 \ each object's record's address, by slot
@@ -43,8 +44,13 @@ FOR i = 0..<SLOTS + 2
     EQUB HI(OBJECTS + i * OB_SIZE)
 NEXT
 
-INCLUDE "squares.6502"
 .spike_end
+ENDSECTION
+
+\ The tables, in HAZEL (the spike pages it in) beside the line log.
+SECTION Tables, org = TABLES, filename = "TABLES", guard = &E000
+INCLUDE "squares.6502"
+INCLUDE "recip.6502"
 ENDSECTION
 
 SECTION Shapes, org = &8000, filename = "SHAPES", guard = &C000

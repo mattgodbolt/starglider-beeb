@@ -1,0 +1,37 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the projection's reciprocals (render.6502)
+\
+\ A depth z is a 9-bit mantissa m (256-511) and a shift: 128 x / z is
+\ x R(m) >> S, R(m) = 2^24 / (m + 1/2). Below 256, a table gives each z's
+\ m (less 256) and S; above, z's high byte gives the shift that brings z
+\ down to m.
+\ ***************************************************************************
+
+FUNCTION bitlen(n) = FLOOR(LOG(n) / LOG(2) + 0.0000001) + 1
+
+ALIGN 256
+.rcp_lo
+FOR m = 256..511
+    EQUB LO(ROUND(2^24 / (m + 0.5)))
+NEXT
+.rcp_hi
+FOR m = 256..511
+    EQUB HI(ROUND(2^24 / (m + 0.5)))
+NEXT
+\ z < 256: m - 256 and S (z is m >> (9 - its bit length))
+.zsmall_idx
+    EQUB 0, 0
+FOR z = 2..255
+    EQUB (z << (9 - bitlen(z))) - 256
+NEXT
+.zsmall_sh
+    EQUB 0, 0
+FOR z = 2..255
+    EQUB 8 + bitlen(z)
+NEXT
+\ z >= 256: by its high byte, the shift that leaves 9 bits (m), 0-6
+.zhigh_sh
+    EQUB 0
+FOR h = 1..127
+    EQUB bitlen(h) - 1
+NEXT

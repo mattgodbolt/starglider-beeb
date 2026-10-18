@@ -7,16 +7,34 @@ the ST's (tools/mkscene.py's expectations, from tools/st_render.py).
 The lists and the camera-space positions are the game's logic: they must
 match exactly. Lines are compared by object and edge: an edge drawn by one
 and not the other is a culling difference (decision 9 moves the test into
-object space); an edge both draw must match end to end, within
---tolerance pixels (0 while the drawing follows the ST's arithmetic).
+object space); an edge both draw must lie within --tolerance pixels of the
+ST's: each end of either line within that distance of the other line. (A
+clipped end can slide along the window's edge by more than its line
+moves.)
 Prints a summary and the cycles each part took, and exits non-zero on a
 difference the rules don't allow.
 """
 import argparse
+import collections
 import json
+import math
 import statistics
 import sys
 from pathlib import Path
+
+
+def to_segment(p, a, b):
+    """The distance from point p to the segment a-b."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    n = dx * dx + dy * dy
+    t = 0 if not n else max(0, min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / n))
+    return math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
+
+
+def apart(p, q):
+    """How far apart two lines are: the furthest end of either from the other."""
+    a, b, c, d = p[:2], p[2:4], q[:2], q[2:4]
+    return max(to_segment(a, c, d), to_segment(b, c, d), to_segment(c, a, b), to_segment(d, a, b))
 
 
 def main():
@@ -32,6 +50,7 @@ def main():
     st = {k: 0 for k in ("frames", "list_bad", "rel_bad", "edges_both", "edges_moved", "only_st", "only_port")}
     worst = 0
     shown = 0
+    spread = collections.Counter()
 
     def show(msg):
         nonlocal shown
@@ -69,9 +88,8 @@ def main():
                 st["only_st"] += 1
                 continue
             p = port[key]
-            d = max(abs(a - b) for a, b in zip(p, line))
-            # the same line either way round
-            d = min(d, max(abs(a - b) for a, b in zip(p, line[2:] + line[:2])))
+            d = math.ceil(apart(p, line) - 1e-9)
+            spread[d] += 1
             st["edges_both"] += 1
             if d:
                 st["edges_moved"] += 1
@@ -79,7 +97,8 @@ def main():
                 if d > args.tolerance:
                     show(f"frame {n}: slot {key[0]} edge {key[1]}: {p} on the port, {line} on the ST")
         st["only_port"] += sum(1 for k in port if k not in ours)
-    print(" ".join(f"{k} {v}" for k, v in st.items()), f"worst {worst}px")
+    print(" ".join(f"{k} {v}" for k, v in st.items()), f"worst {worst}px",
+          "apart: " + ", ".join(f"{d}px {n}" for d, n in sorted(spread.items())))
     fields = 39936
     for k, xs in cycles.items():
         if xs:
