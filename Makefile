@@ -6,8 +6,9 @@
 #   make disc     the disc from a clean tree, as starglider.ssd (the README
 #                 links it)
 #   make check    sincos against the ST's sine table, the spike, the
-#                 disc's erasing (tools/erasecheck.mjs) and its own disc
-#                 reader (tools/disccheck.mjs)
+#                 disc's erasing (tools/erasecheck.mjs), its own disc
+#                 reader (tools/disccheck.mjs) and its controls
+#                 (tools/inputcheck.mjs)
 #   make spike    the spike on every captured scene, checked against the
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
 #   make logic    the port's game logic against the ST's, routine by
@@ -121,6 +122,7 @@ check: build/spike/SPIKE spike $(TARGET)
 	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike
 	node tools/erasecheck.mjs
 	node tools/disccheck.mjs
+	node tools/inputcheck.mjs
 
 spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	@for s in $(SCENES); do \

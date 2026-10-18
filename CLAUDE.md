@@ -48,8 +48,8 @@ make disc       # the disc from a clean tree, as starglider.ssd: the
 make spike      # the spike on every captured scene: checked against the
                 # ST's renderer, and timed (tools/scenecheck.py)
 make check      # sincos against the ST's sine table at every angle, make spike, the
-                # disc's erasing (tools/erasecheck.mjs) and its own disc reader
-                # (tools/disccheck.mjs)
+                # disc's erasing (tools/erasecheck.mjs), its own disc reader
+                # (tools/disccheck.mjs) and its controls (tools/inputcheck.mjs)
 make logic      # the port's game logic against the ST's, routine by routine
                 # and a whole step (tools/logicrun.mjs, on the captures make
                 # steps makes)
