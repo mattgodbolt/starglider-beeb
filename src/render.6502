@@ -134,14 +134,30 @@ ZA_AUTO 5, ksign            ; ... and signs
 {
     ZA_AUTO 10, ps              ; sin h by each constant
     \ the last ground object's heading, while mat is still its
-    LDA ground_valid : BEQ build
-    LDA ang_h : CMP ground_h : BNE build
-    LDA ang_h+1 : CMP ground_h+1 : BNE build
+    LDA ground_valid : BEQ lookup
+    LDA ang_h : CMP ground_h : BNE lookup
+    LDA ang_h+1 : CMP ground_h+1 : BNE lookup
     RTS
-.build
+.lookup
     MOVW ground_h, ang_h
     LDA #&FF : STA ground_valid
     STZ mat_valid               ; mat isn't build_matrix's now
+    \ Kept since the camera last pitched or rolled? The matrix is the
+    \ heading's and kconst's, and kconst is the camera's pitch and roll.
+    LDX gm_n : BEQ build
+.find
+    DEX
+    LDA ang_h : CMP gm_h_lo,X : BNE not_this
+    LDA ang_h+1 : CMP gm_h_hi,X : BEQ hit
+.not_this
+    TXA : BNE find
+    BRA build
+.hit
+FOR i = 0..11
+    LDA gm_mat + i * GM_N,X : STA mat + 2 * (3 * (i DIV 4) + 2 * ((i DIV 2) MOD 2)) + (i MOD 2)
+NEXT
+    JMP camera_column
+.build
     BANK BANK_WORLD
     LDA ang_h : STA m_idx : LDA ang_h+1 : AND #&0F : STA m_idx+1
     JSR sincos
@@ -158,11 +174,38 @@ ZA_AUTO 5, ksign            ; ... and signs
     LDA kp : SEC : SBC ps+6 : STA mat+4 : LDA kp+1 : SBC ps+7 : STA mat+5         ; c s3s1 - s c3
     LDA ps+8 : CLC : ADC kp+2 : STA mat+10 : LDA ps+9 : ADC kp+3 : STA mat+11     ; s s3 + c s1c3
     MOVW mat+16, kp+4                                                             ; c c1
+    \ kept for the heading, over the oldest
+    LDX gm_next
+    LDA ang_h : STA gm_h_lo,X : LDA ang_h+1 : STA gm_h_hi,X
+FOR i = 0..11
+    LDA mat + 2 * (3 * (i DIV 4) + 2 * ((i DIV 2) MOD 2)) + (i MOD 2) : STA gm_mat + i * GM_N,X
+NEXT
+    INX : CPX #GM_N : BCC next_ok
+    LDX #0
+.next_ok
+    STX gm_next
+    LDA gm_n : CMP #GM_N : BCS camera_column
+    INC gm_n
+.camera_column
     MOVW mat+2, cam+2                   ; c1 s3, c1 c3, -s1: the camera's own
     MOVW mat+8, cam+8
     MOVW mat+14, cam+14
     RTS
 }
+
+\ The last GM_N ground matrices made since the camera last pitched or
+\ rolled (draw_objects empties them when it does), by heading: mat's six
+\ entries that aren't the camera's own, by byte. While the player flies
+\ level, the objects drawn at one frame mostly have the headings they
+\ had at the last.
+GM_N = 8
+.gm_h_lo    SKIP GM_N
+.gm_h_hi    SKIP GM_N
+.gm_mat     SKIP 12 * GM_N
+.gm_n       EQUB 0                  ; how many are kept ...
+.gm_next    EQUB 0                  ; ... and the next to fill
+.gm_pitch   EQUW 0                  ; the camera's pitch and roll they're for
+.gm_roll    EQUW 0
 
 \ ground_camera: objc, the camera in the object's space, for an object
 \ with no pitch of its own. Its matrix is the camera's turned by its own
@@ -202,46 +245,62 @@ ZA_AUTO2 kv
 ZA_AUTO 10, kp
 .kmul
 {
-    ZA_AUTO 5, kq               ; each product's byte 1
+    ZA_AUTO 10, kq              ; each product's byte 1, by 2 k
     ZA_AUTO1 kneg, tlo
     LDA kv+1 : STA kneg : BPL positive
     LDA #0 : SEC : SBC kv : STA kv : LDA #0 : SBC kv+1 : STA kv+1
 .positive
     LDA kv : MUL_SET
-FOR k = 0..4
-    LDY kmag + 2 * k
+    ZA_DISCARD kq, kp
+    LDX #8
+.low
+    LDY kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
     SEC : LDA (m_sqlo),Y : SBC (m_nglo),Y : LDA (m_sqhi),Y : SBC (m_nghi),Y
-    STA kq + k
-    LDY kmag + 2 * k + 1 : MUL8 tlo : STA kp + 2 * k
-    LDA tlo : CLC : ADC kq + k : STA kq + k
-    BCC carried
-    INC kp + 2 * k
-.carried
-NEXT
+    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDY kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    MUL8 tlo : STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA tlo : CLC : ADC kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    BCC low_carried
+    INC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.low_carried
+    DEX : DEX : BPL low
     LDA kv+1 : MUL_SET
-FOR k = 0..4
-    LDY kmag + 2 * k : MUL8 tlo
-    CLC : ADC kp + 2 * k : STA kp + 2 * k
-    LDA tlo : CLC : ADC kq + k : STA kq + k
-    BCC carried1
-    INC kp + 2 * k
-.carried1
-    LDY kmag + 2 * k + 1 : MUL8 tlo : STA kp + 2 * k + 1
-    LDA tlo : CLC : ADC kp + 2 * k : STA kp + 2 * k
-    BCC carried2
-    INC kp + 2 * k + 1
-.carried2
-NEXT
-FOR k = 0..4
-    \ >> 14: bytes 1-3 shifted left 2, the top two
-    LDA kq + k
-    ASL A : ROL kp + 2 * k : ROL kp + 2 * k + 1
-    ASL A : ROL kp + 2 * k : ROL kp + 2 * k + 1
-    LDA kneg : EOR ksign + k : BPL done
-    LDA #0 : SEC : SBC kp + 2 * k : STA kp + 2 * k
-    LDA #0 : SBC kp + 2 * k + 1 : STA kp + 2 * k + 1
+    LDX #8
+.high
+    LDY kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    MUL8 tlo
+    CLC : ADC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA tlo : CLC : ADC kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    BCC high_carried
+    INC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.high_carried
+    LDY kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    MUL8 tlo : STA kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA tlo : CLC : ADC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    BCC top_carried
+    INC kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.top_carried
+    \ >> 14: bytes 1-3 shifted left 2, the top two; then signed
+    LDA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ASL A : ROL kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ROL kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ASL A : ROL kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ROL kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    TXA : LSR A : TAY
+    LDA kneg : EOR ksign,Y : ZA_INDEXEDBY 0..4
+    BPL high_next
+    LDA #0 : SEC : SBC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA #0 : SBC kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.high_next
+    DEX : DEX : BMI done
+    JMP high
 .done
-NEXT
     RTS
 }
 
@@ -253,6 +312,16 @@ NEXT
 .draw_objects
 {
     ZA_AUTO1 list_i
+    \ the ground matrices kept hold while the camera neither pitches nor rolls
+    LDA pl_pitch : CMP gm_pitch : BNE flush
+    LDA pl_pitch+1 : CMP gm_pitch+1 : BNE flush
+    LDA pl_roll : CMP gm_roll : BNE flush
+    LDA pl_roll+1 : CMP gm_roll+1 : BEQ kept
+.flush
+    STZ gm_n : STZ gm_next
+    MOVW gm_pitch, pl_pitch
+    MOVW gm_roll, pl_roll
+.kept
     LDX draw_n : BNE each
     RTS
 .each
