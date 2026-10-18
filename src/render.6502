@@ -52,11 +52,11 @@ ENDIF
 .draw_phase
     LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
     ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
-    STA line_plot.f_lo+2 : ADC #2
-    STA line_plot.f_hi+2 : ADC #2
-    STA line_plot.f_row+2 : ADC #2
+    STA line_plot.f_lo0+2 : STA line_plot.f_lo1+2 : ADC #2
+    STA line_plot.f_hi0+2 : STA line_plot.f_hi1+2 : ADC #2
+    STA line_plot.f_row0+2 : STA line_plot.f_row1+2 : ADC #2
     STA line_plot.f_dx+2 : ADC #2
-    STA line_plot.f_dy+2 : ADC #2
+    STA line_plot.f_dy0+2 : STA line_plot.f_dy1+2 : ADC #2
     STA line_plot.f_code+2
     LDA #ERASE_LINES : STA erase_i
     JSR draw_objects

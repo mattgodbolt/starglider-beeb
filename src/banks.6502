@@ -8,6 +8,7 @@ SECTION Tables, org = TABLES, filename = "TABLES", guard = CODE2, cmos = TRUE
 INCLUDE "squares.6502"
 INCLUDE "recip.6502"
 INCLUDE "hazel.6502"
+INCLUDE "../build/gen/linemode.6502"
 ENDSECTION
 
 \ ... and more code.
