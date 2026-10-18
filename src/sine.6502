@@ -11,7 +11,7 @@
 ; negates, 1 - v, since truncating x + 0.5 takes a negative value's half
 ; towards zero), but for the entries sine_bits marks, which are one more
 ; than that in the second and third quarters and one less in the fourth
-; and fifth. sincos (render.6502) puts them together, and
+; and fifth. sincos (world.6502) puts them together, and
 ; tools/sinecheck.py checks it against the ST's table for every angle.
 SINE_ENTRIES = 5120
 SINE_QUARTER = 1024
@@ -55,12 +55,14 @@ FOR i = 0..<SINE_QUARTER
 NEXT
 ASSERT st_sine(SINE_QUARTER) = 16384
 
-\ Entries 1024-5119 symmetry misses: entry 1024 + k is bit k AND 7 of
-\ byte k DIV 8.
+\ Entries 1024-5119 symmetry misses: entry 1024 + k is bit k DIV 512 of
+\ byte k AND 511, so an angle's sine and cosine (1024 apart) share a byte.
+SINE_BITS = (SINE_ENTRIES - SINE_QUARTER) DIV 8
 .sine_bits
-FOR k = 0..<(SINE_ENTRIES - SINE_QUARTER) DIV 8
-    e = SINE_QUARTER + 8 * k
-    EQUB sine_off(e) + 2 * sine_off(e + 1) + 4 * sine_off(e + 2) + 8 * sine_off(e + 3) + 16 * sine_off(e + 4) + 32 * sine_off(e + 5) + 64 * sine_off(e + 6) + 128 * sine_off(e + 7)
+FOR k = 0..<SINE_BITS
+    e = SINE_QUARTER + k
+    EQUB sine_off(e) + 2 * sine_off(e + SINE_BITS) + 4 * sine_off(e + 2 * SINE_BITS) + 8 * sine_off(e + 3 * SINE_BITS) + 16 * sine_off(e + 4 * SINE_BITS) + 32 * sine_off(e + 5 * SINE_BITS) + 64 * sine_off(e + 6 * SINE_BITS) + 128 * sine_off(e + 7 * SINE_BITS)
 NEXT
+ASSERT LO(sine_bits) = 0 AND SINE_BITS = 512
 .sine_mask
     EQUB 1, 2, 4, 8, 16, 32, 64, 128
