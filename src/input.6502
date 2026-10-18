@@ -132,21 +132,7 @@ CA2 = 1                             ; sysvia_ifr's bit: the keyboard's auto-scan
 }
 ASSERT P% <= &3000
 
-\ input_init: each axis read, and taken as where the stick is, for the
-\ accumulators to move from; the conversions the interrupt reads begun.
-\ Before the interrupt is on: it waits for each conversion.
-.input_init
-{
-    LDX #1
-.axis
-    STX adc_control
-.converting
-    BIT adc_control : BMI converting
-    LDA adc_high : STA adc_raw,X : STA adc_kept,X
-    DEX : BPL axis
-    STZ adc_channel                             ; (the last begun, and done)
-    RTS
-}
+\ (start.6502's input_init takes the stick's first readings.)
 
 \ input_step: the stick's movement since the last step into the
 \ accumulators, as the ST's mouse moves them: right adds to the turn

@@ -2,27 +2,7 @@
 \ STARGLIDER for the BBC Master - the screen's addresses
 \ ***************************************************************************
 
-\ screen_mode: MODE 1's CRTC cut to 25 character rows from SCREEN, its
-\ vertical sync moved to keep them central, not interlaced, so the sync,
-\ and the palette split timed from it, falls on the same scan line every
-\ field, and no cursor.
-.screen_mode
-{
-    LDX #0
-.reg
-    LDA crtc_values,X : BMI done
-    STA crtc_reg : LDA crtc_values+1,X : STA crtc_data
-    INX : INX : BRA reg
-.done
-    RTS
-.crtc_values
-    EQUB 6, SCREEN_ROWS
-    EQUB 7, 34 - (32 - SCREEN_ROWS) DIV 2
-    EQUB 8, 0
-    EQUB 10, &20                    ; no cursor
-    EQUB 12, HI(SCREEN DIV 8), 13, LO(SCREEN DIV 8)
-    EQUB &FF
-}
+\ (The CRTC is set up once, by setup.6502's screen_mode.)
 
 \ The window's bytes: x 16-303 is MODE 1's bytes 4-75 of a scan line.
 WINDOW_COL0 = VIEW_XMIN DIV 4

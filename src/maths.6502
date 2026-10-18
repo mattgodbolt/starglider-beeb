@@ -11,13 +11,7 @@
 \ ***************************************************************************
 
 
-\ mul_init: the pointers' high bytes, once.
-.mul_init
-    LDA #HI(sqr_lo) : STA m_sqlo+1
-    LDA #HI(sqr_hi) : STA m_sqhi+1
-    LDA #HI(neg_lo) : STA m_nglo+1
-    LDA #HI(neg_hi) : STA m_nghi+1
-    RTS
+\ (setup.6502's mul_init sets the pointers' high bytes, once.)
 
 \ MUL_SET: A is the multiplicand for the MUL8s that follow.
 MACRO MUL_SET

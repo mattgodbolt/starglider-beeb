@@ -6,8 +6,10 @@
 \
 \ - zero page: zp.6502; the OS's pages &0400-&0CFF: the workspace (zp.6502);
 \   &0D00: the disc reader's NMI routine;
-\ - main RAM from &0E00: the code, then the lists and the object table
-\   (objects.6502) up to the screen;
+\ - main RAM from &0E00: the resident code up to MAIN_TOP, then the lists
+\   and the object table (objects.6502) up to the screen; the disc's start
+\   (start.6502) follows the resident code in SG and may lie over them, as
+\   it's done before they're used;
 \ - shadow RAM's &3000 up to the shadow screen: the erase lists, which only
 \   code in HAZEL reads or writes, as only ACCCON's X shows them;
 \ - HAZEL: the tables and the code that runs with X set (banks.6502);

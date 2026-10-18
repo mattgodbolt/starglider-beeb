@@ -41,38 +41,11 @@ SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*RUN SG", 13
 ENDSECTION
 
-SECTION Main, org = &0E00, filename = "SG", guard = MAIN_TOP, cmos = TRUE
-.start
-    ZA_ENTRY
-    SEI
-    \ HAZEL in, and the game's files loaded (disc.6502)
-    LDA acccon : AND #NOT(ACCCON_X OR ACCCON_D) AND &FF : ORA #ACCCON_Y : STA acccon
-    BANK BANK_SHAPES
-    JSR disc_init
-    LDX #DISC_LOADS - 1
-.load
-    PHX
-    LDA disc_load_lo,X : STA fe_dst
-    LDA disc_load_hi,X : STA fe_dst+1
-    LDY disc_load_bank,X
-    LDA disc_load_file,X : TAX
-    JSR disc_load
-    JSR disc_wait
-    PLX
-    DEX : BPL load
-.start_loaded                                   ; (tools/disccheck.mjs)
-    JSR mul_init
-    JSR line_draw
-    JSR screen_mode
-    \ the cockpit on both screens, their windows empty, their panels to draw
-    JSR screen_copy
-    STZ draw_bank : JSR window_clear
-    LDA #ACCCON_X : STA draw_bank : JSR window_clear
-    JSR panel_reset
-IF DEFINED(SPLIT_SWEEP)
-    JSR split_test
-ENDIF
-    JMP game
+\ SG: main RAM's resident code (Main, up to its budget, MAIN_TOP), then the
+\ start (start.6502), which runs once and may lie over the lists and the
+\ object table above it, but not the screen it loads the cockpit into.
+SECTION SG, org = &0E00, filename = "SG", exec = start, guard = SCREEN, cmos = TRUE
+SECTION Main, org = &0E00, guard = MAIN_TOP, cmos = TRUE
 
 IF DEFINED(SPLIT_SWEEP)
 \ split_test: scan lines 126-131 whole in logical 3, on both screens, so a
@@ -112,103 +85,30 @@ ASSERT P% <= &3000                  ; (the interrupt runs it)
 INCLUDE "cockpit.6502"
 INCLUDE "disc.6502"
 
-
-\ The files start loads (disc_load: the file, where, its bank), the last
-\ first.
-.disc_load_file
-    EQUB DF_WINDOW, DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
-.disc_load_lo
-    EQUB LO(WIN_PIC), LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
-.disc_load_hi
-    EQUB HI(WIN_PIC), HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
-.disc_load_bank
-    EQUB BANK_PIC, BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
-DISC_LOADS = P% - disc_load_bank
-
 \ ---------------------------------------------------------------------------
-\ game: the game's state as the ST's start-up and title leave it, a new
-\ game as the title starts one, and the engine (engine.6502), for ever.
-SIGHT_CX = 160                      ; the sight's centre (init_resolution's, in colour)
-SIGHT_CY = 68
-.game
-{
-    \ the logic's variables 0, in the workspace and in ANDY (with the
-    \ objects' fields there), and the objects', the silo's two records
-    \ included, which no level's set-up clears: as the ST's are as it loads
-    LDX #0
-.work
-    STZ work_end,X
-    INX : CPX #LO(logic_work_end - work_end) : BNE work
-    ASSERT logic_work_end - work_end <= 256
-    BANK_ANDY BANK_LOGIC
-    JSR andy_clear
+\ play: from the start (start.6502), its code done: the objects 0 over it
+\ (and the silo's two records with them, which no level's set-up clears,
+\ as the ST's are as it loads), the new game as the ST's start_game makes
+\ it (L_01EFE) and its first level's start (L_01F06), and the engine
+\ (engine.6502), for ever.
+.play
     JSR objects_clear
-    LDX #pl_roll + 1 - pl_x
-.player
-    STZ pl_x,X
-    DEX : BPL player
-    STZ n_slots : STZ docked : STZ silo_missile : STZ all_faces
-    \ what the ST's start-up sets (init_resolution's sight centre, the
-    \ sound on), the beam's colour as the program loads, and what the
-    \ title leaves: the four frame_ends before it waits for a key, and its
-    \ scene's player at y &64 (sub_03B38)
-    LDA #SIGHT_CX : STA sight_cx
-    LDA #SIGHT_CY : STA sight_cy
-    LDA #&FF : STA sound_on
-    LDA #15 : STA beam_colour
-    LDA #4 : STA frame_count
-    LDA #&64 : STA pl_y
-    LDX #15
-.colours
-    LDA st_colours,X : STA colour_map,X
-    DEX : BPL colours
-    \ main RAM's screen shown, and both cleared before they're drawn
-    JSR erase_init
-    STZ draw_buffer : STZ frame_drawn : STZ frame_ready
-    \ The disc reader at work (decision 12): until the game has a file of
-    \ its own to load as it plays, TABLES read again into the loading area,
-    \ below WINDOW's code and picture there, as the game starts
-    \ (tools/disccheck.mjs checks it).
-    LDX #DF_TABLES : LDY #BANK_PIC
-    STZ fe_dst : LDA #&80 : STA fe_dst+1
-    ASSERT CODE2 - TABLES <= WIN_PIC - &8000    ; (TABLES' guard is CODE2)
-    JSR disc_load
-    JSR input_init
-    BANK BANK_LOGIC
-    JSR sound_init
-    JSR install_irq
-    \ the new game, as the ST's start_game makes it (L_01EFE), and its
-    \ first level's start (L_01F06)
     BANK_ANDY BANK_LOGIC
     JSR new_game
     JSR level_start
     LDA fields : STA stepped
     JMP engine_run
-}
-
-\ andy_clear: ANDY, paged, all 0.
-.andy_clear
-{
-    ZA_AUTO2 p
-    STZ p : LDA #HI(ANDY) : STA p+1
-    LDY #0 : TYA
-.page
-    STA (p),Y
-    INY : BNE page
-    INC p+1 : LDX p+1 : CPX #HI(ANDY_TOP) : BNE page
-    RTS
-}
-
-\ The ST's colours, for now: reds colour 1 (red), blues and cyans colour 2
-\ (cyan), white colour 3 (decision 3 leaves the choice to make).
-.st_colours
-    EQUB &00, &0F, &0F, &0F, &0F, &0F, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &FF
 
 INCLUDE "code.6502"
 INCLUDE "overlays.6502"
 ENDSECTION
 
-\ The cockpit's screen (tools/mkcockpit.py), which !BOOT loads.
+SECTION Start, org = P%, guard = SCREEN, cmos = TRUE
+INCLUDE "start.6502"
+ENDSECTION
+ENDSECTION
+
+\ The cockpit's screen (tools/mkcockpit.py), which the start loads.
 SECTION Cockpit, org = SCREEN, filename = "COCKPIT"
 INCBIN "../build/gen/cockpit.bin"
 ENDSECTION

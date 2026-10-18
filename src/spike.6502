@@ -139,6 +139,7 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 }
 
 INCLUDE "code.6502"
+INCLUDE "setup.6502"
 INCLUDE "sound.6502"
 ENDSECTION
 

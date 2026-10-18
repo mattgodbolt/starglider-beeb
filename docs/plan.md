@@ -173,7 +173,7 @@ owns.
 | Zero page | fixed state (the inputs, the multiply pointers) and baron's pool |
 | OS pages &0400-&0CFF | vertex arrays and marks, the lists, the draw list |
 | &0D00-&0DFF | the disc reader's NMI routine |
-| Main RAM &0E00-&417F | the draw phase's code, the main loop, the interrupts and the disc reader, the object table |
+| Main RAM &0E00-&417F | the draw phase's code, the main loop, the interrupts and the disc reader, the object table; and the start, which follows the resident code in SG and may lie over the lists and objects, as it runs once before they're used (`src/start.6502`) |
 | Shadow RAM &3000-&417F | the erase lists, read and written only with X set: by HAZEL's code, and the objects' boxes by bank 7's (`src/box.6502`) |
 | HAZEL | the multiply and reciprocal tables, the line drawer, the screen's clear, the vertex transforms |
 | ANDY | *as built:* the object fields only the logic reads, and the logic's variables (`src/vars.6502`): paged in with the logic's banks, over their first 4K |
