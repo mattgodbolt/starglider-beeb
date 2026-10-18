@@ -34,9 +34,22 @@ buildings").
 ## Commands
 
 ```sh
+make            # the speed spike's build, build/spike (src/spike.6502)
+make spike      # the spike on every captured scene: checked against the
+                # ST's renderer, and timed (tools/scenecheck.py)
+make check      # the sine table against the ST's, and make spike
+make scenes     # capture the scenes in Hatari (slow; needs ../hatari)
 make fetch      # download every version into original/ (not committed)
 make venv       # .venv (uv sync): SkoolKit, Capstone, Pillow, NumPy
 ```
+
+The build makes the shapes and per-type tables from the ST's STAR.PRG
+(`tools/mkshapes.py`) and generates the line drawer, the camera rotation
+and the vertex transforms (`tools/mkline.py`, `mkrotate.py`,
+`mkxform.py`) into `build/gen/`; baron computes the sine table
+(`src/sine.6502`) and the multiply and reciprocal tables.
+`node tools/scenerun.mjs SCENES OUT --profile 37` samples where the cycles
+go.
 
 `tools/fat12.py IMAGE [OUTDIR]` lists or extracts an ST (or PC) floppy,
 `tools/adf.py IMAGE [OUTDIR]` an Amiga one.
@@ -59,6 +72,21 @@ says how):
 - **The C64**: `tools/c64_unfreeze.py` and `tools/c64_run.py` on py65.
 - **The Master's budgets**: `tools/beeb_linebench.sh` and
   `tools/beeb_soundbench.mjs` in jsbeeb.
+
+## Baron and the 65C12, as met here
+
+- Labels inside a macro are private to each expansion: tables a routine
+  must name go in an INCLUDE, not a macro. A FOR body is a scope too.
+- Zero page is baron's (`ZA_AUTO`); only what the outside world reads or
+  writes, or what lasts, has a fixed address (`src/zp.6502`). Every
+  indexed access to a `ZA_AUTO` wants its `ZA_INDEXEDBY`; a patched or
+  computed jump wants `ZA_CANJUMP`; an array rebuilt by indexed stores
+  wants `ZA_DISCARD`.
+- `ROL` and `ASL` don't touch V; `BIT abs,Y`, `STY abs,X` and `STA zp,Y`
+  don't exist (baron says "No such addressing mode" or uses abs,Y).
+- Generated code with patched operands: assert that each copy's labels
+  sit at the same offsets (`mkrotate.py`) when one routine patches them
+  all through a pointer.
 
 ## House rules
 
