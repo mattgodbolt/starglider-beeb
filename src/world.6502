@@ -14,7 +14,8 @@
 \ turning), and then everything made from them is too: the rotations'
 \ patched code stands as it is, and the matrix and ground_matrix's
 \ constants, which zero page doesn't keep from one step to the next, come
-\ back from the copies kept below.
+\ back from the copies kept below. In a steady turn only the heading
+\ changes, and then so do only its sines and the products they're in.
 .camera
 {
     MOVW ang_p, pl_pitch
@@ -29,6 +30,16 @@ FOR i = 0..5
 NEXT
     JMP same
 .build
+    \ the pitch and roll the last build's? then the rest of what it made
+    \ from them is kept: their sines, their entries alone and the ground
+    \ objects' constants
+    LDA cam_valid : BEQ full
+    LDA ang_p : CMP cam_angles : BNE full
+    LDA ang_p+1 : CMP cam_angles+1 : BNE full
+    LDA ang_r : CMP cam_angles+4 : BNE full
+    LDA ang_r+1 : CMP cam_angles+5 : BNE full
+    JMP turned
+.full
     LDX #5
 .angles
     LDA ang,X : ZA_INDEXEDBY 0..5
@@ -36,6 +47,9 @@ NEXT
     DEX : BPL angles
     LDA #&FF : STA cam_valid
     JSR build_matrix                    ; a full build: its sines are wanted below
+    MOVW cam_s1, build_matrix.m_s1 : MOVW cam_c1, build_matrix.m_c1
+    MOVW cam_s3, build_matrix.m_s3 : MOVW cam_c3, build_matrix.m_c3
+    MOVW cam_d6, build_matrix.m_d6
     \ The ground objects' constants (ground_matrix): their pitch and roll
     \ are the camera's.
     MOVW mul_x, build_matrix.m_s1
@@ -67,6 +81,7 @@ NEXT
     LDA kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
     STA kmag_kept+1,X
     DEX : DEX : BPL kconst_mag
+.made
     LDX #17
     ZA_DISCARD cam
 .camera_copy
@@ -80,6 +95,7 @@ NEXT
 FOR i = 0..17
     LDA cam_kept+i : STA cam+i
 NEXT
+.ground_kept
 FOR i = 0..9
     LDA kmag_kept+i : STA kmag+i
 NEXT
@@ -87,14 +103,35 @@ FOR i = 0..4
     LDA ksign_kept+i : STA ksign+i
 NEXT
     RTS
+.turned
+    \ the heading's sines (as build_matrix makes them), the rest kept
+    MOVW cam_angles+2, ang_h
+    LDA ang_h : STA m_idx : LDA ang_h+1 : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW build_matrix.m_s2, m_sin : MOVW build_matrix.m_c2, m_cos
+    MOVW build_matrix.m_s1, cam_s1 : MOVW build_matrix.m_c1, cam_c1
+    MOVW build_matrix.m_s3, cam_s3 : MOVW build_matrix.m_c3, cam_c3
+    MOVW build_matrix.m_d6, cam_d6
+    MOVW mat+2, cam_kept+2 : MOVW mat+8, cam_kept+8 : MOVW mat+14, cam_kept+14
+    MOVW mul_x, build_matrix.m_c1
+    JSR build_matrix.heading
+    JSR ground_kept
+    JMP made
 }
 \ the angles the camera was last built for (once cam_valid is set), and
-\ what was made from them that zero page doesn't keep
+\ what was made from them that zero page doesn't keep: the matrix, the
+\ ground objects' constants, and the pitch's and roll's sines and their
+\ product
 .cam_valid  EQUB 0
 .cam_angles SKIP 6
 .cam_kept   SKIP 18
 .kmag_kept  SKIP 10
 .ksign_kept SKIP 5
+.cam_s1     SKIP 2
+.cam_c1     SKIP 2
+.cam_s3     SKIP 2
+.cam_c3     SKIP 2
+.cam_d6     SKIP 2
 
 \ ---------------------------------------------------------------------------
 \ coarse_list (&05750): every object within &2020 of the player in z, or

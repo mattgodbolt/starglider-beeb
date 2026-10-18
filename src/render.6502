@@ -111,16 +111,22 @@ ENDMACRO
     ASL m_idx : ROL m_idx+1 : ASL m_idx : ROL m_idx+1 : ASL m_idx : ROL m_idx+1
     JSR sincos : MOVW m_s3, m_sin : MOVW m_c3, m_cos
     \ The ST's products and sums (&04190), taken by the factor they share,
-    \ each sum built in its entry: the same values in any order.
+    \ each sum built in its entry: the same values in any order. First
+    \ those of the pitch and roll alone, which the camera keeps while only
+    \ its heading turns, calling heading with mul_x c1 (world.6502).
     MOVW mul_x, m_s3
     TRIG_BY m_s1 : MOVW m_d6, mul_r
-    TRIG_BY m_c2 : LDA #0 : SEC : SBC mul_r : STA mat+6 : LDA #0 : SBC mul_r+1 : STA mat+7
-    TRIG_BY m_s2 : MOVW mat+10, mul_r
     TRIG_BY m_c1 : MOVW mat+2, mul_r                                ; x' on y
     MOVW mul_x, m_c1
     TRIG_BY m_c3 : MOVW mat+8, mul_r                                ; y' on y
+    LDA #0 : SEC : SBC m_s1 : STA mat+14
+    LDA #0 : SBC m_s1+1 : STA mat+15                                ; z' on y
+.heading
     TRIG_BY m_c2 : MOVW mat+16, mul_r                               ; z' on z
     TRIG_BY m_s2 : MOVW mat+12, mul_r                               ; z' on x
+    MOVW mul_x, m_s3
+    TRIG_BY m_c2 : LDA #0 : SEC : SBC mul_r : STA mat+6 : LDA #0 : SBC mul_r+1 : STA mat+7
+    TRIG_BY m_s2 : MOVW mat+10, mul_r
     MOVW mul_x, m_s2
     TRIG_BY m_d6 : MOVW mat+0, mul_r
     TRIG_BY m_s1 : MOVW m_t, mul_r
@@ -132,8 +138,6 @@ ENDMACRO
     TRIG_BY m_t : ADDW mat+6, mul_r                                 ; y' on x
     MOVW mul_x, m_s1
     TRIG_BY m_d7 : ADDW mat+10, mul_r                               ; y' on z
-    LDA #0 : SEC : SBC m_s1 : STA mat+14
-    LDA #0 : SBC m_s1+1 : STA mat+15                                ; z' on y
     RTS
 }
 
