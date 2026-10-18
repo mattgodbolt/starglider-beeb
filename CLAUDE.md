@@ -44,7 +44,7 @@ make disc       # the disc from a clean tree, as starglider.ssd: the
                 # README links it (github: in jsbeeb's URL, not gh:)
 make spike      # the spike on every captured scene: checked against the
                 # ST's renderer, and timed (tools/scenecheck.py)
-make check      # the sine table against the ST's, make spike, and the
+make check      # sincos against the ST's sine table at every angle, make spike, and the
                 # disc's erasing (tools/erasecheck.mjs)
 make scenes     # capture the scenes in Hatari (slow; needs ../hatari)
 make fetch      # download every version into original/ (not committed)

@@ -3,19 +3,64 @@
 ; the ST's was: pi as 3.14159, and rounded by truncating x + 0.5, which
 ; gives every entry but twelve. Those twelve lie within 0.005 of a tie,
 ; which the ST's own arithmetic rounded the other way; SINE_UP and
-; SINE_DOWN put them back. The table isn't quite periodic or symmetric
-; (pi is short), so the whole of it is kept. tools/sinecheck.py checks it
-; against the ST's.
+; SINE_DOWN put them back.
+;
+; The table isn't quite periodic or symmetric (pi is short), but nearly:
+; its first quarter gives every other entry by symmetry (mirrored in the
+; odd quarters, and in the third and fourth negated as the rounding
+; negates, 1 - v, since truncating x + 0.5 takes a negative value's half
+; towards zero), but for the entries sine_bits marks, which are one more
+; than that in the second and third quarters and one less in the fourth
+; and fifth. sincos (render.6502) puts them together, and
+; tools/sinecheck.py checks it against the ST's table for every angle.
 SINE_ENTRIES = 5120
+SINE_QUARTER = 1024
 SINE_UP = {342, 445, 1003, 1736, 2535}
 SINE_DOWN = {2140, 3722, 3798, 4059, 4195, 4341, 4497}
 FUNCTION st_sine(i) = TRUNC(16384 * SIN(i * 2 * 3.14159 / 4096) + 0.5) + SUM(SINE_UP = i) - SUM(SINE_DOWN = i)
 
-.sine_lo
-FOR i = 0..<SINE_ENTRIES
-    EQUB LO(st_sine(i) AND &FFFF)
+\ What the first quarter gives entry i by symmetry.
+FUNCTION sine_symmetric(i)
+    q = (i DIV SINE_QUARTER) AND 3
+    r = i AND (SINE_QUARTER - 1)
+    IF (q AND 1) = 1
+        v = st_sine(SINE_QUARTER - r)
+    ELSE
+        v = st_sine(r)
+    ENDIF
+    IF q >= 2
+        w = (v <> 0) * (1 - v)
+    ELSE
+        w = v
+    ENDIF
+= w
+
+\ Whether entry i is one that symmetry misses, and where it misses, the
+\ quarter it's in says by how much (+1 or -1).
+FUNCTION sine_missed(i) = st_sine(i) <> sine_symmetric(i)
+FUNCTION sine_off(i)
+    ASSERT NOT(sine_missed(i)) OR st_sine(i) - sine_symmetric(i) = 1 - 2 * (i >= 3 * SINE_QUARTER), "sine entry ", i, " is off by ", st_sine(i) - sine_symmetric(i)
+= sine_missed(i)
+
+\ The first quarter, 0 to 1023 (entry 1024 is 16384): low bytes, then
+\ high, each 1K, from a 1K boundary so a page's number holds i's top bits.
+ALIGN &400
+.sine_qlo
+FOR i = 0..<SINE_QUARTER
+    EQUB LO(st_sine(i))
 NEXT
-.sine_hi
-FOR i = 0..<SINE_ENTRIES
-    EQUB HI(st_sine(i) AND &FFFF)
+.sine_qhi
+FOR i = 0..<SINE_QUARTER
+    EQUB HI(st_sine(i))
 NEXT
+ASSERT st_sine(SINE_QUARTER) = 16384
+
+\ Entries 1024-5119 symmetry misses: entry 1024 + k is bit k AND 7 of
+\ byte k DIV 8.
+.sine_bits
+FOR k = 0..<(SINE_ENTRIES - SINE_QUARTER) DIV 8
+    e = SINE_QUARTER + 8 * k
+    EQUB sine_off(e) + 2 * sine_off(e + 1) + 4 * sine_off(e + 2) + 8 * sine_off(e + 3) + 16 * sine_off(e + 4) + 32 * sine_off(e + 5) + 64 * sine_off(e + 6) + 128 * sine_off(e + 7)
+NEXT
+.sine_mask
+    EQUB 1, 2, 4, 8, 16, 32, 64, 128

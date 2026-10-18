@@ -45,7 +45,10 @@ ENDMACRO
 
 \ Working variables several routines (and the macros) share.
 ZA_AUTO2 acc                ; a row's sum
-ZA_AUTO2 m_idx, m_sin, m_cos  ; sincos's index and results
+ZA_AUTO2 m_idx               ; sincos's index ...
+ZA_AUTO 4, m_sc             ; ... and its results: the sine, then the cosine
+m_sin = m_sc
+m_cos = m_sc + 2
 ZA_AUTO1 ocolour            ; the object's colour, the ST's number
 ZA_AUTO 6, ep               ; an edge's ends in camera space, x y z words
 ZA_AUTO 6, eq

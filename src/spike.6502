@@ -28,6 +28,33 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = SCREEN, cmos = TRUE
 .spike_done
     RTS
 
+\ spike_sines: sincos at every angle, the sine and cosine (4 bytes) for
+\ each into the log's bank in turn, for tools/sinecheck.py.
+.spike_sines
+{
+    ZA_ENTRY
+    ZA_AUTO2 out
+    STZ m_idx : STZ m_idx+1
+    LDA #LO(LOG) : STA out : LDA #HI(LOG) : STA out+1
+.each
+    BANK BANK_SINE
+    JSR sincos
+    LDA #BANK_LOG : STA romsel
+    LDY #3
+.copy
+    LDA m_sc,Y : ZA_INDEXEDBY 0..3
+    STA (out),Y
+    DEY : BPL copy
+    LDA out : CLC : ADC #4 : STA out
+    BCC same
+    INC out+1
+.same
+    INC m_idx : BNE each
+    INC m_idx+1
+    LDA m_idx+1 : CMP #HI(4096) : BNE each
+    RTS
+}
+
 INCLUDE "code.6502"
 ENDSECTION
 

@@ -5,7 +5,7 @@
 #   make run      boot the disc in jsbeeb, screenshot to shots/run.png
 #   make disc     the disc from a clean tree, as starglider.ssd (the README
 #                 links it)
-#   make check    the sine table against the ST's, the spike, and the
+#   make check    sincos against the ST's sine table, the spike, and the
 #                 disc's erasing (tools/erasecheck.mjs)
 #   make spike    the spike on every captured scene, checked against the
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
@@ -89,7 +89,7 @@ build/scenes/%/beeb.json: build/scenes/%/scenes.json $(PRG) tools/mkscene.py too
 	$(PYTHON) -I tools/mkscene.py $(PRG) $< $@
 
 check: build/spike/SPIKE spike $(TARGET)
-	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike/SINE build/spike/symbols.json
+	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike
 	node tools/erasecheck.mjs
 
 spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
