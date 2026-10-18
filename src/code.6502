@@ -72,6 +72,19 @@ INCLUDE "step.6502"
 }
 
 
+\ erase_init: both screens' windows to be cleared before they're first
+\ drawn, as if their erase lists had overflowed, neither showing the
+\ missile view's window (mview.6502); and the marks wiped (render.6502),
+\ as until the first frame their pages hold other things (start.6502's
+\ catalogue, screen_copy's pages, the front end's). Each game's start
+\ (front_main.6502's game_start) takes it, so it's resident, not the
+\ start's, which the lists lie over once a game has run.
+.erase_init
+    STZ erase_stop : STZ erase_stop+1
+    STZ dot_wipes : STZ dot_wipes+1
+    LDA #&FF : STA win_shown : STA win_shown+1
+    JMP marks_wipe
+
 \ objects_clear: every field of every slot to 0.
 .objects_clear
 {

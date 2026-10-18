@@ -296,6 +296,12 @@ await at("end_off", 40);
 near("the end screen's wait, in fields", fields(t), 0x5dc + 1, 3);
 await at("front_title.pass", 10);
 same("the title after the game's end", fe.title);
+// and a game again, which runs: its frames counted
+await pressTo("Space", "game_start", 5);
+await at("engine_run", 30);
+const frames0 = word(sym.frames);
+await tm.runFor(3 * CYCLES);
+if (word(sym.frames) - frames0 < 5) fail("the game after the game's end isn't drawing frames");
 
 console.log(`frontcheck: the start's loads ${times.start.toFixed(2)}s, the title up at ${times.title.toFixed(2)}s; ` +
     `a game's start's loads ${times.started.toFixed(2)}s, ${times.cold.toFixed(2)}s from cold; ` +
