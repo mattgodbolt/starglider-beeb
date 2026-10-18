@@ -10,11 +10,11 @@
 \ number the ST's draws. rng_d0 follows the ST's d0 through every
 \ handler, as a mine's random8 adds whatever the slots before it left.
 \
-\ In the world's bank, for the sine table; ANDY paged. X is the slot; a
-\ handler may take Y, and after any call reloads X from h_slot. What the
-\ ST draws or prints here (the enemies' laser lines, the mines' warnings)
-\ is the drawing's, and isn't here: the laser lines are recorded for it
-\ (enemy_laser).
+\ In the world's bank, for the sine table; ANDY paged. A handler takes its
+\ slot from h_slot into X, may take Y, and after any call reloads X from
+\ h_slot. What the ST draws or prints here (the enemies' laser lines, the
+\ mines' warnings) is the drawing's, and isn't here: the laser lines are
+\ recorded for it (enemy_laser).
 \ ***************************************************************************
 
 ZA_AUTO1 h_slot             ; the slot being handled
@@ -35,35 +35,83 @@ MACRO HDECX lo, hi
     DEC lo,X
 ENDMACRO
 
-\ HASR4 v: the word v four bits right, as asr.w #4.
-MACRO HASR4 v
-    ASRW v : ASRW v : ASRW v : ASRW v
-ENDMACRO
+\ The ST's tables (tools/mkhandlers.py), with the macros angle_to_player's
+\ lookup takes
+INCLUDE "../../build/gen/handlers.6502"
 
+\ The handler by type is handler_gate's (tools/mkhandlers.py): none for
+\ the types whose handler does nothing (type 0's among them), and where
+\ the handler's first test is the draw list's flag or the near list's,
+\ that's tested here, as it costs most of the slots nothing. The ST
+\ clears the homing request ($2D6) after every slot; here the handlers
+\ that make one clear it, so only one there at the start is cleared here,
+\ after the first slot (whose handler sees it, as the ST's does). random32's
+\ state is in zero page meanwhile (h_random32).
+\
+\ The walk stops at the slot past its last (the table has one past the
+\ ST's last, as the silo's records follow), made to look exploding until
+\ then, so that only an exploding slot tests for the end; no handler reads
+\ another slot's exploding.
 .object_handlers
 {
+    ZA_AUTO1 limit                      ; the slot the walk stops at
+    ZA_AUTO1 kept                       ; that slot's own exploding
     STZ shot_n                  ; (for the drawing: this step's shots, enemy_laser's)
     LDX #0
     LDA n_slots : BEQ done
+    LDY homing : BEQ all
+    LDA #1
+.all
+    STA limit
+    LDA rng32 : STA h_rng : LDA rng32+1 : STA h_rng+1
+    LDA rng32+2 : STA h_rng+2 : LDA rng32+3 : STA h_rng+3
+.walk
+    LDY limit
+    LDA ob_exploding,Y : STA kept
+    LDA #1 : STA ob_exploding,Y
+    BRA each
+.next
+    INX
 .each
     LDA ob_exploding,X : BNE exploding
-    LDA ob_type,X : BEQ next
+    LDY ob_type,X
+    LDA handler_gate,Y : BEQ next
+    BIT #GATE_DRAWN OR GATE_NEAR : BNE gated
+.call
     STX h_slot
-    TAY
-    LDA handler_lo,Y : STA h_vec
-    LDA handler_hi,Y : STA h_vec+1
+    TAX
     JSR handler_dispatch
     LDX h_slot
-.next
-    STZ homing                  ; (a handler's request, for its own launch)
-    INX : CPX n_slots : BNE each
-.done
-    RTS
+    INX
+    BRA each
 .exploding
+    CPX limit : BEQ walked
     \ frames 0-31, then the slot is freed (beq on &1F: equality)
     LDA ob_explosion,X : CMP #&1F : BEQ free
     INC ob_explosion,X
     BRA next
+.walked
+    LDA kept : STA ob_exploding,X
+    STZ homing
+    CPX n_slots : BNE rest
+    LDA h_rng : STA rng32 : LDA h_rng+1 : STA rng32+1
+    LDA h_rng+2 : STA rng32+2 : LDA h_rng+3 : STA rng32+3
+.done
+    RTS
+.rest
+    LDA n_slots : STA limit
+    BRA walk
+.gated
+    \ (N is still the gate's bit 7: BIT # sets Z alone)
+    BMI drawn
+    LDY ob_near,X
+    BRA listed
+.drawn
+    LDY ob_drawn,X
+.listed
+    BEQ next
+    AND #&FF EOR (GATE_DRAWN OR GATE_NEAR)
+    BRA call
 .free
     STZ ob_exploding,X : STZ ob_explosion,X : STZ ob_type,X
     TXA : LDY free_n : STA free_stack,Y
@@ -71,21 +119,16 @@ ENDMACRO
     BRA next
 }
 
-\ The types that do nothing (and the loop's tail, on the ST).
-.h_none
-    RTS
-
-\ h_gameover (&0834A, types 28-30): the ST bumps colour 0's hardware
-\ register, which is the drawing's. No code makes these types.
-.h_gameover
-    RTS
-
-\ h_move: on by the velocity, in x and z.
-.h_move
+\ HMOVE, h_move: on by the velocity, in x and z (in line for the
+\ commonest movers).
+MACRO HMOVE
     LDA ob_x_lo,X : CLC : ADC ob_vx_lo,X : STA ob_x_lo,X
     LDA ob_x_hi,X : ADC ob_vx_hi,X : STA ob_x_hi,X
     LDA ob_z_lo,X : CLC : ADC ob_vz_lo,X : STA ob_z_lo,X
     LDA ob_z_hi,X : ADC ob_vz_hi,X : STA ob_z_hi,X
+ENDMACRO
+.h_move
+    HMOVE
     RTS
 
 \ ---------------------------------------------------------------------------
@@ -93,6 +136,7 @@ ENDMACRO
 \ counts) to a missile: +14's byte, the word's high byte here.
 .h_silo
 {
+    LDX h_slot
     HADDX ob_heading_lo, ob_heading_hi, &10
     HDECX ob_timer_b_lo, ob_timer_b_hi
     LDA ob_timer_b_hi,X : BPL done
@@ -111,6 +155,7 @@ ENDMACRO
 \ the others pitching on to a half turn first.
 .h_mine
 {
+    LDX h_slot
     LDA ob_drawn,X : BEQ motion
     LDA ob_cz_hi,X : CMP #&F8 : BMI motion
     CMP #&08 : BPL motion
@@ -151,15 +196,15 @@ ENDMACRO
 \ runs only when dx < -1000, as the ST's does.
 .near_test
 {
-    ZA_AUTO2 d
-    LDA ob_x_lo,X : SEC : SBC pl_x : STA d
-    LDA ob_x_hi,X : SBC pl_x+1 : STA d+1
-    LDA d : CMP #LO(&3E8) : LDA d+1 : SBC #HI(&3E8) : BPL far
-    LDA d : CMP #LO(&FC18) : LDA d+1 : SBC #HI(&FC18) : BPL near
-    LDA ob_z_lo,X : SEC : SBC pl_z : STA d
-    LDA ob_z_hi,X : SBC pl_z+1 : STA d+1
-    LDA d : CMP #LO(&3E8) : LDA d+1 : SBC #HI(&3E8) : BPL far
-    LDA d : CMP #LO(&FC18) : LDA d+1 : SBC #HI(&FC18) : BMI far
+    ZA_AUTO1 d                          ; (each difference's high byte; its low in Y)
+    LDA ob_x_lo,X : SEC : SBC pl_x : TAY
+    LDA ob_x_hi,X : SBC pl_x+1 : STA d
+    CPY #LO(&3E8) : SBC #HI(&3E8) : BPL far
+    CPY #LO(&FC18) : LDA d : SBC #HI(&FC18) : BPL near
+    LDA ob_z_lo,X : SEC : SBC pl_z : TAY
+    LDA ob_z_hi,X : SBC pl_z+1 : STA d
+    CPY #LO(&3E8) : SBC #HI(&3E8) : BPL far
+    CPY #LO(&FC18) : LDA d : SBC #HI(&FC18) : BMI far
 .near
     SEC
     RTS
@@ -176,25 +221,29 @@ ENDMACRO
 \ the one number (frozen fighters still turn and fire).
 .h_fighter
 {
+    LDX h_slot
     LDA enemies_active : BEQ moved
-    JSR h_move
+    HMOVE
 .moved
     JSR near_test : BCC far
     LDA ob_type,X : CMP #27 : BNE near
-    JSR random32
+    JSR h_random32
     LDA rng_d0 : AND #&3F : BEQ laser
     AND #3 : BNE turn
     LDA #&FF : STA homing
+    JSR aim
+    STZ homing
+    RTS
 .to_aim
     JMP aim
 .near
-    JSR random32
+    JSR h_random32
     LDA rng_d0 : AND #&7F : BEQ laser
     AND #7 : BEQ to_aim
 .turn
     JMP turn_to_player
 .far
-    JSR random32
+    JSR h_random32
     LDA rng_d0 : AND #&7F : BEQ laser
     LDA rng_d0 : AND #&1F : BEQ turn
     AND #&0F : BEQ to_aim
@@ -305,31 +354,93 @@ ENDMACRO
     JSR sincos
     MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
     LDX at
-    LDA ob_speed_lo,X : STA mul_x : LDA ob_speed_hi,X : STA mul_x+1
-    MOVW mul_y, trig_sin
-    JSR fmul15
+    \ |speed|: its high byte for vel_part, its low byte the products'
+    \ multiplicand
+    LDA ob_speed_lo,X : STA vel_part.speed
+    LDA ob_speed_hi,X : STA vel_part.speed+1 : BPL s_pos
+    LDA #0 : SEC : SBC vel_part.speed : TAY
+    LDA #0 : SBC vel_part.speed+1 : STA vel_part.ahi
+    TYA
+    BRA s_abs
+.s_pos
+    STA vel_part.ahi
+    LDA vel_part.speed
+.s_abs
+    MUL_SET
+    MOVW vel_part.y, m_sin
+    JSR vel_part
     LDX at
-    LDA #0 : SEC : SBC mul_r : STA ob_vx_lo,X
-    LDA #0 : SBC mul_r+1 : STA ob_vx_hi,X
-    LDA ob_speed_lo,X : STA mul_x : LDA ob_speed_hi,X : STA mul_x+1
-    MOVW mul_y, trig_cos
-    JSR fmul15
+    LDA #0 : SEC : SBC vel_part.r : STA ob_vx_lo,X
+    LDA #0 : SBC vel_part.r+1 : STA ob_vx_hi,X
+    MOVW vel_part.y, m_cos
+    JSR vel_part
     LDX at
-    LDA mul_r : STA ob_vz_lo,X : LDA mul_r+1 : STA ob_vz_hi,X
+    LDA vel_part.r : STA ob_vz_lo,X : LDA vel_part.r+1 : STA ob_vz_hi,X
+    RTS
+}
+
+\ vel_part: r = floor(speed y / 32768), as muls, asl.l #1, swap make it,
+\ for y a sine (|y| <= 16384). |speed| below 512 (ahi, its high byte, 0
+\ or 1) takes the products of its low byte (MUL_SET) with |y|'s bytes, a
+\ product P of 23 bits at most, signed after; any other, fmul15.
+.vel_part
+{
+    ZA_AUTO2 speed, y, r
+    ZA_AUTO1 ahi, neg, p0, p1, p2, t
+    LDA ahi : CMP #2 : BCC small
+    MOVW mul_x, speed : MOVW mul_y, y
+    JSR fmul15
+    MOVW r, mul_r
+    RTS
+.small
+    LDA y+1 : EOR speed+1 : STA neg
+    LDA y+1 : BPL y_pos
+    NEGW y
+.y_pos
+    LDY y : MUL8 p0 : STA p1
+    LDY y+1 : MUL8 t : STA p2
+    LDA p1 : CLC : ADC t : STA p1
+    BCC carried
+    INC p2
+.carried
+    LDA ahi : BEQ low
+    LDA p1 : CLC : ADC y : STA p1
+    LDA p2 : ADC y+1 : STA p2
+.low
+    \ P >> 15; for a negative product, its negation less 1 if P's low 15
+    \ bits aren't all 0 (the floor)
+    LDA p1 : ASL A : LDA p2 : ROL A
+    BIT neg : BMI negative
+    STA r : STZ r+1
+    RTS
+.negative
+    STA t
+    LDA p1 : AND #&7F : ORA p0 : STA p0
+    LDA #0 : SEC : SBC p0               ; (C: P's low 15 bits all 0)
+    LDA #0 : SBC t : STA r
+    LDA #0 : SBC #0 : STA r+1
     RTS
 }
 
 \ turn_by: the heading = h0 + (h_bear - h0) asr 4, h0 the heading masked
 \ (kept in the heading and rng_d0).
 .turn_by
+{
     LDA ob_heading_lo,X : STA rng_d0
     LDA ob_heading_hi,X : AND #&0F : STA rng_d0+1
+    \ (h_bear is 0-&FFF too, so the difference's top four bits are its
+    \ sign's, and asr 4 leaves its sign above bits 4-11)
     LDA h_bear : SEC : SBC rng_d0 : STA h_t
-    LDA h_bear+1 : SBC rng_d0+1 : STA h_t+1
-    HASR4 h_t
-    LDA rng_d0 : CLC : ADC h_t : STA ob_heading_lo,X
-    LDA rng_d0+1 : ADC h_t+1 : STA ob_heading_hi,X
+    LDA h_bear+1 : SBC rng_d0+1
+    LDY #0 : CMP #&80 : BCC up
+    DEY
+.up
+    ASL A : ASL A : ASL A : ASL A : STA h_t+1
+    LDA h_t : LSR A : LSR A : LSR A : LSR A : ORA h_t+1
+    CLC : ADC rng_d0 : STA ob_heading_lo,X
+    TYA : ADC rng_d0+1 : STA ob_heading_hi,X
     RTS
+}
 
 \ ---------------------------------------------------------------------------
 \ h_wanderer (&07CA4): nothing while frozen; on, and 1 in 64 it turns by
@@ -337,8 +448,9 @@ ENDMACRO
 .h_wanderer
 {
     LDA enemies_active : BEQ done
-    JSR h_move
-    JSR random32
+    LDX h_slot
+    HMOVE
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&3F : STA rng_d0 : BEQ turn
     AND #&0F : STA rng_d0 : BEQ laser
@@ -347,7 +459,7 @@ ENDMACRO
 .laser
     JMP enemy_laser
 .turn
-    JSR random32
+    JSR h_random32
     LDA rng_d0 : AND #&1F : SEC : SBC #&10 : STA rng_d0
     LDA #0 : SBC #0 : STA rng_d0+1
     LDA ob_heading_lo,X : CLC : ADC rng_d0 : STA ob_heading_lo,X
@@ -361,6 +473,7 @@ ENDMACRO
 \ count less 1). It doesn't heed the freeze.
 .h_neutron
 {
+    LDX h_slot
     JSR h_move
     LDA pl_y : SEC : SBC ob_y_lo,X : STA rng_d0
     LDA pl_y+1 : SBC ob_y_hi,X : STA rng_d0+1
@@ -409,6 +522,7 @@ ENDMACRO
 \ faces the player again, heading half round from the bearing.
 .h_homing
 {
+    LDX h_slot
     JSR h_move
     LDA pl_y : SEC : SBC ob_y_lo,X : STA rng_d0
     LDA pl_y+1 : SBC ob_y_hi,X : STA rng_d0+1
@@ -450,7 +564,7 @@ ENDMACRO
     STZ shields : STZ shields+1
 .shielded
     LDA ob_cz_lo,X : ORA ob_cz_hi,X : BEQ done
-    JSR random32
+    JSR h_random32
     JSR shot_record
     LDA #LO(&20) : STA flash0 : LDA #HI(&20) : STA flash0+1
     LDA #0 : LDX #1
@@ -492,11 +606,15 @@ ENDMACRO
 .done
     RTS
 .on
+    LDX h_slot
     JSR near_test : BCC far
-    JSR random32
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&7F : STA rng_d0 : BNE asked
-    LDA #&FF : STA homing
+    LDA #&FF : STA homing           ; (the number's low bits 0 too: it aims)
+    JSR aim
+    STZ homing
+    RTS
 .asked
     LDA rng_d0 : AND #3 : STA rng_d0 : BEQ to_aim
     JSR angle_to_player
@@ -517,20 +635,23 @@ ENDMACRO
 .drive
     JSR h_move
     HDECX ob_timer_b_lo, ob_timer_b_hi
-    JSR random32
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&0F : STA rng_d0 : BEQ to_aim
     RTS
 }
 
 \ ---------------------------------------------------------------------------
+\ The handlers object_handlers calls only for an object in the near list
+\ (GATE_NEAR) or the draw list (GATE_DRAWN), the ST's first test in each.
+\
 \ h_juno (&08174): near, 1 in 8 a missile (never homing: nothing asks),
 \ unaligned; else a sixteenth of the way round to face half round from
 \ the bearing. Its freeze is the launch's alone.
 .h_juno
 {
-    LDA ob_near,X : BEQ done
-    JSR random32
+    LDX h_slot
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #7 : STA rng_d0 : BEQ launch_now
     JSR angle_to_player
@@ -539,7 +660,6 @@ ENDMACRO
     JSR turn_by
     LDA ob_heading_lo,X : STA rng_d0                ; (the ST's d0: the heading)
     LDA ob_heading_hi,X : STA rng_d0+1
-.done
     RTS
 .launch_now
     JMP launch
@@ -549,19 +669,20 @@ ENDMACRO
 \ for a homing missile, unaligned.
 .h_pyramid
 {
-    LDA ob_near,X : BEQ done
     LDA level+1 : BNE spin
     LDA level : CMP #1 : BEQ done
 .spin
+    LDX h_slot
     LDA ob_heading_lo,X : SEC : SBC #&40 : STA ob_heading_lo,X
     BCS spun
     DEC ob_heading_hi,X
 .spun
-    JSR random32
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&0F : STA rng_d0 : BNE done
     LDA #&FF : STA homing
-    JMP launch
+    JSR launch
+    STZ homing
 .done
     RTS
 }
@@ -570,15 +691,14 @@ ENDMACRO
 \ spins, and 1 in 8 aims as the tri-launcher does.
 .h_old_pyramid
 {
-    LDA ob_near,X : BEQ done
+    LDX h_slot
     LDA ob_heading_lo,X : SEC : SBC #&40 : STA ob_heading_lo,X
     BCS spun
     DEC ob_heading_hi,X
 .spun
-    JSR random32
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #7 : STA rng_d0 : BEQ to_aim
-.done
     RTS
 .to_aim
     JMP h_tri.aim
@@ -588,7 +708,7 @@ ENDMACRO
 \ it aims, its missiles heading half round from the bearing.
 .h_tri
 {
-    LDA ob_near,X : BEQ done
+    LDX h_slot
     LDA ob_heading_lo,X : SEC : SBC #&60 : STA ob_heading_lo,X
     BCS aim
     DEC ob_heading_hi,X
@@ -605,11 +725,10 @@ ENDMACRO
 \ h_type3 (&0821A): drawn, it fires 1 in 32, frozen or not.
 .h_type3
 {
-    LDA ob_drawn,X : BEQ done
-    JSR random32
+    LDX h_slot
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&1F : STA rng_d0 : BEQ laser
-.done
     RTS
 .laser
     JMP enemy_laser
@@ -620,9 +739,10 @@ ENDMACRO
 .h_beam
 {
     LDA level : CMP #3 : LDA level+1 : SBC #0 : BMI done
-    JSR random32
+    JSR h_random32
     LDA rng_d0+1 : AND #&07 : STA rng_d0+1
     ORA rng_d0 : BNE done
+    LDX h_slot
     STZ ob_type,X
 .done
     RTS
@@ -631,78 +751,166 @@ ENDMACRO
 \ ---------------------------------------------------------------------------
 \ angle_to_player (&08390): h_bear = the ST's bearing from the player to
 \ the object, T - base: base &C00 for dx >= 0, &400 for dx < 0, and T from
-\ table A by dz / dx when |dz| >= |dx| (the signed compare of the neg.w
-\ values, so -32768 stays least), else table B by (dz << 8) / dx; each
-\ quotient clamped by the N flags of q - &FF and q - &FF01, then the
-\ table's entry (q + &FF) & &1FF (one below its centre, as the ST's).
-\ divs by 0 (EmuTOS's vector 5 is an rte) or overflowing leaves the
-\ dividend, whose low word is then q. rng_d0 is dx, as the ST's d0.
+\ table A by q = dz / dx when |dz| >= |dx| (the signed compare of the
+\ neg.w values, so -32768 stays least), else table B by q = (dz << 8) /
+\ dx; q clamped by the N flags of q - &FF and q - &FF01, else the table's
+\ entry (q + &FF) & &1FF (one below its centre, as the ST's). divs by 0
+\ (EmuTOS's vector 5 is an rte) or overflowing leaves the dividend, whose
+\ low word is then q. rng_d0 is dx, as the ST's d0.
+\
+\ With neither dx nor dz -32768 and dx not 0, |q| is |dz| / |dx| (table A,
+\ at least 1) or (|dz| << 8) / |dx| (table B, below 256): from 256 up it
+\ isn't made, as the clamp is decided by then (q - &FF's N flag is clear
+\ again only from -32514 down). The rest go the ST's way (slow).
 .angle_to_player
 {
-    ZA_AUTO2 dx, dz, adx, adz, q, m, p, tab
-    ZA_AUTO1 base, top, bottom, neg
+    ZA_AUTO2 dx, dz, r, q
+    ZA_AUTO1 base, neg, n
+    ZA_AUTO1 top                        ; the clamp's high byte: &4 table A, &2 table B
     LDA ob_x_lo,X : SEC : SBC pl_x : STA dx : STA rng_d0
     LDA ob_x_hi,X : SBC pl_x+1 : STA dx+1 : STA rng_d0+1
     LDA ob_z_lo,X : SEC : SBC pl_z : STA dz
     LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
-    LDA #HI(&C00) : LDY dx+1 : BPL based
+    EOR dx+1 : STA neg                  ; (bit 7: q's sign, if it isn't 0)
+    LDA #HI(&C00) : BIT dx+1 : BPL based
     LDA #HI(&400)
 .based
     STA base
-    MOVW adx, dx : LDA adx+1 : BPL dx_pos
-    NEGW adx
+    LDA dx : BNE dx_fits
+    LDA dx+1 : BNE dx_some
+    JMP dx_zero
+.dx_some
+    CMP #&80 : BNE dx_fits
+    JMP dx_least
+.dx_fits
+    LDA dz : BNE dz_fits
+    LDA dz+1 : CMP #&80 : BNE dz_fits
+    JMP dz_least
+.dz_fits
+    LDA dx+1 : BPL dx_pos
+    NEGW dx
 .dx_pos
-    MOVW adz, dz : LDA adz+1 : BPL dz_pos
-    NEGW adz
+    LDA dz+1 : BPL dz_pos
+    NEGW dz
 .dz_pos
-    \ the dividend: ext.l dz, or for table B, that << 8
-    LDA dz+1 : AND #&80 : BEQ ext
-    LDA #&FF
-.ext
-    STA mul_p+3 : STA mul_p+2
-    CMPS16 adz, adx : BMI path_b
-    MOVW mul_p, dz
-    LDA #LO(atan_a) : STA tab : LDA #HI(atan_a) : STA tab+1
-    LDA #HI(&400) : STA top : LDA #HI(&FC00) : STA bottom
+    LDA dz : CMP dx : LDA dz+1 : SBC dx+1 : BCC path_b
+    LDA #HI(&400) : STA top
+    \ |q| from 256 (|dz| >> 8 >= |dx|) is clamped: to the top if q is
+    \ positive or -32514 and below (|dx| 1), else to the bottom
+    LDA dz+1 : CMP dx : LDA #0 : SBC dx+1 : BCC a_divide
+    BIT neg : BPL clamp_top
+    LDA dx+1 : BNE clamp_bottom
+    LDA dx : CMP #1 : BNE clamp_bottom
+    LDA dz : CMP #LO(32514) : LDA dz+1 : SBC #HI(32514) : BCS clamp_top
+    BRA clamp_bottom
+.a_divide
+    LDA dz : STA n
+    LDA dz+1 : STA r
+    LDA #0
     BRA divide
 .path_b
-    LDA dz+1 : STA mul_p+2
-    LDA dz : STA mul_p+1 : STZ mul_p
-    LDA #LO(atan_b) : STA tab : LDA #HI(atan_b) : STA tab+1
-    LDA #HI(&200) : STA top : LDA #HI(&FE00) : STA bottom
+    LDA #HI(&200) : STA top
+    STZ n
+    LDA dz : STA r
+    LDA dz+1
 .divide
-    MOVW q, mul_p
-    LDA dx : ORA dx+1 : BEQ clamp
-    MOVW div_d, dx
-    JSR sdiv32 : BCS clamp
-    MOVW q, div_q
-.clamp
-    \ the clamps' constants have low bytes 0; T's low byte is then 0
-    LDA q : CMP #&FF : LDA q+1 : SBC #0 : BPL clamp_top
-    LDA q : CMP #&01 : LDA q+1 : SBC #&FF : BPL lookup
-    LDA bottom : BRA clamped
+    \ n's 8 bits of quotient, from the remainder (r, A) below |dx|: each
+    \ step rotates the last bit (C) into n and n's top into the remainder
+    LDY #8
+.step
+    ROL n : ROL r : ROL A
+    CMP dx+1 : BCC zero : BNE one
+    LDX r : CPX dx : BCC zero
+.one
+    TAX : LDA r : SBC dx : STA r : TXA : SBC dx+1
+.zero
+    DEY : BNE step
+    ROL n
+    LDA n
+    BIT neg : BMI minus
+    CMP #&FF : BEQ clamp_top
+    CMP #0 : BNE plus
+    BRA minus
+.clamp_bottom
+    LDA #0 : SEC : SBC top
+    BRA clamped
 .clamp_top
     LDA top
 .clamped
-    STA h_bear+1 : STZ h_bear
-    BRA based_off
-.lookup
-    \ the entry q + &FF is 256 + (q - 1): kept as its upper half H, the
-    \ lower negated (tools/mkhandlers.py)
-    LDA q : SEC : SBC #1 : STA m
-    LDA q+1 : SBC #0 : STA m+1 : STA neg
-    BPL m_pos
-    NEGW m
-.m_pos
-    LDA m : ASL A : STA p : LDA m+1 : ROL A : STA p+1
-    ADDW p, tab
-    LDY #0 : LDA (p),Y : STA h_bear
-    INY : LDA (p),Y : STA h_bear+1
-    LDA neg : BPL based_off
-    NEGW h_bear
+    \ the clamps' constants have low bytes 0
+    STZ h_bear
 .based_off
-    LDA h_bear+1 : SEC : SBC base : STA h_bear+1
+    SEC : SBC base : STA h_bear+1
     RTS
-}
 
-INCLUDE "../../build/gen/handlers.6502"
+\ The entry, by top's table
+.plus
+    \ q = A, from 1: entry 256 + q - 1, which H keeps as itself
+    TAY
+    LDX top : CPX #HI(&200) : BEQ plus_b
+    LDA atan_a_lo - 1,Y : STA h_bear
+    ATAN_A_HI_PLUS
+    BRA based_off
+.plus_b
+    LDA atan_b_lo - 1,Y : STA h_bear
+    ATAN_B_HI_PLUS
+    BRA based_off
+.minus
+    \ q = -A, or 0: entry 256 - (A + 1), which H keeps negated
+    TAY
+    LDX top : CPX #HI(&200) : BEQ minus_b
+    ATAN_A_HI_MINUS : TAX
+    LDA #0 : SEC : SBC atan_a_lo + 1,Y
+    BRA minus_hi
+.minus_b
+    ATAN_B_HI_MINUS : TAX
+    LDA #0 : SEC : SBC atan_b_lo + 1,Y
+.minus_hi
+    STA h_bear
+    TXA : EOR #&FF : ADC #0             ; (C: no borrow, the low byte 0)
+    BRA based_off
+
+\ The ST's way: dx 0 divides by 0, leaving q dz in table A (dz -32768
+\ takes table B, by the low word of dz << 8, 0); dx -32768 takes table A,
+\ by 1 for dz -32768, else 0; dz -32768 otherwise takes table B, by divs.
+.dx_zero
+    LDA dz : BNE by_dz
+    LDA dz+1 : CMP #&80 : BNE by_dz
+.b_zero
+    LDA #HI(&200) : STA top
+    LDA #0 : BRA to_minus
+.by_dz
+    LDA #HI(&400) : STA top
+    MOVW q, dz
+    BRA clamp
+.dx_least
+    LDA #HI(&400) : STA top
+    LDA dz : BNE a_zero
+    LDA dz+1 : CMP #&80 : BNE a_zero
+    LDA #1 : BRA to_plus
+.a_zero
+    LDA #0 : BRA to_minus
+.dz_least
+    LDA #HI(&200) : STA top
+    STZ mul_p : STZ mul_p+1
+    LDA #&80 : STA mul_p+2 : LDA #&FF : STA mul_p+3
+    MOVW div_d, dx
+    JSR sdiv32 : BCS b_zero
+    MOVW q, div_q
+.clamp
+    LDA q : CMP #&FF : LDA q+1 : SBC #0 : BMI not_top
+    JMP clamp_top
+.not_top
+    LDA q : CMP #&01 : LDA q+1 : SBC #&FF : BPL in_range
+    JMP clamp_bottom
+.in_range
+    \ q from -255 to 254
+    LDA q+1 : BMI q_minus
+    LDA q : BEQ to_minus
+.to_plus
+    JMP plus
+.q_minus
+    LDA #0 : SEC : SBC q
+.to_minus
+    JMP minus
+}

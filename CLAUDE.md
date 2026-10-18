@@ -124,6 +124,11 @@ the ST's mouse moves.
   ANDY what its panel shows, so only changes are drawn. What the ST
   prints, the logic records in flags of the port's own (`world_text`,
   `level_text`, `mine_text`, `dock_text`), which the panel draws.
+- object_handlers' walk (`src/logic/handlers.6502`) ends at the slot past
+  its last, made to look exploding while it runs: no handler may read
+  another slot's exploding byte. And it copies random32's state into zero
+  page for its own `h_random32`: anything the handlers call takes numbers
+  from that, never from random32 or rng32 directly.
 - Code that sets ACCCON's X from main RAM must lie below &3000
   (`src/cockpit.6502`, the interrupt handler): `ASSERT` it. Code in a
   bank may set it too (the panel), but mustn't read &3000-&7FFF meanwhile:

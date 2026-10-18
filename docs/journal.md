@@ -955,3 +955,38 @@ then they're Claude's to make (Matt, 2026-10-18), recorded as decisions
 like any other, for Matt to revisit. Decisions 31 to 33 are the first:
 the rotations' near box and slack, and carrying relevance over.
 
+### The handlers' cost
+
+object_handlers was three quarters of a step's logic: about 25,000 cycles
+a step on the disc at level 1's start, 33,000 at most. It is now 18,800,
+and 24,200 at most (measured 2026-10-18). With it the disc draws 5.47
+frames a second flying straight, holding 12.5 steps (`make fps`, from
+5.10). Every routine still matches the ST on every capture.
+
+- **The walk skips what does nothing.** The handler by type is now a gate
+  (`tools/mkhandlers.py`): none for the types whose ST handler does
+  nothing the port keeps. For the five whose first test is the near or
+  draw list's flag, the walk tests the flag itself, so most slots cost no
+  call. The call is one JMP (abs,X) in main RAM. The ST clears the homing
+  request after every slot; here the three handlers that make one clear
+  it, and one left at the start is cleared after the first slot, as the
+  ST's is. The walk stops at the slot past its last, made to look
+  exploding until then, so only an exploding slot tests for the end.
+- **random32 in zero page.** The handlers draw dozens of numbers a step,
+  so the walk copies random32's state into zero page for its own copy of
+  the routine.
+- **angle_to_player's quotient in 8 bits.** Away from dx 0 and the
+  -32768s, only the quotient's low byte matters, since from 256 up the
+  clamp is decided. So eight steps of shift and subtract make it, instead
+  of the 68000's divs. The arctan tables keep their low bytes alone;
+  their high bytes are steps, counted by generated code.
+- **set_velocity by bytes.** Every speed the game sets is below 512, so
+  speed times a sine fits 23 bits, made from two 8-bit products each.
+
+A differential test ran the port's old routines against the new ones from
+the same states: the handlers on capture states perturbed with homing
+requests, launchers near the player, and random types, flags and
+explosions; angle_to_player on every dz for twelve pairs of dx and the
+reverse; set_velocity on every heading for every speed from -600 to 600.
+No case differed.
+
