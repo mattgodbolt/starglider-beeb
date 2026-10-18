@@ -9,12 +9,37 @@
 .sfx_start
     RTS
 
-\ sample_start (the ST's &01A50): speech clip A (1-4: clare1-4), as the
-\ ST's callers start it; with C set, only if no clip is playing (the
-\ callers that test D_01E56 first). It changes no state the game's logic
-\ reads.
+\ The samples sample_start plays (sample_clip), each the ST's: the title
+\ song (star) and Clare Edgeley's four speeches (clare1 to clare4).
+SAMPLE_SONG    = 0
+SAMPLE_LAUNCH  = 1                  ; a missile launched (L)
+SAMPLE_DOCKED  = 2                  ; at the silo tunnel's end
+SAMPLE_SHIELDS = 3                  ; the shields low
+SAMPLE_ENERGY  = 4                  ; the energy low
+
+\ sample_start (the ST's &01A50): sample_clip, if the sound is on. The
+\ caller sets sample_clip and the ST's length and rate of it (sample_len,
+\ sample_tacr, sample_tadr) first, as the ST's sets &A0, &A4, &2CF and
+\ &2D0. The bytes left are what the logic reads back: while they're not 0
+\ the speech warnings wait, and the player (to come) counts them down.
 .sample_start
+{
+    LDA sound_on : BEQ off
+    LDX #3
+.len
+    LDA sample_len,X : STA sample_left,X
+    DEX : BPL len
+.off
     RTS
+}
+
+\ speech: sample_clip at the speeches' rate (Timer A control 4, data 8:
+\ 6144Hz on the ST), sample_len's high word 0: its low word set first.
+.speech
+    STZ sample_len+2 : STZ sample_len+3
+    LDA #4 : STA sample_tacr
+    LDA #8 : STA sample_tadr
+    JMP sample_start
 
 \ sample_stop (Q's, and the ST's &02A30): the clip playing, if one is, to
 \ end at its next sample (the ST sets its bytes left, &01E56, to 1).

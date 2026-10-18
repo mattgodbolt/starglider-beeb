@@ -9,15 +9,8 @@
 \ The projection's shift ($212, colour), which the laser's boxes use.
 LASER_SHIFT = PROJ_SHIFT
 
-\ The laser's box half-height by type (&0ACF2), as the ST indexes it:
-\ types 30 and 31 read the table after it. (The half-width is &0ACB6,
-\ size_z.)
-.size_y_lo
-    EQUB 0, 134, 240, 34, 14, 80, 180, 128, 72, 132, 134, 120, 50, 120, 180, 164
-    EQUB 84, 0, 180, 120, 90, 72, 0, 60, 60, 60, 120, 210, 0, 0, &E8, &E8
-.size_y_hi
-    EQUB 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1
-    EQUB 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3
+\ The laser's box half-height by type is size_y (build/gen/collide.6502,
+\ the ram's): its half-width is size_z.
 
 \ A laser kill's score by type (&0AE9A, BCD): types 30 and 31 read the
 \ table after it (&0AED6).

@@ -35,7 +35,7 @@ ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
 SCENES   = flight towers docked
 SOURCES  = $(wildcard src/*.6502 src/logic/*.6502)
-GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502
+GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/collide.6502
 
 # A failed step leaves no half-made target behind (asm.sh fails on a
 # warning after baron has written its output).
@@ -95,6 +95,9 @@ build/gen/xform.6502: tools/mkxform.py | build/gen
 build/gen/objects.6502 build/gen/objects.json &: tools/mkobjects.py | build/gen
 	python3 -I tools/mkobjects.py build/gen
 
+build/gen/collide.6502: $(PRG) tools/mkcollide.py | build/gen
+	$(PYTHON) -I tools/mkcollide.py $(PRG) build/gen
+
 # The cockpit, from the ST's RESULT.TRA (on its disc, beside STAR.PRG).
 build/gen/cockpit.bin: $(PRG) tools/mkcockpit.py | build/gen
 	$(PYTHON) -I tools/mkcockpit.py build/st/disc/RESULT.TRA --screen $@
@@ -122,7 +125,7 @@ spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	done
 
 # The logic's routines, each on every capture (tools/logicrun.mjs's ROUTINES).
-LOGIC    = animate flight keys handlers world world_after world_whole
+LOGIC    = animate flight keys handlers world world_after world_whole collide message frame_end post mine
 STEPS    = $(patsubst tests/st/steps_%.txt,%,$(wildcard tests/st/steps_*.txt))
 
 logic: build/spike/SPIKE

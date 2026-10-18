@@ -66,6 +66,8 @@ def st_bytes(e):
         n = e["count"]
     elif k == "slots":
         n = 4 * e["count"]
+    elif k == "slotsdown":
+        return [(r, o - 4 * e["count"] + i) for i in range(4 * e["count"])]
     return [(r, o + i) for i in range(n)]
 
 
@@ -113,7 +115,7 @@ def variables(syms):
                 e["count"] = args[0]
             elif kind in ("wlo", "whi", "barr"):
                 e["count"], e["stride"] = args
-            elif kind == "slots":
+            elif kind in ("slots", "slotsdown"):
                 e["count"] = args[0]
             elif kind not in SIZES:
                 raise SystemExit(f"{path}: {name}: no such kind {kind}")

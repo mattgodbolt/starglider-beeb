@@ -4,16 +4,191 @@
 \ and the post-frame tests (&01F30: the level change, game over, the
 \ warnings, ramming's cost, the energy drain, the ground scrape)
 \
-\ To be transcribed exactly (docs/research/st-logic.md, "The main loop,
-\ the post-frame tests, game over, the level change and init_objects" and
+\ Exactly the ST's (docs/research/st-logic.md, "The main loop, the
+\ post-frame tests, game over, the level change and init_objects" and
 \ "The frame's end, the score, the interrupts and world_render's logic").
+\ What the ST prints, the port's screen layer is to draw: level_text,
+\ dock_text and collide.6502's mine_text say when.
 \ ***************************************************************************
 
+\ level_message (&0260C): 'LEVEL n' and 'YOU NOW HAVE MANUAL CONTROL!' on
+\ the frame just drawn, while the count lasts; it stops in the missile
+\ view.
 .level_message
+{
+    STZ level_text
+    LDA level_msg : ORA level_msg+1 : BEQ done
+    LDA missile_view : BNE done
+    LDA level_msg : BNE low
+    DEC level_msg+1
+.low
+    DEC level_msg
+    DEC level_text
+.done
     RTS
+}
 
+\ frame_end_logic (&08EC2): the frame counted, and the flash taken for
+\ colour 0 from this frame's end, as the ST writes it to the palette.
 .frame_end_logic
+{
+    INC frame_count : BNE counted
+    INC frame_count+1
+.counted
+    MOVW flash_shown, flash0
+    STZ flash0 : STZ flash0+1
+    RTS
+}
+
+\ post_frame (&01F30-&0215F): after the frame's end, in the ST's order.
+\ It returns at once to a level change or a game over, which the frame
+\ loop then acts on: level_start, or the end. Where the ST ends the game
+\ (&02140, &02150) it sets game_over and goes on to the next frame, which
+\ runs whole before the end. The d0 the ST leaves reaches no random8:
+\ world_render sets its own before its first.
+.post_frame
+{
+    STZ dock_text : STZ mine_text
+    LDA level_changed : BEQ steady
+    RTS
+.steady
+    LDA game_over : ORA game_over+1 : BEQ playing
+    RTS
+.playing
+    \ the warnings: below &2EE0 (unsigned), no speech playing, and a
+    \ frame count a multiple of 128. With the sound on, the shields' speech
+    \ keeps the energy's from starting
+    LDA shields : CMP #LO(&2EE0) : LDA shields+1 : SBC #HI(&2EE0) : BCS shields_ok
+    JSR quiet : BNE shields_ok
+    LDA #SAMPLE_SHIELDS : STA sample_clip
+    LDA #LO(&1680) : STA sample_len : LDA #HI(&1680) : STA sample_len+1
+    JSR speech
+.shields_ok
+    LDA energy : CMP #LO(&2EE0) : LDA energy+1 : SBC #HI(&2EE0) : BCS energy_ok
+    JSR quiet : BNE energy_ok
+    LDA #SAMPLE_ENERGY : STA sample_clip
+    LDA #LO(&1B00) : STA sample_len : LDA #HI(&1B00) : STA sample_len+1
+    JSR speech
+.energy_ok
+    LDA shields : ORA shields+1 : BNE alive
+    JMP shields_out
+.alive
+    \ at the silo tunnel's end: the docked texts (on the screen now shown)
+    LDA launch_state+1 : BNE launching
+    LDA launch_state : CMP #&1E : BNE launching
+    DEC dock_text
+.launching
+    \ a ram costs only in flight, not docked or launching
+    LDA launch_state : ORA launch_state+1 : BNE costs
+    LDA ram_hit : BEQ costs
+    JMP ram_damage
+}
+\ costs (&02036): the cheat's refill, the energy drain and the ground
+\ scrape.
+.costs
+{
+    ZA_AUTO2 t
+    LDA cheat_mode : BEQ drain
+    LDA #LO(&55F0) : STA energy : LDA #HI(&55F0) : STA energy+1
+    LDA #LO(&9C40) : STA shields : LDA #HI(&9C40) : STA shields+1
+    LDA #LO(&7530) : STA laser_energy : LDA #HI(&7530) : STA laser_energy+1
+.drain
+    \ (speed asr 4) and &1FF: the speed's bits 4 to 12, whatever its sign;
+    \ only a borrow ends the game, so the energy can sit at 0
+    LDA speed+1 : STA t+1 : LDA speed
+    LSR t+1 : ROR A : LSR t+1 : ROR A : LSR t+1 : ROR A : LSR t+1 : ROR A
+    STA t : LDA t+1 : AND #1 : STA t+1
+    LDA energy : SEC : SBC t : TAX
+    LDA energy+1 : SBC t+1 : BCS drained
+    JMP energy_out
+.drained
+    STA energy+1 : STX energy
+    \ the scrape: at the ground (y >= -20, signed), moving, and not docked,
+    \ in the missile view or refuelling
+    LDA docked : ORA missile_view : ORA refuelling : BNE done
+    LDA speed : ORA speed+1 : BEQ done
+    CMPS16 pl_y, #-20 : BMI done
+    LDA shields : SEC : SBC #LO(300) : TAX
+    LDA shields+1 : SBC #HI(300) : BCS scraped
+    JMP shields_out
+.scraped
+    STA shields+1 : STX shields
+    LDA #3 : LDX #1
+    JSR sfx_start
+.done
+    RTS
+}
+
+\ ram_damage (&020BA): the flash and the sound, every ram; then for one
+\ that isn't a silo, the ram score if it was destroyed this frame (and
+\ isn't an enemy missile or indestructible), and outside the missile view
+\ a hit counted, the roll's jolt from random8 and the shields' loss by the
+\ level and type. A loss of exactly what's left carries on: the next
+\ frame's test ends the game. Rejoins costs.
+.ram_damage
+{
+    ZA_AUTO1 type
+    ZA_AUTO2 t
+    LDA #LO(&555) : STA flash0 : LDA #HI(&555) : STA flash0+1
+    LDA #1 : LDX #1
+    JSR sfx_start
+    LDY ram_obj : CPY #&FF : BEQ rejoin
+    LDA ob_type,Y : STA type
+    CMP #6 : BNE scoring
+.rejoin
+    JMP costs
+.scoring
+    \ the score: the whole flags byte 0 (an enemy missile's 1 scores nothing)
+    LDA ob_flags,Y : BNE unscored
+    LDA ob_exploding,Y : BEQ unscored
+    LDX type
+    LDA ram_score_lo,X : STA pending_score : LDA ram_score_hi,X : STA pending_score+1
+    LDA missile_view : BNE rejoin
+    INC hits_taken : BNE unscored
+    INC hits_taken+1 : BNE unscored
+    INC hits_taken+2 : BNE unscored
+    INC hits_taken+3
+.unscored
+    LDA missile_view : BNE rejoin
+    \ the jolt: random8 with the ST's d0 the type x 2, then (r and &3E) -
+    \ &20 on the roll's jolt
+    LDA type : ASL A : STA rng_d0 : STZ rng_d0+1
+    JSR random8
+    LDA rng_d0 : AND #&3E : SEC : SBC #&20 : STA t
+    LDA #0 : SBC #0 : STA t+1
+    ADDW jolt, t
+    \ the loss: the level's table (levels past 15 take 15's: a decision to
+    \ come, as the ST reads past its 16 there) by the type
+    LDX level : CPX #RAM_COST_LEVELS : BCC table
+    LDX #RAM_COST_LEVELS - 1
+.table
+    LDA ram_cost_at,X : CLC : ADC type : TAX
+    LDA shields : SEC : SBC ram_cost_lo,X : STA t
+    LDA shields+1 : SBC ram_cost_hi,X : BCC out
+    STA shields+1 : LDA t : STA shields
+    JMP costs
+.out
+    JMP shields_out
+}
+
+\ shields_out (&02140) and energy_out (&02150): the game ends after the
+\ next frame.
+.shields_out
+    STZ shields : STZ shields+1
+    LDA #2 : STA game_over : STZ game_over+1
+    RTS
+.energy_out
+    STZ energy : STZ energy+1
+    LDA #1 : STA game_over : STZ game_over+1
     RTS
 
-.post_frame
+\ quiet: Z set when it's time for a warning: no speech playing and the
+\ frame count a multiple of 128.
+.quiet
+{
+    LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3 : BNE done
+    LDA frame_count : AND #&7F
+.done
     RTS
+}
+

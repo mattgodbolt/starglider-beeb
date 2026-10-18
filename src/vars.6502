@@ -9,18 +9,19 @@
 \ its low byte), long, raw N (N bytes as they are), slot (the ST's pointer
 \ to an object record, kept as the slot: &FF for none), or for an array
 \ wlo N S / whi N S / barr N S (N words' low or high bytes, or N bytes, S
-\ bytes apart on the ST) or slots N (N record pointers, kept as slots), or
-\ index A S (the ST's pointer into its array at A of S-byte entries, kept
-\ as the entry's number). 
-\ or, for a list, list COUNT N (the address is the ST's pointer to the
-\ list's first entry, record pointers pushed downward; COUNT its count's
-\ ST address, N the port's count; the port keeps the slots in the order
-\ pushed). A last word "in" marks an input the ST's interrupts write when
-\ they will (a key's state): the harness puts it but doesn't compare it.
-\ tools/stmap.py reads them, and the harness
-\ translates the ST's state into the port's and back by them
-\ (tools/logicrun.mjs). Variables declared elsewhere carry the same braces
-\ (the player, in zp.6502).
+\ bytes apart on the ST), slots N (N record pointers, kept as slots),
+\ slotsdown N (N record pointers pushed downward from the address, the
+\ first just below it, kept as slots in the order pushed), index A S (the
+\ ST's pointer into its array at A of S-byte entries, kept as the entry's
+\ number) or list COUNT N (the address is the ST's pointer to the list's
+\ first entry, record pointers pushed downward; COUNT its count's ST
+\ address, N the port's count; the port keeps the slots in the order
+\ pushed). A last word "in" marks an input, given to the routine, never
+\ compared (what an interrupt changes in real time between the points, as
+\ a key's state). tools/stmap.py reads them, and the harness translates
+\ the ST's state into the port's and back by them (tools/logicrun.mjs).
+\ Variables declared elsewhere carry the same braces (the player, in
+\ zp.6502; the near list, in zp.6502 and memory.6502).
 \
 \ What any code may read, the drawing's included, is in the workspace;
 \ what only the logic reads is in ANDY, after the logic's object fields
@@ -67,6 +68,20 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .bolt_timer   SKIP 1        ; {ST $284(a6) word8} the laser bolt's steps to go, 4-0
 .bolt_target_x SKIP 2       ; {ST $24C(a6) word} the sight as it was when the bolt was fired
 .bolt_target_y SKIP 2       ; {ST $24E(a6) word}
+    \ collisions and the frame's end (logic/collide.6502, logic/frame.6502):
+    \ what the panel, the screen and the sound read
+.flash_shown  SKIP 2        ; the port's own: colour 0 from this frame's end (the ST's &FF8240)
+.refuelling   SKIP 1        ; {ST $2C3(a6) byte} in a beam whose test passed
+.level_text   SKIP 1        ; the port's own: non-zero when this frame shows 'LEVEL n' (level_message)
+.dock_text    SKIP 1        ; the port's own: non-zero when the docked texts show (post_frame)
+.mine_text    SKIP 1        ; the port's own: a mine's text this frame (mine_proximity), 0 from post_frame
+.game_over    SKIP 2        ; {ST $12C(a6) word} 1: the energy ran out; 2: the shields
+.dockings     SKIP 4        ; {ST $0C0(a6) long} for the pilot rating
+.sample_clip  SKIP 1        ; the port's own: the speech sample_start plays (the ST's &A0, a pointer)
+.sample_len   SKIP 4        ; {ST &0A4 long} the ST's length of it, in bytes
+.sample_tacr  SKIP 1        ; {ST &2CF byte} the ST's Timer A control and data: its rate
+.sample_tadr  SKIP 1        ; {ST &2D0 byte}
+.sample_left  SKIP 4        ; {ST P&01E56 long in} bytes still to play, which the player counts down
 .logic_work_end
 ENDSECTION
 
@@ -162,6 +177,9 @@ free_top = free_n           ; {ST $09C(a6) index &94C 4} (the ST's pointer past 
 .homing       SKIP 1        ; {ST $2D6(a6) byte} non-zero: this handler's launch is homing
 
     \ collisions, docking, refuelling and the laser (logic/collide.6502)
+.ram_hit      SKIP 1        ; {ST $2BF(a6) byte} this frame's collisions found a ram
+.ram_obj      SKIP 1        ; {ST $0AC(a6) slot} what was rammed
+.refuel_latch SKIP 1        ; {ST $2C4(a6) byte} the refuelling test is made for this contact
 
     \ the frame's end and the post-frame tests (logic/frame.6502)
 

@@ -1,0 +1,112 @@
+# Collisions and the post-frame tests, on the keys: refuelling in a beam
+# (the test passed, the energy added to and then stopping at full; then
+# failed on each of its tests, the latch reset between), the scrape
+# skipped while refuelling, a misaligned silo, docking on either side of
+# the silo's heading, the tunnel's end and the docked texts, the launch,
+# a ram during its countdown (which costs nothing), and the scrape until
+# the shields run out. The pokes (at a frame's start: tools/st_steps.py)
+# write the player ($12E: x, y, z; $13A: the angles), the climb input
+# (&01844), the energy ($25E), the shields ($260) and a silo's heading.
+# The capture runs the game slowly, so the waits stand for frames.
+wait 38
+key 57
+wait 3
+debug parse {arm}
+wait 2
+debug echo \nSEG refuel\n
+# beam 14 (x &1EC0, z &2690) 1985 ahead, facing it (heading &800): the
+# test passes; the energy below full, so the refill adds
+poke w w $5c15e $8000
+poke w w $5c02e $1ec0 $ffd0 $2e51
+poke w w $5c03a 0 $800 0
+wait 4
+# at the ground in the beam: no scrape while refuelling; and the energy
+# near full, so the refill stops at &FFFF
+poke w w $5c030 $ffec
+poke w w $5c15e $ff00
+wait 3
+debug echo \nSEG fails\n
+# out of every box between each, so the latch resets: 1500 ahead (camera
+# z short); heading &500 and &A00 (the beam's heading as drawn either
+# side of the window); 800 to either side (camera x)
+poke w w $12202 0
+poke w w $5c02e $4000 $ffd0 $4000
+poke w w $5c03a 0 0 0
+wait 2
+poke w w $5c02e $1ec0 $ffd0 $2c6c
+poke w w $5c03a 0 $800 0
+wait 3
+poke w w $5c02e $4000 $ffd0 $4000
+wait 2
+poke w w $5c02e $1796 $ffd0 $2988
+poke w w $5c03a 0 $500 0
+wait 3
+poke w w $5c02e $4000 $ffd0 $4000
+wait 2
+poke w w $5c02e $243c $ffd0 $2c0c
+poke w w $5c03a 0 $a00 0
+wait 3
+poke w w $5c02e $4000 $ffd0 $4000
+wait 2
+poke w w $5c02e $1ba0 $ffd0 $2e51
+poke w w $5c03a 0 $800 0
+wait 3
+poke w w $5c02e $4000 $ffd0 $4000
+wait 2
+poke w w $5c02e $21e0 $ffd0 $2e51
+wait 3
+# at the ground, not refuelling: the scrape
+poke w w $5c030 $ffec
+wait 3
+debug echo \nSEG dock\n
+# silo 26 (x &99C0, z &2670), its heading 0, 200 ahead with heading
+# &800: misaligned, a ram that costs nothing
+poke w w $12202 0
+poke w w $5d826 0
+poke w w $5c02e $99c0 $ffd0 $2738
+poke w w $5c03a 0 $800 0
+wait 3
+# at the silo with heading &F00 (its heading as drawn just short of a
+# turn): docks
+poke w w $5d826 0
+poke w w $5c02e $99c0 $ffd0 $2670
+poke w w $5c03a 0 $f00 0
+wait 3
+# near the tunnel's end: the docked texts
+poke w w $5c032 $25b0
+wait 4
+debug echo \nSEG launch\n
+# the launch as space makes it at the tunnel's end, but for its two
+# random32 calls (under the capture's breakpoints the game never saw
+# space here, held for 6 seconds, though without them it launches): not
+# docked, the countdown from &1D, the speed input &FEC0 and the player
+# out of the silo
+poke w b $5c1ca 0
+poke w w $5c192 $1d
+poke w w $12206 $fec0
+poke w w $5c02e $a190 $ffd0
+wait 5
+# a tower (record 11, x &1EC0, z &1EC0) during the countdown
+poke w w $5c02e $1ec0 $ffd0 $1ec0
+wait 3
+poke w w $5c02e $4000 $ffd0 $4000
+wait 22
+debug echo \nSEG dock2\n
+# silo 44 (x &75E0, z &75E0), its heading and the player's 0: docks
+poke w w $5dca6 0
+poke w w $5c02e $75e0 $ffd0 $7550
+poke w w $5c03a 0 0 0
+wait 4
+poke w b $5c1ca 0
+poke w w $5c192 $1d
+poke w w $12206 $fec0
+poke w w $5c02e $7db0 $ffd0
+wait 3
+debug echo \nSEG scrape\n
+# at the ground with the shields low: the scrape ends the game
+poke w w $12202 0
+poke w w $5c160 $0190
+poke w w $5c030 $ffec
+wait 8
+debug echo \nSEG end\n
+quit

@@ -1,0 +1,57 @@
+# The mines' proximity, on the keys: a mine &700 ahead while 'LEVEL 1'
+# shows (nothing) and after (the warning), then &500 ahead (it explodes:
+# the jolt, the shields' loss, the flash); another &700 and then &500
+# ahead of the player's missile (no warning, then the missile's hit); a
+# missile into Starglider One on its last hit point; and a third mine with
+# the shields below its cost, which ends the game. The pokes (at a
+# frame's start: tools/st_steps.py) write the player ($12E: x, y, z; $13A:
+# the angles), the speed input (&01848), the shields ($260), the missiles
+# carried ($278), the missile ($26A: x, y, z) and an object's fields (its
+# record is at &5D19A + 64 x its index). The capture runs the game
+# slowly, so the waits stand for frames.
+wait 38
+key 57
+wait 3
+debug parse {arm}
+wait 2
+debug echo \nSEG warning\n
+# mine 41 (type 14, x &6910, y -1040, z &6910) &700 ahead, stopped
+poke w w $12206 0
+poke w w $5c02e $6910 $fbf0 $6210
+poke w w $5c03a 0 0 0
+wait 20
+debug echo \nSEG explode\n
+poke w w $5c032 $6410
+wait 4
+debug echo \nSEG missile\n
+# mine 22 (type 14, x &6680, y -1120, z &2B90) &700 and then &500 ahead
+# of the missile
+poke w w $5c02e $4000 $ffd0 $4000
+wait 2
+key l
+wait 16
+poke w w $5c16a $6680 $fba0 $2490
+wait 4
+poke w w $5c16a $6680 $fba0 $2690
+wait 24
+debug echo \nSEG sg1\n
+# Starglider One (record 106) held at x &4000, y -750, z &4000, on its
+# last hit point, and the next missile put into it: destroyed
+poke w w $5c178 1
+wait 2
+key l
+wait 16
+poke w w $5ec2a 0
+poke w w $5ec4a 0
+poke w w $5ec1e $4000 $fd12 $4000
+poke w w $5c16a $4000 $fd12 $4000
+wait 24
+debug echo \nSEG last\n
+# mine 31 (type 14, x &DC60, y -1120, z &2900) &500 ahead, with 10000
+# shields left
+poke w w $5c160 $2710
+poke w w $5c02e $dc60 $fba0 $2400
+poke w w $5c03a 0 0 0
+wait 8
+debug echo \nSEG end\n
+quit

@@ -174,7 +174,9 @@
 .launched
     RTS
 .launch_it
-    LDA #1 : JSR sample_start
+    LDA #SAMPLE_LAUNCH : STA sample_clip
+    LDA #LO(&1B80) : STA sample_len : LDA #HI(&1B80) : STA sample_len+1
+    JSR speech
     DEC missiles
     MOVW m_x, pl_x
     MOVW m_y, pl_y

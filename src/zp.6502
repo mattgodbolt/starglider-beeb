@@ -103,7 +103,7 @@ NMI_PAGE = &0D00
 SECTION Work, org = WORK, guard = NMI_PAGE, virtual = TRUE
     \ the lists' lengths (the lists: memory.6502)
 .coarse_n   SKIP 1
-.near_n     SKIP 1
+.near_n     SKIP 1          ; {ST $240(a6) word8}
 .draw_n     SKIP 1
 .log_n      SKIP 2          ; lines in line_log
 .mat_valid  SKIP 1          ; non-zero: mat is for mat_angles

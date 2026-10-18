@@ -602,3 +602,43 @@ own branch, are merged. Three things had to give:
   docked by a script in the missile view, behind the camera, seemed
   drawn. It asks the ST's draw list now.
 
+### Collisions and the frame's end
+
+One part of the logic's transcription (decision 1), done beside four
+others: collisions (`src/logic/collide.6502`: ramming, the missile's
+hits, refuelling, docking, and the mines' proximity, which the mine
+handler calls), and the frame's end (`src/logic/frame.6502`:
+level_message, frame_end's count and flash, and the post-frame tests:
+the speech warnings, the docked texts, ramming's cost, the cheat's
+refill, the energy drain and the ground scrape). Each matches the ST in
+everything the map holds on the flight capture and on five captures of
+its own (`tests/st/steps_collide_*.txt`, `steps_post_warn.txt`). Run
+with a branch log in jsbeeb, they take every branch the game can, but an
+empty near list and the levels from 16 on; the rest can't be taken (a
+test already settled, a count that never gets so high).
+
+- **The near list in the map.** Collisions walk the list the list phase
+  made, so the harness now puts the ST's into the port's: a new kind,
+  `slotsdown`, for a list pushed downward as the ST pushes it, which the
+  port's `near_slots` holds in the order pushed. Walked from its last
+  entry, it's the ST's ascending order.
+- **Pokes at a fixed point.** A capture that moves the player with the
+  debugger's writes changes the state wherever the emulation happens to
+  be, so whichever routine spans that moment sees a difference it didn't
+  make. `poke` lines now run at the next world_render's entry, just after
+  the `top` point, and the harness leaves that frame out for the one
+  routine that starts there.
+- **Inputs.** The speech warnings wait while a sample plays, and the
+  bytes left are counted down by the ST's Timer A interrupt in real time
+  between the points. A trailing `in` in a variable's braces gives it to
+  the routine but never compares it.
+- **The mines** run inside object_handlers, between two points, so the
+  capture has two more, at the proximity block's entry and end, which log
+  the mine's record (a0) for the harness to call the port's routine with.
+- **A quirk kept.** A ram's flag outlives the ram when the next first
+  box hit is a beam (refuelling neither sets nor clears it), so the ram
+  costs again every frame in the beam: measured, and in
+  `docs/research/st-logic.md`.
+
+The ram's cost reads a table by level, and from level 16 on the ST reads
+past it; for now the port takes level 15's, which needs a decision.
