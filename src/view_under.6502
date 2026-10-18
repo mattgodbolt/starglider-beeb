@@ -80,15 +80,16 @@ INCLUDE "../build/gen/sight.6502"
 
 \ ---------------------------------------------------------------------------
 \ dots_draw (&047AA): the dots this step's ground_dots kept in view (as it
-\ records in dot_seen), each rotated into camera space, projected and
-\ plotted if that's inside the window (strictly, as the ST tests it), as
-\ the ST plots it (dot_put), in the ST's colour 2. A dot whose offset from
-\ the camera is under NEAR_D on both x and z is rotated exactly
-\ (rotate_exact, as the logic does) and projected by the drawing's
-\ projection (proj_z, proj_x); the rest are rotated by ground_x, ground_y
-\ and ground_z (build/gen/ground.6502), within a pixel, a row at a time,
-\ depth first, so that one outside the window in x needs no y, and
-\ projected by their own (far_x, far_y). In the missile view the camera is
+\ records in dot_seen), each in camera space, projected and plotted if
+\ that's inside the window (strictly, as the ST tests it), as the ST plots
+\ it (dot_put), in the ST's colour 2. A dot whose offset from the camera is
+\ under NEAR_D on both x and z is rotated exactly (rotate_exact, as the
+\ logic does) and projected by the drawing's projection (proj_z, proj_x).
+\ The rest are where they were, moved with the camera while its matrix
+\ holds (dot_kept), or else rotated by ground_x, ground_y and ground_z
+\ (build/gen/ground.6502), within a pixel, a row at a time, depth first,
+\ so that one outside the window in x needs no y; and they're projected by
+\ their own (far_x, far_y). In the missile view the camera is
 \ the missile, and the window its own (L_05248), its bottom where the
 \ window's opening leaves it: the dots are only drawn when it's open.
 NEAR_D = 1024
@@ -122,8 +123,17 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     \ the ground's dy, the same for every dot
     LDA #0 : SEC : SBC at+2 : STA rot_d+2
     LDA #0 : SBC at+3 : STA rot_d+3
+    \ the rotation made for the frame's matrix and dy, unless they're the
+    \ last frame's
+    JSR dots_steady
+    BIT dv_steady : BPL setup
+    LDA rot_d+2 : CMP dv_dy : BNE setup
+    LDA rot_d+3 : CMP dv_dy+1 : BEQ set
+.setup
+    LDA rot_d+2 : STA dv_dy : LDA rot_d+3 : STA dv_dy+1
     JSR ground_start
     JSR ground_setup
+.set
     \ dot_put's stores onto this screen's erase list, and its colour
     LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
     ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
@@ -142,6 +152,12 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     ZA_DISCARD rot_acc
     LDX dot
     LDA dot_seen,X : BEQ next
+    JSR one
+.next
+    DEC dot : BPL each
+    RTS
+\ one: dot X, in view
+.one
     LDA dot_x_lo,X : SEC : SBC at : STA rot_d
     LDA dot_x_hi,X : SBC at+1 : STA rot_d+1
     LDA dot_z_lo,X : SEC : SBC at+4 : STA rot_d+4
@@ -149,24 +165,199 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     LDA rot_d+1 : CLC : ADC #HI(NEAR_D) : CMP #2 * HI(NEAR_D) : BCS far
     LDA rot_d+5 : CLC : ADC #HI(NEAR_D) : CMP #2 * HI(NEAR_D) : BCS far
     JSR dot_exact
-    JSR dot_x : BCS next
-    JSR dot_y : BCS next
-    BRA put
+    JSR dot_x : BCS done
+    JSR dot_y : BCS done
+    JMP dot_put
 .far
+    \ as it was, or rotated
+    BIT dv_steady : BPL rotate
+    JSR dot_kept : BCS rotate
+    JSR far_x : BCS done
+    BRA y_known
+.rotate
     JSR ground_z
     JSR ground_x
-    JSR far_x : BCS next
+    JSR far_x : BCS done
     JSR ground_y
-    JSR far_y : BCS next
-.put
-    JSR dot_put
-.next
-    DEC dot : BPL each
+    BIT dv_steady : BPL y_known
+    JSR dot_base
+.y_known
+    JSR far_y : BCS done
+    JMP dot_put
+.done
     RTS
 \ (in the bank's own RAM, as the draw phase leaves zero page little room)
 .dot  SKIP 1                            ; the dot drawn
 .at   SKIP 6                            ; the camera's place
 }
+
+\ A far dot's camera-space position is cam (d - c) / 16384 for the camera
+\ at c, which while cam holds is the same less cam (c - c0) / 16384 since
+\ c0: so each such dot keeps its rotated position, plus that at the frame
+\ it was rotated (its base), and the frames after take off this frame's,
+\ dv_t, as long as cam is the same and the camera within 8192 of c0 on
+\ each axis (dots_steady). Bases are kept only in frames whose matrix
+\ held from the last frame's, so that a turn makes none.
+DV_F = 0 : DV_LO = 1 : DV_HI = 2          ; a base's fraction, low and high bytes, x' y' z' in turn
+
+\ dots_steady: dv_steady and dv_t for this frame's camera (cam, at): a
+\ matrix not the last frame's (or the other view's) makes no base good;
+\ a camera too far from c0 starts again from where it is.
+.dots_steady
+{
+    LDA mv_render : CMP dv_mv : BNE turned
+    LDX #17
+.same
+    LDA cam,X : ZA_INDEXEDBY 0..17
+    CMP dv_cam,X : BNE turned
+    DEX : BPL same
+    LDA #&FF : STA dv_steady
+    \ c - c0, each within 8192, or start again (as costs nothing while
+    \ there are no bases)
+    LDA dv_some : BEQ again
+    LDX #4
+.offset
+    LDA dots_draw.at,X : SEC : SBC dv_c0,X : STA dv_d,X
+    LDA dots_draw.at+1,X : SBC dv_c0+1,X : STA dv_d+1,X
+    CLC : ADC #&20 : CMP #&40 : BCS again
+    DEX : DEX : BPL offset
+    JMP dots_move
+.turned
+    STZ dv_steady
+    LDA mv_render : STA dv_mv
+    LDX #17
+.copy
+    LDA cam,X : ZA_INDEXEDBY 0..17
+    STA dv_cam,X
+    DEX : BPL copy
+.again
+    \ no base good (bases are good while they're the generation's), and c0
+    \ here, where dv_t is 0
+    STZ dv_some
+    INC dv_gen : BNE forgot
+    INC dv_gen                          ; (0 is none's: a wrap clears them)
+    LDX #39
+.forget
+    STZ dv_valid,X
+    DEX : BPL forget
+.forgot
+    LDX #5
+.c0
+    LDA dots_draw.at,X : STA dv_c0,X
+    DEX : BPL c0
+    LDX #8
+.zero
+    STZ dv_t,X
+    DEX : BPL zero
+    RTS
+}
+
+\ dots_move: dv_t, cam (c - c0) / 16384 by row, to 1/256 (with the
+\ entries within about 16384 and c - c0 within 8192, a row's three
+\ products sum to under 2^29, which / 64 fits 24 bits): an entry of 0 has
+\ no product.
+.dots_move
+{
+    STZ entry : STZ row
+.rows
+    STZ dv_acc : STZ dv_acc+1 : STZ dv_acc+2 : STZ dv_acc+3
+    STZ column
+.terms
+    \ (smul16 takes X and Y)
+    LDX entry
+    LDA cam,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    STA mul_x
+    LDA cam+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    STA mul_x+1
+    ORA mul_x : BEQ none
+    LDY column
+    LDA dv_d,Y : STA mul_y : LDA dv_d+1,Y : STA mul_y+1
+    ORA mul_y : BEQ none
+    JSR smul16
+    CLC
+    LDA dv_acc : ADC mul_p : STA dv_acc
+    LDA dv_acc+1 : ADC mul_p+1 : STA dv_acc+1
+    LDA dv_acc+2 : ADC mul_p+2 : STA dv_acc+2
+    LDA dv_acc+3 : ADC mul_p+3 : STA dv_acc+3
+.none
+    INC entry : INC entry
+    LDA column : CLC : ADC #2 : STA column
+    CMP #6 : BNE terms
+    \ / 64: the sum << 2's upper three bytes
+    ASL dv_acc : ROL dv_acc+1 : ROL dv_acc+2 : ROL dv_acc+3
+    ASL dv_acc : ROL dv_acc+1 : ROL dv_acc+2 : ROL dv_acc+3
+    LDX row
+    LDA dv_acc+1 : STA dv_t,X
+    LDA dv_acc+2 : STA dv_t+1,X
+    LDA dv_acc+3 : STA dv_t+2,X
+    INX : INX : INX : STX row
+    CPX #9 : BEQ done
+    JMP rows
+.done
+    RTS
+\ (in the bank's own RAM)
+.entry  SKIP 1                          ; cam's, by its offset
+.column SKIP 1                          ; c - c0's, by its offset
+.row    SKIP 1                          ; dv_t's, by its offset
+}
+
+\ dot_kept: rot_acc = dot X's position from its base, moved with the
+\ camera, and C clear; C set if it has none it can use. (dv_steady is
+\ set.)
+.dot_kept
+{
+    LDA dv_valid,X : CMP dv_gen : BNE none
+    LDA dot_x_lo,X : CMP dv_xlo,X : BNE none
+    LDA dot_x_hi,X : CMP dv_xhi,X : BNE none
+    LDA dot_z_lo,X : CMP dv_zlo,X : BNE none
+    LDA dot_z_hi,X : CMP dv_zhi,X : BNE none
+FOR r = 0..2
+    LDA dv_base + DV_F * 40 + 120 * r,X : CMP dv_t + 3 * r
+    LDA dv_base + DV_LO * 40 + 120 * r,X : SBC dv_t + 3 * r + 1 : STA rot_acc + 2 * r
+    LDA dv_base + DV_HI * 40 + 120 * r,X : SBC dv_t + 3 * r + 2 : STA rot_acc + 2 * r + 1
+NEXT
+    CLC : RTS
+.none
+    SEC : RTS
+}
+
+\ dot_base: the dot's rotated position (rot_acc) kept as its base, dv_t
+\ and a half on (so that what dots_draw takes off is rounded), with where
+\ the dot is.
+.dot_base
+{
+    LDX dots_draw.dot
+FOR r = 0..2
+    LDA dv_t + 3 * r : CLC : ADC #&80 : STA dv_base + DV_F * 40 + 120 * r,X
+    LDA rot_acc + 2 * r : ADC dv_t + 3 * r + 1 : STA dv_base + DV_LO * 40 + 120 * r,X
+    LDA rot_acc + 2 * r + 1 : ADC dv_t + 3 * r + 2 : STA dv_base + DV_HI * 40 + 120 * r,X
+NEXT
+    LDA dot_x_lo,X : STA dv_xlo,X
+    LDA dot_x_hi,X : STA dv_xhi,X
+    LDA dot_z_lo,X : STA dv_zlo,X
+    LDA dot_z_hi,X : STA dv_zhi,X
+    LDA dv_gen : STA dv_valid,X
+    STA dv_some
+    RTS
+}
+
+\ (in the bank's own RAM)
+.dv_steady SKIP 1                       ; bit 7: cam is the last frame's
+.dv_mv     EQUB &FF                     ; the view the matrix was for (none yet)
+.dv_cam    SKIP 18                      ; the last frame's matrix
+.dv_dy     SKIP 2                       ; the dy the ground's rotation was last made for
+.dv_c0     SKIP 6
+.dv_d      SKIP 6                       ; c - c0
+.dv_acc    SKIP 4
+.dv_t      SKIP 9                       ; by row, cam (c - c0) / 16384: its fraction, low and high bytes
+.dv_gen    EQUB 1                       ; the bases' generation, never 0
+.dv_some   EQUB 0                       ; non-zero once the generation has a base
+.dv_valid  SKIP 40                      ; by dot: its base's generation, 0 for none
+.dv_xlo    SKIP 40                      ; where it was then
+.dv_xhi    SKIP 40
+.dv_zlo    SKIP 40
+.dv_zhi    SKIP 40
+.dv_base   SKIP 9 * 40
 
 \ The windows a dot must be strictly inside, as tests on its projection
 \ (128 x / z, 128 y / z): an offset that puts the inside from 0, and the
