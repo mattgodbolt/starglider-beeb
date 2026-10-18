@@ -132,9 +132,9 @@ emit("""\\ rotate_setup: specialise rotate_exact and rotate_approx to cam, once 
 \\ constants), then each row's constant and the flags.
 .rotate_setup
 {
-    ZA_AUTO2 m, mag, t, lnk, asite, esite, askip, astub, estub
+    ZA_AUTO2 m, mag, t, lnk, asite, esite, askip
     ZA_AUTO 6, ka, ke, ky       ; the rows' constants, and column y's
-    ZA_AUTO1 row, seen, prods, msign, mode, skipping, astub_go, estub_go
+    ZA_AUTO1 seen, prods, msign, mode, skipping
     LDX #5
     ZA_DISCARD ka, ke, ky
 .clear
@@ -149,30 +149,34 @@ emit("""\\ rotate_setup: specialise rotate_exact and rotate_approx to cam, once 
 for j in range(3):
     emit(f"    \\ column {'xyz'[j]}")
     emit("    STZ seen")
-    emit(f"    LDA #LO(rapc{j}) : STA astub : LDA #HI(rapc{j}) : STA astub+1")
-    emit(f"    LDA #rapc{j}_go + 1 - rapc{j} : STA astub_go")
-    emit(f"    LDA #LO(rotc{j}) : STA estub : LDA #HI(rotc{j}) : STA estub+1")
-    emit(f"    LDA #rotc{j}_go + 1 - rotc{j} : STA estub_go")
     passes = [("&40", "its units"), ("&80", "its products")] if j == SKIP_COLUMN else [("0", None)]
     for mode, what in passes:
         if what:
             emit(f"    \\ {what}")
         emit(f"    LDA #{mode} : STA mode")
         for i in range(3):
-            emit(f"    LDA #{2 * i} : STA row : LDX #{3 * i + j} : JSR term")
+            emit(f"    LDX #{3 * i + j} : JSR term")
     if j == SKIP_COLUMN:
-        emit("    \\ its constants, each row's that has a product, and the stub's skip")
-        emit("    \\ on to the next link")
-        emit(f"    LDA seen : BEQ no_skip")
-        for i in range(3):
-            emit(f"    LDA ky+{2 * i} : ORA ky+{2 * i + 1} : BEQ no_k{i}")
-            emit(f"    LDA ky+{2 * i} : STA rapk{i}_lo+1 : LDA ky+{2 * i + 1} : STA rapk{i}_hi+1")
-            emit(f"    LDA #LO(rapk{i}) : STA t : LDA #HI(rapk{i}) : STA t+1")
-            emit("    LDA #0 : LDY #RAPK_GO : JSR alink")
-            emit(f".no_k{i}")
-        emit(f"    LDA #LO(rapc{j}_skip + 1) : STA askip : LDA #HI(rapc{j}_skip + 1) : STA askip+1")
-        emit("    LDA #&80 : STA skipping")
-        emit(".no_skip")
+        emit(f"""    \\ its constants, each row's that has a product, and the stub's skip
+    \\ on to the next link
+    LDA seen : BEQ no_skip
+    LDX #4
+.constants
+    LDA ky,X : ZA_INDEXEDBY {{0, 2, 4}}
+    ORA ky+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    BEQ no_k
+    TXA : LSR A : TAY
+    LDA rapk_lo,Y : STA t : LDA rapk_hi,Y : STA t+1
+    LDA ky,X : ZA_INDEXEDBY {{0, 2, 4}}
+    LDY #rapk0_lo + 1 - rapk0 : STA (t),Y
+    LDA ky+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    LDY #rapk0_hi + 1 - rapk0 : STA (t),Y
+    LDA #0 : LDY #RAPK_GO : JSR alink
+.no_k
+    DEX : DEX : BPL constants
+    LDA #LO(rapc{j}_skip + 1) : STA askip : LDA #HI(rapc{j}_skip + 1) : STA askip+1
+    LDA #&80 : STA skipping
+.no_skip""")
 emit("""    \\ the chains' ends
     LDA #LO(rap_done) : STA t : LDA #HI(rap_done) : STA t+1
     LDA #0 : TAY : JSR alink
@@ -230,7 +234,7 @@ emit("""    \\ no products: the approximation is exact
     \\\\ the constants: -2m in both (the approximation's in column y's own
     \\\\ while it's that column), and the exact's 32768 for m < 0
     LDA m : ASL A : STA t : LDA m+1 : ROL A : STA t+1
-    LDY row
+    LDY rot_row,X
     LDA ke,Y : ZA_INDEXEDBY {0, 2, 4}
     SEC : SBC t : STA ke,Y : ZA_INDEXEDBY {0, 2, 4}
     LDA ke+1,Y : ZA_INDEXEDBY {0, 2, 4}
@@ -252,10 +256,12 @@ emit("""    \\ no products: the approximation is exact
     \\\\ a column's first product loads its D first
     LDA seen : BNE stubbed
     INC seen
-    LDA astub : STA t : LDA astub+1 : STA t+1
-    LDA #0 : LDY astub_go : JSR alink
-    LDA estub : STA t : LDA estub+1 : STA t+1
-    LDA #0 : LDY estub_go : JSR elink
+    LDY rot_col,X
+    LDA rapc_lo,Y : STA t : LDA rapc_hi,Y : STA t+1
+    LDA rapc_go,Y : TAY : LDA #0 : JSR alink
+    LDY rot_col,X
+    LDA rotc_lo,Y : STA t : LDA rotc_hi,Y : STA t+1
+    LDA rotc_go,Y : TAY : LDA #0 : JSR elink
 .stubbed
     \\\\ the exact term: M = 4m, a word
     ASL m : ROL m+1 : ASL m : ROL m+1
@@ -328,9 +334,23 @@ def table(name, labels):
     emit("    EQUB " + ", ".join(f"HI({x})" for x in labels))
 
 
-emit("\\ each term's code, by term")
+emit("\\ each term's code, by term, and its row (times 2) and column")
 table("rot_base", [f"rot{e}" for e in range(9)])
 table("rap_base", [f"rap{e}" for e in range(9)])
+emit(".rot_row")
+emit("    EQUB " + ", ".join(str(2 * (e // 3)) for e in range(9)))
+emit(".rot_col")
+emit("    EQUB " + ", ".join(str(e % 3) for e in range(9)))
+emit("\\ each column's stubs, and their jumps' offsets; column y's constants")
+table("rapc", [f"rapc{j}" for j in range(3)])
+table("rotc", [f"rotc{j}" for j in range(3)])
+emit(".rapc_go")
+emit("    EQUB " + ", ".join(f"rapc{j}_go + 1 - rapc{j}" for j in range(3)))
+emit(".rotc_go")
+emit("    EQUB " + ", ".join(f"rotc{j}_go + 1 - rotc{j}" for j in range(3)))
+table("rapk", [f"rapk{i}" for i in range(3)])
+for i in range(1, 3):
+    emit(f"ASSERT rapk{i}_lo - rapk{i} = rapk0_lo - rapk0 AND rapk{i}_hi - rapk{i} = rapk0_hi - rapk0")
 emit()
 
 
