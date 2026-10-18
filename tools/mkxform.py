@@ -11,8 +11,8 @@ code:
 - xform: into camera space, x' = (A k) / 1024 + t, where A is the object's
   matrix scaled to its shape (A = m x g / 256, xf_amag and xf_asign,
   render.6502), three rows, summed into px, xf_y and pz; render.6502's
-  vertex adds t, or its fold put 4t in the starting values and patched
-  xform_back to say so;
+  vertex adds t, unless the setup folded 4t into the starting values,
+  where no sum can then pass a word, and patched xform_back to say so;
 - screen: straight onto the screen, for an object far enough away that
   its perspective is linear across it (render.6502, decision 10): two rows
   of B, the first-order change in x' and y' on the screen, sc_bmag and
@@ -121,17 +121,64 @@ def signs(t, e, sign):
     emit(f"    LDA {sign}+{e} : STA {t}_m0+1 : STA {t}_m1+1 : AND #CARRY_BIT : ORA #CLC_OP : STA {t}_c0")
 
 
-def setup_skipping(name, prefix, rows, mag, sign, start):
+def fold(name, start, pos, back, folded):
+    """The end of name_setup: the object's position pos (three words) into
+    the starting values, in quarters, where no sum can then pass a word,
+    and name_back patched to say which."""
+    emit(f"""    \\ The object's position into the starting values, in quarters, where
+    \\ no sum can then pass a word: when on every axis |t| + the radius +
+    \\ FOLD_SLACK <= FOLD_MAX. A vertex is within the radius of the centre
+    \\ (mkshapes.py), and the sums are within FOLD_SLACK of the exact
+    \\ rotation's. Then they need only the shift ({name}_back to {folded}),
+    \\ and otherwise t added ({back}). |t| < 256 (h + 1), h its high byte
+    \\ if it's positive and that EORed with &FF if not, so h <
+    \\ HI(FOLD_MAX - FOLD_SLACK - the radius) will do.
+    LDA #LO(FOLD_MAX - FOLD_SLACK) : SEC : SBC sh_radius
+    LDA #HI(FOLD_MAX - FOLD_SLACK) : SBC sh_radius+1 : BMI unfolded
+    STA lim
+    LDX #4
+.fits
+    LDA {pos}+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    BPL positive
+    EOR #&FF
+.positive
+    CMP lim : BCS unfolded
+    DEX : DEX : BPL fits
+    LDX #4
+.into
+    \\ the start += 4 t
+    LDA {pos},X : ZA_INDEXEDBY {{0, 2, 4}}
+    ASL A : STA sum
+    LDA {pos}+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    ROL A : ASL sum : ROL A : TAY
+    LDA sum : CLC : ADC {start},X : ZA_INDEXEDBY {{0, 2, 4}}
+    STA {start},X : ZA_INDEXEDBY {{0, 2, 4}}
+    TYA : ADC {start}+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    STA {start}+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    DEX : DEX : BPL into
+    LDA #LO({folded}) : STA {name}_back+1
+    LDA #HI({folded}) : STA {name}_back+2
+    RTS
+.unfolded
+    LDA #LO({back}) : STA {name}_back+1
+    LDA #HI({back}) : STA {name}_back+2
+    RTS""")
+
+
+def setup_skipping(name, prefix, rows, mag, sign, start, folding=None):
     """name_setup for name_vertex with each term's skip: a term whose
     magnitude is zero adds nothing, and is skipped (and if it's the first
-    of its row, the row's starting value is copied instead)."""
+    of its row, the row's starting value is copied instead). With folding,
+    fold's arguments, it ends by folding the position in."""
     n = 3 * rows
     emit(f"""\\ {name}_setup: specialise {name}_vertex to the object's {mag} and
-\\ {sign} (by term: {rows} rows of x, y, z), skipping the terms that are zero.
+\\ {sign} (by term: {rows} rows of x, y, z), skipping the terms that are zero{", and fold the object's position in" if folding else ""}.
 .{name}_setup
-{{
-    ZA_AUTO 3, sum
-    ZA_AUTO1 ones                       ; the ones the row's terms add, negated""")
+{{""")
+    emit("    ZA_AUTO 3, sum")
+    emit("    ZA_AUTO1 ones                       ; the ones the row's terms add, negated")
+    if folding:
+        emit("    ZA_AUTO1 lim")
     sums_loop(rows, mag, sign, start, None, True)
     for e in range(n):
         t = f"{prefix}{e}"
@@ -149,7 +196,10 @@ def setup_skipping(name, prefix, rows, mag, sign, start):
         if j == 0:
             emit(f"    LDA #LDA_IMM : STA {prefix}row{i}_k")
         emit(f".done{e}")
-    emit("    RTS")
+    if folding:
+        fold(name, start, *folding)
+    else:
+        emit("    RTS")
     emit("}")
     emit()
 
@@ -335,7 +385,10 @@ def sums(rows, acc, start, what):
 emit("ZA_AUTO2 xf_y                 ; y', in quarters (x' and z' are px and pz)")
 emit("ZA_AUTO 6, xf_start           ; their starting values")
 emit()
-setup_skipping("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start")
+emit("FOLD_MAX = &7FFF DIV 4             ; (fold's)")
+emit("FOLD_SLACK = 16")
+setup_skipping("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start",
+               folding=("tpos", "vertex.back", "vertex.folded"))
 vertex("xform", "xf", 3, ["px", "xf_y", "pz"], "xf_start", "vertex.back", skipping=True,
        backs=["vertex.folded"])
 sums(2, "sc_acc", "sc_start", "the screen's x and y")
