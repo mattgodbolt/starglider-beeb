@@ -73,10 +73,14 @@ ZA_AUTO 4, h_rng
     BNE kept                    ; (the top byte isn't 0, so nor is the long)
     LDA h_rng : ORA h_rng+1 : ORA h_rng+2 : BNE kept
 .flip
-    LDA h_rng : EOR #&41 : STA h_rng
-    LDA h_rng+1 : EOR #&2B : STA h_rng+1
-    LDA h_rng+2 : EOR #&87 : STA h_rng+2
-    LDA h_rng+3 : EOR #&1D : STA h_rng+3
+    \ (half the calls: each byte's EOR on its way to the adds)
+    LDA h_rng : EOR #&41 : CLC : ADC mouse_x : STA h_rng
+    LDA h_rng+1 : EOR #&2B : ADC mouse_x+1 : STA h_rng+1
+    LDA h_rng : CLC : ADC rng_lag+3 : STA h_rng
+    LDA h_rng+1 : ADC rng_lag+2 : STA h_rng+1
+    LDA h_rng+2 : EOR #&87 : ADC rng_lag+1 : STA h_rng+2 : STA rng_d0
+    LDA h_rng+3 : EOR #&1D : ADC rng_lag : STA h_rng+3 : STA rng_d0+1
+    RTS
 .kept
     LDA h_rng : CLC : ADC mouse_x : STA h_rng
     LDA h_rng+1 : ADC mouse_x+1 : STA h_rng+1

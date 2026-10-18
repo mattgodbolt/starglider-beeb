@@ -35,10 +35,6 @@ MACRO HDECX lo, hi
     DEC lo,X
 ENDMACRO
 
-\ HASR4 v: the word v four bits right, as asr.w #4.
-MACRO HASR4 v
-    ASRW v : ASRW v : ASRW v : ASRW v
-ENDMACRO
 
 \ The ST's tables (tools/mkhandlers.py), with the macros angle_to_player's
 \ lookup takes
@@ -108,12 +104,16 @@ INCLUDE "../../build/gen/handlers.6502"
     BRA next
 }
 
-\ h_move: on by the velocity, in x and z.
-.h_move
+\ HMOVE, h_move: on by the velocity, in x and z (in line for the
+\ commonest movers).
+MACRO HMOVE
     LDA ob_x_lo,X : CLC : ADC ob_vx_lo,X : STA ob_x_lo,X
     LDA ob_x_hi,X : ADC ob_vx_hi,X : STA ob_x_hi,X
     LDA ob_z_lo,X : CLC : ADC ob_vz_lo,X : STA ob_z_lo,X
     LDA ob_z_hi,X : ADC ob_vz_hi,X : STA ob_z_hi,X
+ENDMACRO
+.h_move
+    HMOVE
     RTS
 
 \ ---------------------------------------------------------------------------
@@ -181,15 +181,15 @@ INCLUDE "../../build/gen/handlers.6502"
 \ runs only when dx < -1000, as the ST's does.
 .near_test
 {
-    ZA_AUTO2 d
-    LDA ob_x_lo,X : SEC : SBC pl_x : STA d
-    LDA ob_x_hi,X : SBC pl_x+1 : STA d+1
-    LDA d : CMP #LO(&3E8) : LDA d+1 : SBC #HI(&3E8) : BPL far
-    LDA d : CMP #LO(&FC18) : LDA d+1 : SBC #HI(&FC18) : BPL near
-    LDA ob_z_lo,X : SEC : SBC pl_z : STA d
-    LDA ob_z_hi,X : SBC pl_z+1 : STA d+1
-    LDA d : CMP #LO(&3E8) : LDA d+1 : SBC #HI(&3E8) : BPL far
-    LDA d : CMP #LO(&FC18) : LDA d+1 : SBC #HI(&FC18) : BMI far
+    ZA_AUTO1 d                          ; (each difference's high byte; its low in Y)
+    LDA ob_x_lo,X : SEC : SBC pl_x : TAY
+    LDA ob_x_hi,X : SBC pl_x+1 : STA d
+    CPY #LO(&3E8) : SBC #HI(&3E8) : BPL far
+    CPY #LO(&FC18) : LDA d : SBC #HI(&FC18) : BPL near
+    LDA ob_z_lo,X : SEC : SBC pl_z : TAY
+    LDA ob_z_hi,X : SBC pl_z+1 : STA d
+    CPY #LO(&3E8) : SBC #HI(&3E8) : BPL far
+    CPY #LO(&FC18) : LDA d : SBC #HI(&FC18) : BMI far
 .near
     SEC
     RTS
@@ -208,7 +208,7 @@ INCLUDE "../../build/gen/handlers.6502"
 {
     LDX h_slot
     LDA enemies_active : BEQ moved
-    JSR h_move
+    HMOVE
 .moved
     JSR near_test : BCC far
     LDA ob_type,X : CMP #27 : BNE near
@@ -339,17 +339,71 @@ INCLUDE "../../build/gen/handlers.6502"
     JSR sincos
     MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
     LDX at
-    LDA ob_speed_lo,X : STA mul_x : LDA ob_speed_hi,X : STA mul_x+1
-    MOVW mul_y, trig_sin
-    JSR fmul15
+    \ |speed|: its high byte for vel_part, its low byte the products'
+    \ multiplicand
+    LDA ob_speed_lo,X : STA vel_part.speed
+    LDA ob_speed_hi,X : STA vel_part.speed+1 : BPL s_pos
+    LDA #0 : SEC : SBC vel_part.speed : TAY
+    LDA #0 : SBC vel_part.speed+1 : STA vel_part.ahi
+    TYA
+    BRA s_abs
+.s_pos
+    STA vel_part.ahi
+    LDA vel_part.speed
+.s_abs
+    MUL_SET
+    MOVW vel_part.y, m_sin
+    JSR vel_part
     LDX at
-    LDA #0 : SEC : SBC mul_r : STA ob_vx_lo,X
-    LDA #0 : SBC mul_r+1 : STA ob_vx_hi,X
-    LDA ob_speed_lo,X : STA mul_x : LDA ob_speed_hi,X : STA mul_x+1
-    MOVW mul_y, trig_cos
-    JSR fmul15
+    LDA #0 : SEC : SBC vel_part.r : STA ob_vx_lo,X
+    LDA #0 : SBC vel_part.r+1 : STA ob_vx_hi,X
+    MOVW vel_part.y, m_cos
+    JSR vel_part
     LDX at
-    LDA mul_r : STA ob_vz_lo,X : LDA mul_r+1 : STA ob_vz_hi,X
+    LDA vel_part.r : STA ob_vz_lo,X : LDA vel_part.r+1 : STA ob_vz_hi,X
+    RTS
+}
+
+\ vel_part: r = floor(speed y / 32768), as muls, asl.l #1, swap make it,
+\ for y a sine (|y| <= 16384). |speed| below 512 (ahi, its high byte, 0
+\ or 1) takes the products of its low byte (MUL_SET) with |y|'s bytes, a
+\ product P of 23 bits at most, signed after; any other, fmul15.
+.vel_part
+{
+    ZA_AUTO2 speed, y, r
+    ZA_AUTO1 ahi, neg, p0, p1, p2, t
+    LDA ahi : CMP #2 : BCC small
+    MOVW mul_x, speed : MOVW mul_y, y
+    JSR fmul15
+    MOVW r, mul_r
+    RTS
+.small
+    LDA y+1 : EOR speed+1 : STA neg
+    LDA y+1 : BPL y_pos
+    NEGW y
+.y_pos
+    LDY y : MUL8 p0 : STA p1
+    LDY y+1 : MUL8 t : STA p2
+    LDA p1 : CLC : ADC t : STA p1
+    BCC carried
+    INC p2
+.carried
+    LDA ahi : BEQ low
+    LDA p1 : CLC : ADC y : STA p1
+    LDA p2 : ADC y+1 : STA p2
+.low
+    \ P >> 15; for a negative product, its negation less 1 if P's low 15
+    \ bits aren't all 0 (the floor)
+    LDA p1 : ASL A : LDA p2 : ROL A
+    BIT neg : BMI negative
+    STA r : STZ r+1
+    RTS
+.negative
+    STA t
+    LDA p1 : AND #&7F : ORA p0 : STA p0
+    LDA #0 : SEC : SBC p0               ; (C: P's low 15 bits all 0)
+    LDA #0 : SBC t : STA r
+    LDA #0 : SBC #0 : STA r+1
     RTS
 }
 
@@ -358,11 +412,17 @@ INCLUDE "../../build/gen/handlers.6502"
 .turn_by
     LDA ob_heading_lo,X : STA rng_d0
     LDA ob_heading_hi,X : AND #&0F : STA rng_d0+1
+    \ (h_bear is 0-&FFF too, so the difference's top four bits are its
+    \ sign's, and asr 4 leaves its sign above bits 4-11)
     LDA h_bear : SEC : SBC rng_d0 : STA h_t
-    LDA h_bear+1 : SBC rng_d0+1 : STA h_t+1
-    HASR4 h_t
-    LDA rng_d0 : CLC : ADC h_t : STA ob_heading_lo,X
-    LDA rng_d0+1 : ADC h_t+1 : STA ob_heading_hi,X
+    LDA h_bear+1 : SBC rng_d0+1
+    LDY #0 : CMP #&80 : BCC up
+    DEY
+.up
+    ASL A : ASL A : ASL A : ASL A : STA h_t+1
+    LDA h_t : LSR A : LSR A : LSR A : LSR A : ORA h_t+1
+    CLC : ADC rng_d0 : STA ob_heading_lo,X
+    TYA : ADC rng_d0+1 : STA ob_heading_hi,X
     RTS
 
 \ ---------------------------------------------------------------------------
@@ -372,7 +432,7 @@ INCLUDE "../../build/gen/handlers.6502"
 {
     LDA enemies_active : BEQ done
     LDX h_slot
-    JSR h_move
+    HMOVE
     JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&3F : STA rng_d0 : BEQ turn
