@@ -1,0 +1,9 @@
+# For GitHub's Languages bar (Linguist).
+
+# The port's baron sources. Linguist has no 6502 language and doesn't know
+# the .6502 extension, so without this they aren't counted at all.
+*.6502 linguist-language=Assembly
+
+# SkoolKit control files, which Linguist takes for Visual Basic 6.0 by their
+# extension. Text keeps them out of the bar and shows them as plain text.
+*.ctl linguist-language=Text
