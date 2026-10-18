@@ -295,7 +295,8 @@ ENDMACRO
     STZ nears : STZ draws
     \ each object's way, by the camera's matrix: unrotated if it's the
     \ identity, exactly if it has no products (as cheap), and otherwise
-    \ approximately first (decision 11)
+    \ approximately first (decision 11), unless it was relevant at the last
+    \ step (decision 33)
     LDA #LO(approximately) : LDY #HI(approximately)
     BIT rot_exactly : BPL way
     LDA #LO(offset_exactly) : LDY #HI(offset_exactly)
@@ -325,14 +326,34 @@ ENDMACRO
     LDA #1 : STA ob_exact,X
     JMP stored
 .approximately
+    \ ob_exact &FF: relevant at the last step, and so likely at this one
+    LDA ob_exact,X : BMI carried
     OFFSET
     JMP rotate_approx                       ; (on to relevance)
-.offset_exactly
+.carried
+    \ exactly at once, and relevant at the next step too if it's near or
+    \ drawn (the draw list marks it): an exact position needs no slack
     OFFSET
-.exactly
     JSR rotate_exact
     LDX slot
-    LDA #1 : STA ob_exact,X
+    WITHIN rot_acc+4, #NEAR_BOX, lapsed
+    WITHIN rot_acc, #NEAR_BOX, lapsed
+    BRA store
+.lapsed
+    LDA #1
+    BRA exact
+.offset_exactly
+    OFFSET
+    JSR rotate_exact
+    LDA #1                                  ; (relevant if the draw list marks it)
+    BRA exact
+.exactly
+    \ relevant: exactly, and at once at the next step
+    JSR rotate_exact
+    LDA #&FF
+.exact
+    LDX slot
+    STA ob_exact,X
 .store
     \ the camera-space position, and the near list unless it's exploding
     LDA rot_acc : STA ob_cx_lo,X : LDA rot_acc+1 : STA ob_cx_hi,X
@@ -362,6 +383,7 @@ ENDMACRO
     WITHIN rot_acc, z2, next
     WITHIN rot_acc+2, z2, next
     LDA #&FF : STA ob_drawn,X
+    STA ob_exact,X                          ; (relevant: decision 33)
     TXA : LDY draws : STA draw_slots,Y
     INC draws
 .next

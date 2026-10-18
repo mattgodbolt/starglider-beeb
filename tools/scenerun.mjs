@@ -154,16 +154,19 @@ if (frameRange) [lo, hi] = frameRange.split("-").map(Number);
 // The object table's fields in main RAM (the renderer's), and how a
 // record's bytes go into them. tools/mkscene.py's records have the ST's
 // words little-endian but for the bytes at +22 to +25, so a byte field
-// elsewhere sits at its offset with the low bit flipped.
+// elsewhere sits at its offset with the low bit flipped. The port's own
+// field, ob_exact, is cleared for the first frame and then carried from
+// frame to frame, as the disc carries it from step to step: an object
+// relevant at one is rotated exactly at once at the next (decision 33).
 const layout = JSON.parse(fs.readFileSync("build/gen/objects.json", "utf8"));
 const fields = layout.fields.filter((f) => f.where === "main");
-function putObjects(records) {
+function putObjects(records, first) {
     for (let slot = 0; slot < layout.slots; slot++) {
         const rec = records.subarray(64 * slot, 64 * slot + 64);
         if (rec[1] !== 0) throw new Error(`slot ${slot}: type ${rec[0] | (rec[1] << 8)} doesn't fit a byte`);
         for (const f of fields) {
             const at = f.arrays.map(need);
-            if (f.kind === "port") ram[at[0] + slot] = 0;
+            if (f.kind === "port") { if (first) ram[at[0] + slot] = 0; }
             else if (f.kind === "byte") ram[at[0] + slot] = rec[f.st >= 0x22 && f.st < 0x26 ? f.st : f.st ^ 1];
             else if (f.kind === "word8") ram[at[0] + slot] = rec[f.st];
             else if (f.kind === "word") {
@@ -177,7 +180,7 @@ const word = (lo, hi, slot) => ram[need(lo) + slot] | (ram[need(hi) + slot] << 8
 const out = [];
 for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
     const fr = scenes[n];
-    putObjects(Buffer.from(fr.objects, "hex"));
+    putObjects(Buffer.from(fr.objects, "hex"), n === lo);
     for (const [name, v] of Object.entries(fr.zp)) {
         if (name.startsWith("pl_")) pokew(need(name), v);
         else ram[need(name)] = v & 0xff;
