@@ -162,59 +162,49 @@ STICK_NOISE = 1                     ; the most a still stick's reading moves
 .input_step
 {
     ZA_AUTO2 d, s
-    ZA_AUTO1 r                                  ; a reading, read once: the interrupt writes it
-    ZA_AUTO1 u
-    \ x: the BBC's reading falls to the right
-    LDA adc_raw : STA r
-    SEC : SBC adc_kept : JSR noise : BCC x_done
-    LDA adc_kept : JSR scale_x : MOVW s, d
-    LDA r : STA adc_kept : JSR scale_x
-    SUBW s, d                                   ; the scaled kept less the scaled new
-    ADDW mouse_x, s
-.x_done
-    \ y: the BBC's reading falls as the stick comes back
-    LDA adc_raw+1 : STA r
-    SEC : SBC adc_kept+1 : JSR noise : BCC done
-    LDA adc_kept+1 : JSR scale_y : MOVW s, d
-    LDA r : STA adc_kept+1 : JSR scale_y
-    SUBW s, d
-    LDA key_state + ST_BUTTON_RIGHT : BNE speed
-    ADDW mouse_y, s
-.done
+    ZA_AUTO1 r, u
+    LDX #1                                      ; y, then x
+.axis
+    LDA adc_raw,X : STA r                       ; (read once: the interrupt writes it)
+    SEC : SBC adc_kept,X : BCS more             ; |raw - kept|, more than noise?
+    EOR #&FF : INC A
+.more
+    CMP #STICK_NOISE + 1 : BCC next
+    LDA adc_kept,X : JSR scale : MOVW s, d
+    LDA r : STA adc_kept,X : JSR scale
+    SUBW s, d                                   ; the scaled kept less the scaled new:
+                                                ; the reading falls right, and back
+    \ x onto the turn; y onto the climb, or with the right button held the
+    \ speed accumulator
+    LDY #0
+    TXA : BEQ add
+    LDY #2
+    LDA key_state + ST_BUTTON_RIGHT : BEQ add
+    LDY #4
+.add
+    LDA mouse_x,Y : CLC : ADC s : STA mouse_x,Y
+    LDA mouse_x+1,Y : ADC s+1 : STA mouse_x+1,Y
+    ASSERT mouse_y = mouse_x + 2 AND speed_acc = mouse_x + 4
+.next
+    DEX : BPL axis
     RTS
-.speed
-    ADDW speed_acc, s
-    RTS
-\ noise: d = A, with the carry the subtraction left, as a 9-bit signed
-\ word; carry set if it's more than noise
-.noise
-    STA d
-    LDA #0 : SBC #0 : STA d+1                   ; (a borrow: -1)
-    BPL positive
-    LDA d : EOR #&FF : INC A                    ; |d|
-    BRA compare
-.positive
-    LDA d
-.compare
-    CMP #STICK_NOISE + 1
-    RTS
-\ scale_x: d = 31/8 A (rounded down), A an ADC reading: 4 A less A / 8
-\ rounded up
-.scale_x
+\ scale: d = A, an ADC reading, by axis X's scale, rounded down: x's 31/8
+\ (4 A less A / 8 rounded up), y's 5/2 (2 A and A / 2)
+.scale
     STA d : STZ d+1
+    CPX #0 : BNE scale_y
     CLC : ADC #7 : ROR A : LSR A : LSR A : STA u
     ASL d : ROL d+1 : ASL d : ROL d+1
     LDA d : SEC : SBC u : STA d
-    BCS x_scaled
+    BCS scaled
     DEC d+1
-.x_scaled
+.scaled
     RTS
-\ scale_y: d = 5/2 A (rounded down), A an ADC reading
 .scale_y
-    STA d : STZ d+1
-    LSR A                                       ; A / 2 ...
-    ASL d : ROL d+1                             ; ... and 2 A
+    LSR A
+    ASL d : ROL d+1
     CLC : ADC d : STA d
-    LDA d+1 : ADC #0 : STA d+1
+    BCC scaled
+    INC d+1
     RTS
 }
