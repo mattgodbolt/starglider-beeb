@@ -102,7 +102,7 @@ def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
     n = 3 * rows
     emit(f"""\\ {name}_setup: specialise {name}_vertex to the object's {mag} and
 \\ {sign} (by term: {rows} rows of x, y, z), or {name}8_vertex if every
-\\ term's high byte is zero; {call} calls whichever.
+\\ term's high byte is zero; {call} jumps to whichever.
 .{name}_setup
 {{
     ZA_AUTO 3, sum
@@ -149,10 +149,11 @@ def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
     emit()
 
 
-def vertex(name, prefix, rows, acc, start):
+def vertex(name, prefix, rows, acc, start, back):
     emit(f"\\ {name}_vertex: {acc} = the matrix by (xf_u - 128), / 256. A term is the")
     emit("\\ high byte by u (X:xf_plo) and the low byte by u, its high byte, added in")
-    emit("\\ A; the first column's terms add to the starting values.")
+    emit("\\ A; the first column's terms add to the starting values. Its one caller")
+    emit(f"\\ jumps here, and it jumps back to {back}.")
     emit(f".{name}_vertex")
     for j in range(3):
         emit(f"    LDY xf_u+{j}")
@@ -188,13 +189,13 @@ def vertex(name, prefix, rows, acc, start):
             emit(f".{t}_m1")
             emit("    EOR #0                                ; patched: the sign")
             emit(f"    ADC {src}+1 : STA {a}+1")
-    emit("    RTS")
+    emit(f"    JMP {back}")
     emit()
 
 
-def vertex8(name, prefix, rows, acc, start):
+def vertex8(name, prefix, rows, acc, start, back):
     emit(f"\\ {name}8_vertex: {name}_vertex for a matrix whose high bytes are zero, so")
-    emit("\\ a term is the low byte by u, its high byte, alone.")
+    emit(f"\\ a term is the low byte by u, its high byte, alone; back to {back}.")
     emit(f".{name}8_vertex")
     for j in range(3):
         emit(f"    LDY xf_u+{j}")
@@ -218,7 +219,7 @@ def vertex8(name, prefix, rows, acc, start):
             emit(f".{t}_m1")
             emit("    ADC #0                                ; patched: the sign")
             emit(f"    STA {a}+1")
-    emit("    RTS")
+    emit(f"    JMP {back}")
     emit()
 
 
@@ -230,10 +231,10 @@ def sums(rows, acc, start, what):
 
 sums(3, "xf_acc", "xf_start", "x', y', z' in world units")
 setup("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start", None)
-vertex("xform", "xf", 3, "xf_acc", "xf_start")
+vertex("xform", "xf", 3, "xf_acc", "xf_start", "vertex.back")
 sums(2, "sc_acc", "sc_start", "the screen's x and y")
 setup_choosing("screen", "sc", "s8", 2, "sc_bmag", "sc_bsign", "sc_start", ["sc_x0q", "sc_y0q"],
                "vertex_far.screen")
-vertex("screen", "sc", 2, "sc_acc", "sc_start")
-vertex8("screen", "s8", 2, "sc_acc", "sc_start")
+vertex("screen", "sc", 2, "sc_acc", "sc_start", "vertex_far.back")
+vertex8("screen", "s8", 2, "sc_acc", "sc_start", "vertex_far.back")
 print("\n".join(out))

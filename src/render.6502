@@ -591,13 +591,12 @@ ENDMACRO
 .vertex_far
 {
     ZA_AUTO1 vtx
-    TAX
-    LDA vert_mark,X : CMP stamp : BNE new
+    TAY
+    LDA vert_mark,Y : CMP stamp : BNE new
     RTS
 .new
-    LDA stamp : STA vert_mark,X
-    STX vtx
-    TXA : TAY
+    LDA stamp : STA vert_mark,Y
+    STY vtx
     CPY sh_nstill : BCS moving
     LDA (sh_vx),Y : EOR #&80 : STA xf_u
     LDA (sh_vy),Y : EOR #&80 : STA xf_u+1
@@ -609,9 +608,10 @@ ENDMACRO
     LDA (fr_vz),Y : EOR #&80 : STA xf_u+2
 .got
 .screen
-    JSR screen_vertex                       ; patched by screen_setup; from the centre's quarters
-    ZA_CANCALL screen_vertex, screen8_vertex
-    LDY vtx
+    JMP screen_vertex                       ; or screen8_vertex (screen_setup's), back to back
+    ZA_CANJUMP screen_vertex, screen8_vertex
+.back
+    LDY vtx                                 ; from the centre's quarters
     TO_PIXELS sc_acc, VIEW_CX, v_sxlo, v_sxhi
     TO_PIXELS sc_acc+2, VIEW_CY, v_sylo, v_syhi
     RTS
@@ -729,13 +729,12 @@ ENDMACRO
 {
     ZA_AUTO1 vtx
     ZA_AUTO2 cvy
-    TAX
-    LDA vert_mark,X : CMP stamp : BNE new
+    TAY
+    LDA vert_mark,Y : CMP stamp : BNE new
     RTS
 .new
-    LDA stamp : STA vert_mark,X
-    STX vtx
-    TXA : TAY
+    LDA stamp : STA vert_mark,Y
+    STY vtx
     CPY sh_nstill : BCS moving
     LDA (sh_vx),Y : EOR #&80 : STA xf_u
     LDA (sh_vy),Y : EOR #&80 : STA xf_u+1
@@ -746,7 +745,8 @@ ENDMACRO
     LDA (fr_vy),Y : EOR #&80 : STA xf_u+1
     LDA (fr_vz),Y : EOR #&80 : STA xf_u+2
 .got
-    JSR xform_vertex
+    JMP xform_vertex                        ; which comes back to back
+.back
     LDY vtx
     WORLD xf_acc, tx, px, v_xlo, v_xhi
     WORLD xf_acc+2, ty, cvy, v_ylo, v_yhi
@@ -831,10 +831,29 @@ ENDMACRO
     LDA #0 : ROR A : STA pq
     RTS
 .fits
-    \ |x| R >> 8 into X:pq:p1: x's high byte by R, then its low byte by R's
-    \ high byte and by R's low byte (that one's high byte only, in A).
-    \ Each product's high byte leaves C set, as a product isn't negative.
-    LDY xh
+    \ |x| R >> 8 into A:pq:p1: x's low byte by R's high byte and by its low
+    \ byte (that one's high byte only), then x's high byte by R, if it
+    \ isn't zero. Each product's high byte leaves C set, as a product
+    \ isn't negative.
+    LDY xl
+    SEC
+.c  LDA sqr_lo,Y
+.d  SBC neg_lo,Y
+    STA p1
+.e  LDA sqr_hi,Y
+.f  SBC neg_hi,Y
+    STA pq
+.a  LDA sqr_hi,Y
+.b  SBC neg_hi,Y
+    \ that + p1, carrying into pq (a product's high byte, below 255)
+    CLC : ADC p1 : STA p1
+    BCC c1
+    INC pq
+.c1
+    LDY xh : BNE high
+    TYA
+    BRA shift
+.high
     SEC
 .g  LDA sqr_lo,Y
 .h  SBC neg_lo,Y
@@ -848,22 +867,8 @@ ENDMACRO
 .m  LDA sqr_hi,Y
 .n  SBC neg_hi,Y
     TAX
-    LDY xl
-.c  LDA sqr_lo,Y
-.d  SBC neg_lo,Y
-    STA p1
-.e  LDA sqr_hi,Y
-.f  SBC neg_hi,Y
-    STA pq
-.a  LDA sqr_hi,Y
-.b  SBC neg_hi,Y
-    \ that + p1 + u0, carrying into pq + u1 + w0 (pq, a product's high
-    \ byte, is below 255), carrying into X
-    CLC : ADC p1
-    BCC c1
-    INC pq
-.c1
-    CLC : ADC u0 : STA p1
+    \ p1 + u0, carrying into pq + u1 + w0, carrying into X
+    CLC : LDA p1 : ADC u0 : STA p1
     LDA pq : ADC u1
     BCC c2
     INX
@@ -873,9 +878,9 @@ ENDMACRO
     BCC c3
     INX
 .c3
+    TXA
     \ >> S, unrolled: each S has its own way in (shift_lo, shift_hi),
     \ which shifts A:pq:p1 left or right, whichever is fewer bits
-    TXA
 .shift
     JMP right0                              ; patched by proj_z
     ZA_CANJUMP right24_2, right24_3, right24_4, left24_3, left24_2, left24_1, right0, right16_1, right16_2, right16_3, right16_4, right16_5, left16_2, left16_1
