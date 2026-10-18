@@ -42,7 +42,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import st_prg  # noqa: E402
 
 HANDLER_TABLE, HANDLERS = 0x08252, 62
-# The ST's handlers and the port's routines for them (src/logic/handlers.6502).
+# The ST's handlers and the port's routines for them (src/logic/handlers.6502),
+# but for SKIPPED's two, which the port has none for.
 HANDLER_NAMES = {
     0x07AA0: "h_none", 0x07AAE: "h_silo", 0x07AC6: "h_mine", 0x07BF4: "h_fighter",
     0x07CA4: "h_wanderer", 0x07D8E: "h_neutron", 0x07DD2: "h_homing", 0x080D8: "h_tank",

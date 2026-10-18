@@ -35,7 +35,6 @@ MACRO HDECX lo, hi
     DEC lo,X
 ENDMACRO
 
-
 \ The ST's tables (tools/mkhandlers.py), with the macros angle_to_player's
 \ lookup takes
 INCLUDE "../../build/gen/handlers.6502"
@@ -49,13 +48,14 @@ INCLUDE "../../build/gen/handlers.6502"
 \ after the first slot (whose handler sees it, as the ST's does). random32's
 \ state is in zero page meanwhile (h_random32).
 \
-\ The walk stops at the slot past its last (the table always has one: the
-\ ST's count stops short of the silo's records), made to look exploding
-\ until then, so that only an exploding slot tests for the end; no
-\ handler reads another slot's exploding.
+\ The walk stops at the slot past its last (the table has one past the
+\ ST's last, as the silo's records follow), made to look exploding until
+\ then, so that only an exploding slot tests for the end; no handler reads
+\ another slot's exploding.
 .object_handlers
 {
-    ZA_AUTO1 limit, kept
+    ZA_AUTO1 limit                      ; the slot the walk stops at
+    ZA_AUTO1 kept                       ; that slot's own exploding
     STZ shot_n                  ; (for the drawing: this step's shots, enemy_laser's)
     LDX #0
     LDA n_slots : BEQ done
