@@ -76,9 +76,10 @@ def lookups(prefix, e, mag):
 
 def sums_loop(rows, mag, sign, start, origin, skip_zero):
     """Each row's sum of its terms' signed magnitudes (sum), made in a loop,
-    and so its starting value; each term's sign kept as a mask (mask). With
-    skip_zero, a term whose magnitude is zero is left out, and the one each
-    other term adds counted (ones)."""
+    and so its starting value; each term's sign (bit 7) widened in place to
+    a mask, &00 or &FF, as nothing reads it after. With skip_zero, a term
+    whose magnitude is zero is left out, and the one each other term adds
+    counted (ones)."""
     for i in range(rows):
         ix = "{" + ", ".join(str(2 * e) for e in range(3 * i, 3 * i + 3)) + "}"
         iy = f"{3 * i}..{3 * i + 2}"
@@ -91,7 +92,6 @@ def sums_loop(rows, mag, sign, start, origin, skip_zero):
             emit(f"    BEQ next{i}")
         emit(f"    LDA {sign},Y : ZA_INDEXEDBY {iy}")
         emit(f"    BMI neg{i}")
-        emit(f"    LDA #0 : STA mask,Y : ZA_INDEXEDBY {iy}")
         emit(f"    CLC : LDA sum : ADC {mag},X : ZA_INDEXEDBY {ix}")
         emit(f"    STA sum : LDA sum+1 : ADC {mag}+1,X : ZA_INDEXEDBY {ix}")
         emit(f"    STA sum+1 : BCC pos{i}")
@@ -101,7 +101,7 @@ def sums_loop(rows, mag, sign, start, origin, skip_zero):
             emit("    DEC ones")
         emit(f"    BRA next{i}")
         emit(f".neg{i}")
-        emit(f"    LDA #&FF : STA mask,Y : ZA_INDEXEDBY {iy}")
+        emit(f"    LDA #&FF : STA {sign},Y : ZA_INDEXEDBY {iy}")
         emit(f"    SEC : LDA sum : SBC {mag},X : ZA_INDEXEDBY {ix}")
         emit(f"    STA sum : LDA sum+1 : SBC {mag}+1,X : ZA_INDEXEDBY {ix}")
         emit(f"    STA sum+1 : BCS neg_c{i}")
@@ -114,9 +114,9 @@ def sums_loop(rows, mag, sign, start, origin, skip_zero):
         row_start(i, start, origin, skip_zero)
 
 
-def signs(t, e):
-    """Patch term e's sign, from its mask."""
-    emit(f"    LDA mask+{e} : STA {t}_m0+1 : STA {t}_m1+1 : AND #CARRY_BIT : ORA #CLC_OP : STA {t}_c0")
+def signs(t, e, sign):
+    """Patch term e's sign, from its mask (sums_loop's)."""
+    emit(f"    LDA {sign}+{e} : STA {t}_m0+1 : STA {t}_m1+1 : AND #CARRY_BIT : ORA #CLC_OP : STA {t}_c0")
 
 
 def setup_skipping(name, prefix, rows, mag, sign, start):
@@ -129,8 +129,7 @@ def setup_skipping(name, prefix, rows, mag, sign, start):
 .{name}_setup
 {{
     ZA_AUTO 3, sum
-    ZA_AUTO1 ones                       ; the ones the row's terms add, negated
-    ZA_AUTO {n}, mask                   ; each term's sign, &00 or &FF""")
+    ZA_AUTO1 ones                       ; the ones the row's terms add, negated""")
     sums_loop(rows, mag, sign, start, None, True)
     for e in range(n):
         t = f"{prefix}{e}"
@@ -138,7 +137,7 @@ def setup_skipping(name, prefix, rows, mag, sign, start):
         emit(f"    \\ term {e}")
         emit(f"    LDA {mag}+{2 * e} : ORA {mag}+{2 * e + 1} : BEQ zero{e}")
         lookups(prefix, e, mag)
-        signs(t, e)
+        signs(t, e, sign)
         emit(f"    LDA #LDA_IMM : STA {t}_k")
         if j == 0:
             emit(f"    LDA #BRA_OP : STA {prefix}row{i}_k")
@@ -154,8 +153,8 @@ def setup_skipping(name, prefix, rows, mag, sign, start):
 
 
 def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
-    """name_setup, compact: the rows' sums in a loop, each term's sign kept as
-    a mask; then the terms patched into name_vertex, or into name8_vertex
+    """name_setup, compact: the rows' sums in a loop, each term's sign made a
+    mask; then the terms patched into name_vertex, or into name8_vertex
     if every magnitude's high byte is zero, and the call site set to it."""
     n = 3 * rows
     emit(f"""\\ {name}_setup: specialise {name}_vertex to the object's {mag} and
@@ -163,8 +162,7 @@ def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
 \\ term's high byte is zero; {call} jumps to whichever.
 .{name}_setup
 {{
-    ZA_AUTO 3, sum
-    ZA_AUTO {n}, mask                   ; each term's sign, &00 or &FF""")
+    ZA_AUTO 3, sum""")
     sums_loop(rows, mag, sign, start, origin, False)
     emit("    LDA " + " : ORA ".join(f"{mag}+{2 * e + 1}" for e in range(n)) + " : BEQ bytes")
     emit("    JMP words")
@@ -176,7 +174,7 @@ def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
         if e % 3:
             emit(f"    LDA {mag}+{2 * e} : BEQ zero{e}")
             emit(f"    STA {t}_a+1 : EOR #&FF : STA {t}_b+1")
-            signs(t, e)
+            signs(t, e, sign)
             emit(f"    LDA #LDA_IMM : STA {t}_k")
             emit(f"    BRA done{e}")
             emit(f".zero{e}")
@@ -184,7 +182,7 @@ def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
             emit(f".done{e}")
         else:
             emit(f"    LDA {mag}+{2 * e} : STA {t}_a+1 : EOR #&FF : STA {t}_b+1")
-            signs(t, e)
+            signs(t, e, sign)
     emit("    RTS")
     emit(".words")
     emit(f"    LDA #LO({name}_vertex) : STA {call}+1 : LDA #HI({name}_vertex) : STA {call}+2")
@@ -192,7 +190,7 @@ def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
         t = f"{prefix}{e}"
         emit(f"    \\ term {e}")
         lookups(prefix, e, mag)
-        signs(t, e)
+        signs(t, e, sign)
     emit("    RTS")
     emit("}")
     emit()
@@ -211,6 +209,9 @@ def vertex(name, prefix, rows, acc, start, back, skipping=False):
     emit(f"\\ Its one caller jumps here, and it jumps back to {back}.")
     emit(f".{name}_vertex")
     if skipping:
+        # Every row's first term that's done writes the row, so the sums'
+        # old values are dead here, whatever skips Baron can see.
+        emit(f"    ZA_DISCARD {acc}")
         for i in range(rows):
             r = f"{prefix}row{i}"
             emit(f".{r}_k")
