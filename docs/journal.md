@@ -996,3 +996,40 @@ attacker's place at its own step, and a new game starts with none. There
 is room for four a step over a frame's most steps (`SHOTS`, `ASSERT`ed
 against `MAX_STEPS`).
 
+### The near box, the slack and carried relevance
+
+Decisions 31 to 33 were built on 2026-10-18.
+
+- **The near box** (31). The checks now call an approximated object near
+  when the ST's own x' and z' are within the largest collision box,
+  NEAR_BOX, which the build takes from STAR.PRG's box table (the beam's).
+  The port tests its approximation one slack wider.
+- **The slack** (32) is 444, `ASSERT`ed to cover ROT_BOUND, the most the
+  approximation can be off the ST's, which `tools/mkrotate.py` now
+  computes from its own derivation. The checks hold the approximation to
+  ROT_BOUND rather than the slack, so a slip in the derivation would fail
+  them, and `make rot` holds the ST's own matrices to it too. The test's
+  edge ahead compares the low byte as well, since the slack is no longer
+  a multiple of 256.
+- **Carried relevance** (33). An object relevant at the last step is
+  rotated exactly at once. For one rotated exactly then, relevant means
+  drawn or within NEAR_BOX: an exact position needs no slack. In a hard
+  turn 8.9 objects a step are carried, so as many fewer are approximated,
+  for 0.2 more exact rotations. The first build kept an object carried
+  while the relevance test, run again on its exact result, held. That
+  saved less: the test, and a flag on every approximation to tell the
+  paths apart, cost more than they kept.
+- **Both checks take the carried path.** `scenerun.mjs` carries ob_exact
+  from frame to frame, as the disc carries it from step to step. A carried
+  path made to skip its rotation fails both.
+- **build_matrix's products with the heading** moved to the world bank's
+  end (`src/matrix.6502`), past the logic bank's code. build_matrix pages
+  that bank for its sines anyway, and it frees about 290 bytes of main
+  RAM, the region every layer wants.
+
+A hard turn's rotations fell from 34,700 cycles a step to 31,800 and its
+approximations from 40.9 to 32.0 a step; flying straight, 9,900 to 9,700
+(measured 2026-10-18). The list phase now ends a few bytes short of the
+sine table, which is aligned to 1K: much more code there would move the
+table, and everything after it, 1K on.
+

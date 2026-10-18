@@ -114,7 +114,7 @@ NEXT
     MOVW build_matrix.m_d6, cam_d6
     MOVW mat+2, cam_kept+2 : MOVW mat+8, cam_kept+8 : MOVW mat+14, cam_kept+14
     MOVW mul_x, build_matrix.m_c1
-    JSR build_matrix.heading
+    JSR matrix_heading
     JSR ground_kept
     JMP made
 }
@@ -223,23 +223,25 @@ ENDMACRO
 \ RELEVANT yes (decision 11): on to yes if an object at rot_acc, rotated
 \ approximately (within ROT_SLACK), could be drawn or meet the player:
 \ in front, short of &2000 and within the view's pyramid across, or within
-\ NEAR_BOX in x and z (the largest collision box is 2000). Only those
-\ need the exact rotation: nothing else the game decides reads the rest.
-\ The checks take an object as near when the ST's own x' and z' are within
-\ NEAR_BOX, so the approximation's are tested ROT_SLACK wider (NEAR_TEST)
-\ to be sure of every one. The approximation has no y' (decision 21), so
-\ neither test has it: the collisions test y only once x and z are in the
-\ box. (rotate_lists' z2 and t16 are its workings.)
-ROT_SLACK = 512
-NEAR_BOX = 2000 + ROT_SLACK
+\ NEAR_BOX in x and z (the largest collision box). Only those need the
+\ exact rotation: nothing else the game decides reads the rest. The checks
+\ take an object as near when the ST's own x' and z' are within NEAR_BOX
+\ (decision 31), so the approximation's are tested ROT_SLACK wider
+\ (NEAR_TEST) to be sure of every one. The approximation has no y'
+\ (decision 21), so neither test has it: the collisions test y only once x
+\ and z are in the box. (rotate_lists' z2 and t16 are its workings.)
+ROT_SLACK = 444                         ; decision 32
+ASSERT ROT_SLACK >= ROT_BOUND           ; (rotate.6502's, the approximation's)
+NEAR_BOX = SIZE_Z_MAX
 NEAR_TEST = NEAR_BOX + ROT_SLACK
 MACRO RELEVANT yes
     LDA rot_acc+5 : BPL ahead
     \ behind the player: below -3 slack / 2 the pyramid is empty, and only
-    \ NEAR_TEST can catch it; above, so it is if it's wholly behind the view,
-    \ z <= -(size + slack)
+    \ NEAR_TEST can catch it (tested by the high byte, which rounds that
+    \ down: the pyramid's own test takes the few between); above, so it is
+    \ if it's wholly behind the view, z <= -(size + slack)
     CMP #HI(-3 * ROT_SLACK / 2) : BCS just_behind
-    ASSERT LO(-3 * ROT_SLACK / 2) = 0 AND -3 * ROT_SLACK / 2 > -NEAR_TEST
+    ASSERT -3 * ROT_SLACK / 2 > -NEAR_TEST
     JMP near_test
 .just_behind
     LDX slot : LDY ob_type,X
@@ -253,8 +255,8 @@ MACRO RELEVANT yes
     \ ahead of &2000 (with the slack), it's neither drawn nor near
     CMP #HI(&2000 + ROT_SLACK) : BCC pyramid
     BNE not
-    LDA rot_acc+4 : BNE not
-    ASSERT LO(&2000 + ROT_SLACK) = 0 AND &2000 + ROT_SLACK > NEAR_TEST
+    LDA rot_acc+4 : CMP #LO(&2000 + ROT_SLACK) + 1 : BCS not
+    ASSERT LO(&2000 + ROT_SLACK) < &FF AND &2000 + ROT_SLACK > NEAR_TEST
 .pyramid
     \ in the view's pyramid across, with the slack: |x| <= 2z + 3 slack,
     \ which is no pyramid if that's negative
@@ -293,7 +295,8 @@ ENDMACRO
     STZ nears : STZ draws
     \ each object's way, by the camera's matrix: unrotated if it's the
     \ identity, exactly if it has no products (as cheap), and otherwise
-    \ approximately first (decision 11)
+    \ approximately first (decision 11), unless it was relevant at the last
+    \ step (decision 33)
     LDA #LO(approximately) : LDY #HI(approximately)
     BIT rot_exactly : BPL way
     LDA #LO(offset_exactly) : LDY #HI(offset_exactly)
@@ -323,14 +326,34 @@ ENDMACRO
     LDA #1 : STA ob_exact,X
     JMP stored
 .approximately
+    \ ob_exact &FF: relevant at the last step, and so likely at this one
+    LDA ob_exact,X : BMI carried
     OFFSET
     JMP rotate_approx                       ; (on to relevance)
-.offset_exactly
+.carried
+    \ exactly at once, and relevant at the next step too if it's near or
+    \ drawn (the draw list marks it): an exact position needs no slack
     OFFSET
-.exactly
     JSR rotate_exact
     LDX slot
-    LDA #1 : STA ob_exact,X
+    WITHIN rot_acc+4, #NEAR_BOX, lapsed
+    WITHIN rot_acc, #NEAR_BOX, lapsed
+    BRA store
+.lapsed
+    LDA #1
+    BRA exact
+.offset_exactly
+    OFFSET
+    JSR rotate_exact
+    LDA #1                                  ; (relevant if the draw list marks it)
+    BRA exact
+.exactly
+    \ relevant: exactly, and at once at the next step
+    JSR rotate_exact
+    LDA #&FF
+.exact
+    LDX slot
+    STA ob_exact,X
 .store
     \ the camera-space position, and the near list unless it's exploding
     LDA rot_acc : STA ob_cx_lo,X : LDA rot_acc+1 : STA ob_cx_hi,X
@@ -360,6 +383,7 @@ ENDMACRO
     WITHIN rot_acc, z2, next
     WITHIN rot_acc+2, z2, next
     LDA #&FF : STA ob_drawn,X
+    STA ob_exact,X                          ; (relevant: decision 33)
     TXA : LDY draws : STA draw_slots,Y
     INC draws
 .next

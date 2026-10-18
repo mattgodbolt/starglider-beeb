@@ -5,8 +5,10 @@ and the model of rotate_approx's (tools/mkrotate.py), bit for bit.
 
 The matrices are the ST's from random angles and quarter angles, a steady
 turn's (only the heading changing, signs crossing quarters), and made-up
-ones with units, zeros and products anywhere, column y's units too. The
-offsets include column y's high byte 0 and -1 and the range's ends.
+ones with units, zeros and products anywhere, column y's units too; each
+case says whether its matrix is the ST's, whose rows are unit vectors, as
+mkrotate.py's bound on the approximation needs. The offsets include column
+y's high byte 0 and -1 and the range's ends.
 """
 import json
 import random
@@ -54,7 +56,7 @@ def approx(cam, d):
 prg = st_prg.load(str(ROOT / "build/st/STAR.PRG"))
 r = R.Renderer(prg)
 rng = random.Random(1)
-cams = []
+cams = []                       # (the matrix, whether it is the ST's)
 # the ST's matrices from random angles, and from angles at the quarters
 for _ in range(60):
     p, h, rl = rng.randrange(4096), rng.randrange(4096), rng.randrange(512)
@@ -63,11 +65,11 @@ for _ in range(60):
     if rng.random() < 0.3:
         rl = rng.choice([0, 128, 256, 384])
     m = r.matrix(*r.angles(p, h, rl))
-    cams.append([m[a][b] for a in range(3) for b in range(3)])
+    cams.append(([m[a][b] for a in range(3) for b in range(3)], True))
 # a steady turn: only the heading changing, signs crossing quarters
 for h in range(0, 4096, 97):
     m = r.matrix(*r.angles(0, h, 31 * 8 // 8))
-    cams.append([m[a][b] for a in range(3) for b in range(3)])
+    cams.append(([m[a][b] for a in range(3) for b in range(3)], True))
 # made-up ones: units, zeros and products anywhere (column y's units too)
 choices = [0, 16384, -16384, 1, -1, 31, 32, -32, 33, 16351, 16352, 16353, -16383, 8191, -8192]
 for _ in range(80):
@@ -75,9 +77,9 @@ for _ in range(80):
     for e in range(9):
         c = rng.random()
         cam.append(rng.choice(choices) if c < 0.6 else rng.randrange(-16383, 16384))
-    cams.append(cam)
+    cams.append((cam, False))
 cases = []
-for cam in cams:
+for cam, st in cams:
     ds = []
     for _ in range(12):
         d = []
@@ -91,6 +93,6 @@ for cam in cams:
                 v = rng.randrange(-32768, 32768)
             d.append(v)
         ds.append({"d": d, "exact": exact(cam, d), "approx": approx(cam, d)})
-    cases.append({"cam": cam, "ds": ds})
+    cases.append({"cam": cam, "st": st, "ds": ds})
 Path(sys.argv[2]).write_text(json.dumps(cases))
 print(len(cases), "matrices")
