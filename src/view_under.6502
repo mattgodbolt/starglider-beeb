@@ -200,11 +200,11 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
 \ A far dot's camera-space position is cam (d - c) / 16384 for the camera
 \ at c, which while cam holds is the same less cam (c - c0) / 16384 since
 \ c0: so each such dot keeps its rotated position, plus that at the frame
-\ it was rotated (its base), and the frames after take off this frame's,
-\ dv_t, as long as cam is the same and the camera within 8192 of c0 on
-\ each axis (dots_steady). Bases are kept only in frames whose matrix
-\ held from the last frame's, so that a turn makes none.
-DV_F = 0 : DV_LO = 1 : DV_HI = 2          ; a base's fraction, low and high bytes, x' y' z' in turn
+\ it was rotated, rounded (its base), and the frames after take off this
+\ frame's, rounded, dv_t, as long as cam is the same and the camera within
+\ 8192 of c0 on each axis (dots_steady). Bases are kept only in frames
+\ whose matrix held from the last frame's, so that a turn makes none.
+DV_LO = 0 : DV_HI = 1                   ; a base's low and high bytes, x' y' z' in turn
 
 \ dots_steady: dv_steady and dv_t for this frame's camera (cam, at): a
 \ matrix not the last frame's (or the other view's) makes no base good;
@@ -326,9 +326,9 @@ DV_F = 0 : DV_LO = 1 : DV_HI = 2          ; a base's fraction, low and high byte
     LDA dot_z_lo,X : CMP dv_zlo,X : BNE none
     LDA dot_z_hi,X : CMP dv_zhi,X : BNE none
 FOR r = 0..2
-    LDA dv_base + DV_F * 40 + 120 * r,X : CMP dv_t + 3 * r
-    LDA dv_base + DV_LO * 40 + 120 * r,X : SBC dv_t + 3 * r + 1 : STA rot_acc + 2 * r
-    LDA dv_base + DV_HI * 40 + 120 * r,X : SBC dv_t + 3 * r + 2 : STA rot_acc + 2 * r + 1
+    LDA #&7F : CMP dv_t + 3 * r           ; (C clear, 1 more off, from a half)
+    LDA dv_base + DV_LO * 40 + 80 * r,X : SBC dv_t + 3 * r + 1 : STA rot_acc + 2 * r
+    LDA dv_base + DV_HI * 40 + 80 * r,X : SBC dv_t + 3 * r + 2 : STA rot_acc + 2 * r + 1
 NEXT
     CLC : RTS
 .none
@@ -336,15 +336,14 @@ NEXT
 }
 
 \ dot_base: the dot's rotated position (rot_acc) kept as its base, dv_t
-\ and a half on (so that what dots_draw takes off is rounded), with where
-\ the dot is.
+\ rounded on, with where the dot is.
 .dot_base
 {
     LDX dots_draw.dot
 FOR r = 0..2
-    LDA dv_t + 3 * r : CLC : ADC #&80 : STA dv_base + DV_F * 40 + 120 * r,X
-    LDA rot_acc + 2 * r : ADC dv_t + 3 * r + 1 : STA dv_base + DV_LO * 40 + 120 * r,X
-    LDA rot_acc + 2 * r + 1 : ADC dv_t + 3 * r + 2 : STA dv_base + DV_HI * 40 + 120 * r,X
+    LDA dv_t + 3 * r : CMP #&80           ; (C set, 1 more on, from a half)
+    LDA rot_acc + 2 * r : ADC dv_t + 3 * r + 1 : STA dv_base + DV_LO * 40 + 80 * r,X
+    LDA rot_acc + 2 * r + 1 : ADC dv_t + 3 * r + 2 : STA dv_base + DV_HI * 40 + 80 * r,X
 NEXT
     LDA dot_x_lo,X : STA dv_xlo,X
     LDA dot_x_hi,X : STA dv_xhi,X
@@ -370,7 +369,7 @@ NEXT
 .dv_xhi    SKIP 40
 .dv_zlo    SKIP 40
 .dv_zhi    SKIP 40
-.dv_base   SKIP 9 * 40
+.dv_base   SKIP 6 * 40
 
 \ The windows a dot must be strictly inside, as tests on its projection
 \ (128 x / z, 128 y / z): an offset that puts the inside from 0, and the
