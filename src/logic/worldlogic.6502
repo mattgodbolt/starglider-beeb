@@ -48,7 +48,7 @@ PROJ_SHIFT = 7
     STZ level_changed
     LDA score+2 : CMP last_score_byte : BEQ add
     INC level
-    LDA #&32 : STA level_msg
+    LDA #&32 : STA level_msg : STZ level_msg+1
     LDA score+2 : STA last_score_byte
     LDA #&FF : STA level_changed
     LDA level : CMP #&23 : BNE add

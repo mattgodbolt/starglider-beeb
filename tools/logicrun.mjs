@@ -46,7 +46,8 @@ const ROUTINES = {
     frame_end: { from: "message", to: "end", call: "frame_end_logic", bank: "BANK_LOGIC" },
     post: { from: "end", to: "next:top", call: "post_frame", bank: "BANK_LOGIC", unless: "level" },
     mine: { from: "mine", to: "mined", call: "mine_proximity", bank: "BANK_LOGIC", x: true },
-    level: { from: "level", to: "next:top", call: "level_start", bank: "BANK_LOGIC" },
+    level: { from: "level", to: "next:top", call: "level_start", bank: "BANK_LOGIC", d0: true },
+    newgame: { from: "newgame", to: "level", call: "new_game", bank: "BANK_LOGIC" },
 };
 
 const args = process.argv.slice(2);

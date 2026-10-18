@@ -59,7 +59,6 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .level_msg    SKIP 2        ; {ST $298(a6) word} the steps "LEVEL n" has left
 .missiles     SKIP 2        ; {ST $278(a6) word} the player's
 .flash0       SKIP 2        ; {ST $242(a6) word} this step's flash of colour 0 (0 none)
-.hits_taken   SKIP 4        ; {ST $0C4(a6) long} the enemies' laser hits, for the rating
     \ world_render's logic (logic/worldlogic.6502): what the panel and the
     \ drawing show
 .score        SKIP 4        ; {ST P&0150C long} BCD, eight digits
@@ -76,7 +75,6 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .dock_text    SKIP 1        ; the port's own: non-zero when the docked texts show (post_frame)
 .mine_text    SKIP 1        ; the port's own: a mine's text this frame (mine_proximity), 0 from post_frame
 .game_over    SKIP 2        ; {ST $12C(a6) word} 1: the energy ran out; 2: the shields
-.dockings     SKIP 4        ; {ST $0C0(a6) long} for the pilot rating
 .sample_clip  SKIP 1        ; the port's own: the speech sample_start plays (the ST's &A0, a pointer)
 .sample_len   SKIP 4        ; {ST &0A4 long} the ST's length of it, in bytes
 .sample_tacr  SKIP 1        ; {ST &2CF byte} the ST's Timer A control and data: its rate
@@ -146,8 +144,12 @@ SECTION LogicAndy, org = ANDY_OBJECTS_END, guard = ANDY_TOP, virtual = TRUE
 .last_score_byte SKIP 1     ; {ST $2D5(a6) byte} the score's second byte at the last level change
 .level_changed SKIP 1       ; {ST $2D7(a6) byte} &FF when the score has just changed its ten-thousands
 .docked_silo  SKIP 1        ; {ST $0A8(a6) slot} the silo docked in
+    \ the pilot rating's counts, in the ST's order: new_game clears them together
 .shots_fired  SKIP 4        ; {ST $0B0(a6) long}
 .hits_scored  SKIP 4        ; {ST $0B8(a6) long} laser hits that took a hit point
+.dockings     SKIP 4        ; {ST $0C0(a6) long} for the pilot rating
+.hits_taken   SKIP 4        ; {ST $0C4(a6) long} the enemies' laser hits, for the rating
+    ASSERT hits_scored = shots_fired + 4 AND dockings = shots_fired + 8 AND hits_taken = shots_fired + 12
 .laser_px     SKIP 2        ; {ST $254(a6) word} the laser's last box tested, projected: written, never read
 .laser_py     SKIP 2        ; {ST $256(a6) word}
 .laser_half_w SKIP 2        ; {ST $258(a6) word}
@@ -180,9 +182,5 @@ free_top = free_n           ; {ST $09C(a6) index &94C 4} (the ST's pointer past 
 .ram_hit      SKIP 1        ; {ST $2BF(a6) byte} this frame's collisions found a ram
 .ram_obj      SKIP 1        ; {ST $0AC(a6) slot} what was rammed
 .refuel_latch SKIP 1        ; {ST $2C4(a6) byte} the refuelling test is made for this contact
-
-    \ the frame's end and the post-frame tests (logic/frame.6502)
-
-    \ the level change (logic/level.6502)
 
 ENDSECTION

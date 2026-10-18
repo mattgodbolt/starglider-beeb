@@ -1,0 +1,21 @@
+# The level change in the missile view. Play reaches it only when L
+# launches the player's missile in the frame world_render raised the
+# level; the missile view's world_render never clears $2D7 (&0502C is on
+# the normal path alone), so the change runs again at every frame's end.
+# Here $2D7 is poked once the missile is flying (L, scancode &26). Each
+# change re-creates the objects, the missile hits one every few frames
+# and its life goes back to 16, so the view, and the changes, go on.
+# (Each change's flash takes the ST a while, so the waits are long; a
+# poke must not land inside one, which the comparison would see.)
+wait 38
+key 57
+wait 3
+debug parse {arm}
+debug echo \nSEG launch\n
+key 0x26
+wait 3
+debug w b $5c1d7 $ff
+debug echo \nSEG level\n
+wait 100
+debug echo \nSEG end\n
+quit
