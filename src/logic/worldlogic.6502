@@ -748,7 +748,8 @@ DOT_K = 3 * DOT_B
     LDA frame_count : BNE quiet
     LDA #SAMPLE_DOCKED : STA sample_clip
     LDA #LO(&1D00) : STA sample_len : LDA #HI(&1D00) : STA sample_len+1
-    JSR speech
+    LDA #LO(speech) : STA logic_vec : LDA #HI(speech) : STA logic_vec+1
+    JSR logic_bank_call                 ; (speech is in the logic's bank)
 .quiet
     LDA #&FF : TAY
 .energy

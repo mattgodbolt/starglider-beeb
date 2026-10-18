@@ -22,8 +22,11 @@ sysvia_ier = &FE4E          ; write bit 7 clear to disable the bits set
 sysvia_ora_nh = &FE4F       ; port A without handshake: the keyboard
 usrvia_t1cl = &FE64         ; T1's counter, low (reading it acknowledges T1)
 usrvia_t1ch = &FE65         ; ... high (writing it starts the count)
+usrvia_t2cl = &FE68         ; T2's counter, low (reading it acknowledges T2): the speech's;
+                            ; written, its latch
+usrvia_t2ch = &FE69         ; ... high (writing it starts the count)
 usrvia_acr = &FE6B
-usrvia_ifr = &FE6D
+usrvia_ifr = &FE6D          ; bit 6: T1 (the palette split); bit 5: T2
 usrvia_ier = &FE6E
 ula_pal    = &FE21          ; the video ULA's palette
 adc_control = &FE18         ; the Master's ADC: write a channel to convert it (bit 3

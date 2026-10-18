@@ -86,14 +86,6 @@ SIGHT_CY = 68
     \ main RAM's screen shown, and both cleared before they're drawn
     JSR erase_init
     STZ draw_buffer : STZ frame_drawn : STZ frame_ready
-    \ The disc reader at work (decision 12): until the game has a file of
-    \ its own to load as it plays, TABLES read again into the loading area,
-    \ below WINDOW's code and picture there, as the game starts
-    \ (tools/disccheck.mjs checks it).
-    LDX #DF_TABLES : LDY #BANK_PIC
-    STZ fe_dst : LDA #&80 : STA fe_dst+1
-    ASSERT CODE2 - TABLES <= WIN_PIC - &8000    ; (TABLES' guard is CODE2)
-    JSR disc_load
     JSR input_init
     BANK BANK_LOGIC
     JSR sound_init
@@ -122,13 +114,13 @@ SIGHT_CY = 68
 \ The files start loads (disc_load: the file, where, its bank), the last
 \ first.
 .disc_load_file
-    EQUB DF_WINDOW, DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
+    EQUB DF_SPEECH, DF_WINDOW, DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
 .disc_load_lo
-    EQUB LO(WIN_PIC), LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
+    EQUB LO(&8000), LO(WIN_PIC), LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
 .disc_load_hi
-    EQUB HI(WIN_PIC), HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
+    EQUB HI(&8000), HI(WIN_PIC), HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
 .disc_load_bank
-    EQUB BANK_PIC, BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
+    EQUB BANK_PIC, BANK_PIC, BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
 DISC_LOADS = P% - disc_load_bank
 
 \ ---------------------------------------------------------------------------
@@ -263,6 +255,8 @@ DF_COCKPIT = 4
 DF_LOGIC = 5
     EQUS "WINDOW "
 DF_WINDOW = 6
+    EQUS "SPEECH "
+DF_SPEECH = 7
 DISC_FILES = (P% - disc_names) DIV 7
 ASSERT DISC_FILES <= DISC_MAX
 

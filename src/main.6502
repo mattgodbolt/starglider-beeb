@@ -12,8 +12,9 @@
 \ runs SG, which makes no OS call: it loads the rest itself, with its own
 \ disc reader (disc.6502, decision 12), a track a revolution: HAZEL's
 \ files into HAZEL (the filing system's workspace until then), the shapes,
-\ the world and the logic into their banks, and the cockpit into the
-\ screen, which it copies into the shadow screen. (*SRLOAD, Q or no,
+\ the world and the logic into their banks, the loading area's window and
+\ speech into bank 7, and the cockpit into the screen, which it copies
+\ into the shadow screen. (*SRLOAD, Q or no,
 \ loaded the banks at a fraction of the speed: docs/journal.md,
 \ 2026-10-18.)
 \ ***************************************************************************
@@ -81,7 +82,8 @@ ENDIF
 INCLUDE "engine.6502"
 INCLUDE "input.6502"
 INCLUDE "sound.6502"
-ASSERT P% <= &3000                  ; (the interrupt runs it)
+INCLUDE "speech.6502"
+ASSERT P% <= &3000                  ; (the interrupt runs them)
 INCLUDE "cockpit.6502"
 INCLUDE "disc.6502"
 
@@ -111,6 +113,16 @@ ENDSECTION
 \ The cockpit's screen (tools/mkcockpit.py), which the start loads.
 SECTION Cockpit, org = SCREEN, filename = "COCKPIT"
 INCBIN "../build/gen/cockpit.bin"
+ENDSECTION
+
+\ The speech's first area (speech_tick.6502), bank 7's first 4K, which no code
+\ can use, past the zeros that keep the OS from taking it for a ROM's
+\ header after a BREAK.
+SECTION SpeechA, org = &8000, filename = "SPEECH", guard = ANDY_TOP
+    EQUD 0, 0
+    ASSERT P% = SPEECH_A
+INCBIN "../build/gen/speech_a.bin"
+    ASSERT P% = ANDY_TOP
 ENDSECTION
 
 \ The controls' state (input.6502), in the workspace, below &3000 for the

@@ -1,0 +1,60 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the speech player (decision 5): what must
+\ lie below &3000
+\
+\ Clare Edgeley's clips (tools/mkspeech.py), a sample a tick of User VIA
+\ T2 at SPEECH_RATE, on tone 1: its period 1, a carrier the BBC's analogue
+\ stage smooths away, its attenuation the sample (docs/research/beeb.md,
+\ section 5). The player is in bank 7 (speech_tick.6502). Here is what the
+\ interrupt must find whichever bank is paged: its entry, which pages bank
+\ 7, its way out, which puts the bank back, and the read of the clips' area
+\ in the logic bank, which code in bank 7 can't page. sfx.6502's
+\ sample_start starts a clip.
+\ ***************************************************************************
+
+SN_TONE1 = &A0
+SPEECH_RATE = 4096
+SPEECH_A = &8008                    ; bank 7's first 4K, past its ROM header's zeros
+SPEECH_END = &FF                    ; a clip's end, which no packed byte of its samples is
+\ T2 is one-shot: each tick starts the next count, for a period on from
+\ this tick's due moment. SPEECH_LAG is what the reload takes itself (the
+\ instructions from the count's read to its write, and the timer's own
+\ start): tools/speechcheck.mjs holds the rate to SPEECH_RATE.
+SPEECH_LAG = 17
+SPEECH_T2  = 1000000 DIV SPEECH_RATE - SPEECH_LAG
+
+\ sp_phase: bit 7 set while the next sample is a byte's second; bit 6
+\ sample_start's mark, a clip (sample_clip's) to start at the next tick.
+.sp_phase       SKIP 1
+
+\ speech_irq: IRQ1V while a clip plays (sample_start sets it, the clip's
+\ end puts irq_handler back), so that a tick needn't pass the engine's
+\ tests: User VIA T2's interrupt alone is the speech's tick, in bank 7
+\ (bank_now first, as the disc's NMI routine expects), and anything else,
+\ the palette split's with it or not, the engine's (engine.6502).
+.speech_irq
+    ZA_INTERRUPT
+    LDA usrvia_ifr : AND #&60 : CMP #&20 : BNE sp_engine    ; (T2 is bit 5, T1 6)
+    PHX
+    LDA bank_now : PHA
+    BANK BANK_PIC
+    JMP speech_tick
+\ speech_exit: speech_tick's way out: the bank put back, and a split come
+\ meanwhile handed on.
+.speech_exit
+    PLA : STA bank_now : STA romsel
+    PLX
+    BIT usrvia_ifr : BVS sp_engine
+    LDA &FC                                     ; the interrupted A, which the OS kept
+    RTI
+.sp_engine
+    JMP irq_handler
+
+\ speech_read: for speech_tick, the byte at speech_read_at in the logic
+\ bank's area, and bank 7 back. X goes.
+.speech_read
+    BANK BANK_LOGIC
+.speech_read_at
+    LDA &8000                                   ; (speech_tick sets it)
+    LDX #BANK_PIC : STX bank_now : STX romsel
+    RTS

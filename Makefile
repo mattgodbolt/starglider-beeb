@@ -8,9 +8,12 @@
 #   make check    sincos against the ST's sine table, the spike, the
 #                 disc's erasing (tools/erasecheck.mjs), its own disc
 #                 reader (tools/disccheck.mjs), its controls
-#                 (tools/inputcheck.mjs) and its sound effects (make sfx)
+#                 (tools/inputcheck.mjs), its sound effects (make sfx)
+#                 and its speech (make speech)
 #   make sfx      the disc's sound effects against the ST's YM writes
 #                 (tools/sfxcheck.mjs, on build/sfx's capture)
+#   make speech   the disc's speech against its packed levels, and a WAV of
+#                 each clip as the chip plays it (tools/speechcheck.mjs)
 #   make sfxcapture  capture the ST's sound effects in Hatari
 #                 (tests/st/sfx_all.txt; slow, needs Hatari)
 #   make spike    the spike on every captured scene, checked against the
@@ -43,7 +46,7 @@ ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
 SCENES   = flight towers docked missile
 SOURCES  = $(wildcard src/*.6502 src/logic/*.6502)
-GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/anim.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/sight.6502 build/gen/ground.6502 build/gen/window.6502 build/gen/panel.6502 build/gen/sfx.6502
+GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/anim.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/sight.6502 build/gen/ground.6502 build/gen/window.6502 build/gen/panel.6502 build/gen/sfx.6502 build/gen/speech.6502 build/gen/speech_clips.6502
 
 # A failed step leaves no half-made target behind (asm.sh fails on a
 # warning after baron has written its output).
@@ -55,7 +58,7 @@ BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short 
 TARGET   = build/starglider.ssd
 DISC     = starglider.ssd
 
-.PHONY: all run disc check spike logic view panel rot sfx sfxcapture steps memory fps scenes fetch venv clean
+.PHONY: all run disc check spike logic view panel rot sfx speech sfxcapture steps memory fps scenes fetch venv clean
 
 all: $(TARGET) build/spike/SPIKE
 
@@ -121,6 +124,11 @@ build/gen/collide.6502: $(PRG) tools/mkcollide.py | build/gen
 build/gen/sfx.6502 build/gen/sfx.json &: $(PRG) tools/mksfx.py tools/st_prg.py | build/gen
 	$(PYTHON) -I tools/mksfx.py $(PRG) build/gen/sfx.6502 build/gen/sfx.json
 
+# Clare Edgeley's speech, from the ST's STAR.PRG, packed for the SN76489 in
+# three areas, the logic bank's after the effects' tables.
+build/gen/speech.6502 build/gen/speech_clips.6502 build/gen/speech_a.bin build/gen/speech_b.bin build/gen/speech_c.bin build/gen/speech.json &: $(PRG) build/gen/sfx.json tools/mkspeech.py tools/st_samples.py tools/st_prg.py | build/gen
+	$(PYTHON) -I tools/mkspeech.py $(PRG) build/gen/sfx.json build/gen
+
 # The level layouts (init_objects's), from the ST's STAR.PRG.
 build/gen/levels.6502: $(PRG) tools/mklevels.py tools/st_prg.py | build/gen
 	$(PYTHON) -I tools/mklevels.py $(PRG) build/gen
@@ -149,7 +157,7 @@ build/st build/gen build/spike:
 build/scenes/%/beeb.json: build/scenes/%/scenes.json $(PRG) tools/mkscene.py tools/st_render.py
 	$(PYTHON) -I tools/mkscene.py $(PRG) $< $@
 
-check: build/spike/SPIKE spike panel view rot sfx $(TARGET)
+check: build/spike/SPIKE spike panel view rot sfx speech $(TARGET)
 	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike
 	node tools/erasecheck.mjs
 	node tools/disccheck.mjs
@@ -160,6 +168,11 @@ check: build/spike/SPIKE spike panel view rot sfx $(TARGET)
 # (tools/sfxcheck.mjs).
 sfx: $(TARGET) build/gen/sfx.json
 	node tools/sfxcheck.mjs
+
+# Clare Edgeley's speech on the disc against the levels it packed, timed,
+# with a WAV of each clip in build/speech (tools/speechcheck.mjs).
+speech: $(TARGET) build/gen/speech.json
+	node tools/speechcheck.mjs
 
 sfxcapture:
 	$(PYTHON) -I tools/st_sfx.py run tests/st/sfx_all.txt build/sfx/all \
