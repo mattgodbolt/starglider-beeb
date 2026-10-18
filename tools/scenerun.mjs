@@ -169,9 +169,11 @@ for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
     const list = (name, count) => Array.from(ram.subarray(need(name), need(name) + peek(need(count))));
     const coarse = list("coarse_slots", "coarse_n");
     const rel = {};
+    const exact = {};
     for (const s of coarse) {
         const r = objBank + s * 64 + OB.cx;
         rel[s] = [signed(peekw(r)), signed(peekw(r + 2)), signed(peekw(r + 4))];
+        exact[s] = ram[need("rot_exact") + s] !== 0;
     }
     const lines = [];
     const logN = peekw(need("log_n"));
@@ -184,6 +186,7 @@ for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
         near: list("near_slots", "near_n"),
         draw: list("draw_slots", "draw_n"),
         rel,
+        exact,
         lines,
         logged: logN,
     });

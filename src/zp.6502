@@ -104,6 +104,7 @@ SECTION Work, org = WORK, guard = &0E00, virtual = TRUE
 .mat_valid  SKIP 1          ; non-zero: mat is for mat_angles
 .mat_angles SKIP 6
 .stamp      SKIP 1          ; the object's stamp on its edges and vertices
+.rot_exact  SKIP SLOTS + 2  ; by slot: 1 if this frame's rotation was exact (decision 11)
     \ by shape and colour
 .anim_frame SKIP 32         ; each shape's animation frame, as its list numbers them
 .colour_map SKIP 16         ; the ST's colours to the screen's bytes (&00, &0F, &F0, &FF)

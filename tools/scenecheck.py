@@ -5,7 +5,9 @@ the ST's (tools/mkscene.py's expectations, from tools/st_render.py).
     scenecheck.py SCENES.json RUN.json [--show N] [--tolerance PX]
 
 The lists and the camera-space positions are the game's logic: they must
-match exactly. Lines are compared by object and edge: an edge drawn by one
+match exactly, but for the objects the port rotated approximately
+(decision 11), which must be within the approximation's bound and
+neither drawn nor near the player on the ST. Lines are compared by object and edge: an edge drawn by one
 and not the other is a culling difference (decision 9 moves the test into
 object space); an edge both draw must lie within --tolerance pixels of the
 ST's: each end of either line within that distance of the other line,
@@ -22,6 +24,12 @@ import math
 import statistics
 import sys
 from pathlib import Path
+
+
+# decision 11: the approximate rotation's bound, and the collision boxes'
+# reach with it (render.6502's ROT_SLACK and NEAR_BOX)
+ROT_SLACK = 512
+NEAR_BOX = 2000 + ROT_SLACK
 
 
 def to_segment(p, a, b):
@@ -48,8 +56,10 @@ def main():
     scenes = json.loads(Path(args.scenes).read_text())["frames"]
     run = json.loads(Path(args.run).read_text())
     first = run.get("first", 0)
-    st = {k: 0 for k in ("frames", "list_bad", "rel_bad", "edges_both", "edges_moved", "only_st", "only_port")}
+    st = {k: 0 for k in ("frames", "list_bad", "rel_bad", "rel_approx", "edges_both", "edges_moved",
+                          "only_st", "only_port")}
     worst = 0
+    worst_approx = 0
     shown = 0
     spread = collections.Counter()
 
@@ -70,11 +80,22 @@ def main():
             if got[name] != exp[name]:
                 st["list_bad"] += 1
                 show(f"frame {n}: {name} list {got[name]} on the port, {exp[name]} on the ST")
+        drawn = set(exp["draw"])
         for slot, v in exp["rel"].items():
             g = got["rel"].get(slot)
-            if g != v:
+            if got.get("exact", {}).get(slot, True):
+                if g != v:
+                    st["rel_bad"] += 1
+                    show(f"frame {n}: slot {slot} camera-space {g} on the port, {v} on the ST")
+                continue
+            # rotated approximately (decision 11): within the slack, and
+            # neither drawn by the ST nor near enough to meet the player
+            st["rel_approx"] += 1
+            off = max(min(abs(a - b), 65536 - abs(a - b)) for a, b in zip(g, v))   # words wrap
+            worst_approx = max(worst_approx, off)
+            if off > ROT_SLACK or int(slot) in drawn or all(abs(c) <= NEAR_BOX for c in v):
                 st["rel_bad"] += 1
-                show(f"frame {n}: slot {slot} camera-space {g} on the port, {v} on the ST")
+                show(f"frame {n}: slot {slot} approximated as {g}, the ST's {v}")
         port = {}
         for slot, edge, x0, y0, x1, y1, colour in got["lines"]:
             port[(slot, edge)] = (x0, y0, x1, y1)
@@ -98,7 +119,7 @@ def main():
                 if d > args.tolerance:
                     show(f"frame {n}: slot {key[0]} edge {key[1]}: {p} on the port, {line} on the ST")
         st["only_port"] += sum(1 for k in port if k not in ours)
-    print(" ".join(f"{k} {v}" for k, v in st.items()), f"worst {worst}px",
+    print(" ".join(f"{k} {v}" for k, v in st.items()), f"worst {worst}px, approximation {worst_approx}",
           "apart: " + ", ".join(f"{d}px {n}" for d, n in sorted(spread.items())))
     fields = 39936
     for k, xs in cycles.items():

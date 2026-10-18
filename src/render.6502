@@ -224,7 +224,7 @@ ENDMACRO
 \ Each slot's list flags are cleared, as the ST clears them.
 .coarse_list
 {
-    ZA_AUTO2 dx, dz
+    ZA_AUTO1 dx, dz             ; their low bytes
     STZ coarse_n
     LDA docked : BEQ open
     LDA #SLOT_TUNNEL : STA coarse_slots
@@ -235,25 +235,46 @@ ENDMACRO
 .done
     RTS
 .open
+    LDA #LO(OBJECTS) : STA rec : LDA #HI(OBJECTS) : STA rec+1
     LDX #0
 .slot
-    LDA obj_lo,X : STA rec : LDA obj_hi,X : STA rec+1
     LDA #0
-    LDY #OB_NEAR : STA (rec),Y
-    LDY #OB_DRAWN : STA (rec),Y
+    LDY #OB_DRAWN : STA (rec),Y : INY : STA (rec),Y     ; and OB_NEAR
     LDY #OB_TYPE : LDA (rec),Y : INY : ORA (rec),Y : BEQ next
+    \ dz = z - the player's, within (-&2020, &2020]: the high byte
+    \ decides all but its two edges
     LDY #OB_Z : LDA (rec),Y : SEC : SBC pl_z : STA dz
-    INY : LDA (rec),Y : SBC pl_z+1 : STA dz+1
-    CMPS16 dz, #&2021 : BPL next        ; more than &2020 ahead
-    CMPS16 dz, #-&201F : BPL keep       ; within &2020 behind
+    INY : LDA (rec),Y : SBC pl_z+1
+    CMP #&20 : BCC keep                 ; 0 to &1FFF
+    BEQ z_top
+    CMP #&80 : BCC next                 ; more than &2020 ahead
+    CMP #&DF : BCC behind
+    BNE keep                            ; -&2000 to -1
+    LDA dz : CMP #&E1 : BCS keep        ; -&201F up
+    BRA behind
+.z_top
+    LDA dz : CMP #&21 : BCC keep        ; up to &2020
+    BRA next
+.behind
+    \ further behind: kept if within &2020 in x, [-&2020, &2020]
     LDY #OB_X : LDA (rec),Y : SEC : SBC pl_x : STA dx
-    INY : LDA (rec),Y : SBC pl_x+1 : STA dx+1
-    CMPS16 dx, #&2021 : BPL next
-    CMPS16 dx, #-&2020 : BMI next
+    INY : LDA (rec),Y : SBC pl_x+1
+    CMP #&20 : BCC keep
+    BEQ x_top
+    CMP #&DF : BCC next
+    BNE keep
+    LDA dx : CMP #&E0 : BCS keep
+    BRA next
+.x_top
+    LDA dx : CMP #&21 : BCS next
 .keep
     TXA : LDY coarse_n : STA coarse_slots,Y
     INC coarse_n
 .next
+    LDA rec : CLC : ADC #OB_SIZE : STA rec
+    BCC same_page
+    INC rec+1
+.same_page
     INX : CPX n_slots : BEQ done2
     JMP slot
 .done2
@@ -268,8 +289,7 @@ ENDMACRO
 .rotate_lists
 {
     ZA_AUTO1 list_i
-    ZA_AUTO2 cx, cy, cz, z2, nz2, t16
-    ZA_AUTO 14, rx              ; x', y', z' at +0, +6, +12
+    ZA_AUTO2 z2, nz2, t16
     STZ near_n : STZ draw_n
     LDX coarse_n : BNE each
     RTS
@@ -286,34 +306,30 @@ ENDMACRO
     INY : LDA (rec),Y : SBC pl_y+1 : STA rot_d+3
     LDY #OB_Z : LDA (rec),Y : SEC : SBC pl_z : STA rot_d+4
     INY : LDA (rec),Y : SBC pl_z+1 : STA rot_d+5
+    JSR rotate_abs
+    JSR rotate_approx
+    JSR relevant : BCS exactly
+    \ Approximately: kept for the scanner, never drawn (decision 11).
+    LDX slot : STZ rot_exact,X
+    JSR store_rel
+    JMP next
+.exactly
     JSR rotate_exact
-    MOVW rx, rot_acc
-    MOVW rx+6, rot_acc+2
-    MOVW rx+12, rot_acc+4
-    LDY #OB_CX : LDA rx : STA (rec),Y : INY : LDA rx+1 : STA (rec),Y
-    LDY #OB_CY : LDA rx+6 : STA (rec),Y : INY : LDA rx+7 : STA (rec),Y
-    LDY #OB_CZ : LDA rx+12 : STA (rec),Y : INY : LDA rx+13 : STA (rec),Y
-    LDY #OB_EXPLODING : LDA (rec),Y : BNE not_near
-    LDA #&FF : LDY #OB_NEAR : STA (rec),Y
-    LDA slot : LDY near_n : STA near_slots,Y
-    INC near_n
-.not_near
-    MOVW cz, rx+12
-    MOVW cx, rx
-    MOVW cy, rx+6
-    CMPS16 cz, #&2001 : BMI ahead       ; more than &2000 away: not drawn
+    LDX slot : LDA #1 : STA rot_exact,X
+    JSR store_rel
+    CMPS16 rot_acc+4, #&2001 : BMI ahead    ; more than &2000 away: not drawn
     JMP next
 .ahead
     LDX otype
     LDA #0 : SEC : SBC size_z_lo,X : STA t16
     LDA #0 : SBC size_z_hi,X : STA t16+1
-    CMPS16 t16, cz : BPL next           ; wholly behind: z <= -size
-    LDA cz : ASL A : STA z2 : LDA cz+1 : ROL A : STA z2+1
+    CMPS16 t16, rot_acc+4 : BPL next        ; wholly behind: z <= -size
+    LDA rot_acc+4 : ASL A : STA z2 : LDA rot_acc+5 : ROL A : STA z2+1
     LDA #0 : SEC : SBC z2 : STA nz2 : LDA #0 : SBC z2+1 : STA nz2+1
-    CMPS16 cx, nz2 : BMI next
-    CMPS16 z2, cx : BMI next
-    CMPS16 cy, nz2 : BMI next
-    CMPS16 z2, cy : BMI next
+    CMPS16 rot_acc, nz2 : BMI next
+    CMPS16 z2, rot_acc : BMI next
+    CMPS16 rot_acc+2, nz2 : BMI next
+    CMPS16 z2, rot_acc+2 : BMI next
     LDA #&FF : LDY #OB_DRAWN : STA (rec),Y
     LDA slot : LDY draw_n : STA draw_slots,Y
     INC draw_n
@@ -322,6 +338,70 @@ ENDMACRO
     JMP each
 .done
     RTS
+\ store_rel: rot_acc into the record's camera-space position, and the
+\ object onto the near list unless it's exploding.
+.store_rel
+    LDY #OB_CX
+    LDA rot_acc : STA (rec),Y : INY : LDA rot_acc+1 : STA (rec),Y : INY
+    LDA rot_acc+2 : STA (rec),Y : INY : LDA rot_acc+3 : STA (rec),Y : INY
+    LDA rot_acc+4 : STA (rec),Y : INY : LDA rot_acc+5 : STA (rec),Y
+    LDY #OB_EXPLODING : LDA (rec),Y : BNE far_off
+    LDA #&FF : LDY #OB_NEAR : STA (rec),Y
+    LDA slot : LDY near_n : STA near_slots,Y
+    INC near_n
+.far_off
+    RTS
+}
+
+\ relevant (decision 11): C set if an object at rot_acc, rotated
+\ approximately (within ROT_SLACK), could be drawn or meet the player:
+\ in front, short of &2000 and within the view's pyramid, or within
+\ NEAR_BOX on every axis (the largest collision box is 2000). Only those
+\ need the exact rotation: nothing else the game decides reads the rest.
+ROT_SLACK = 512
+NEAR_BOX = 2000 + ROT_SLACK
+.relevant
+{
+    ZA_AUTO2 z2, nz2, size, mag
+    \ ahead of &2000 (with the slack), it's neither drawn nor near
+    CMPS16 rot_acc+4, #&2001 + ROT_SLACK : BMI not_far
+.no
+    CLC : RTS
+.not_far
+    LDX otype
+    LDA #0 : SEC : SBC size_z_lo,X : STA size : LDA #0 : SBC size_z_hi,X : STA size+1
+    LDA size : SEC : SBC #LO(ROT_SLACK) : STA size : LDA size+1 : SBC #HI(ROT_SLACK) : STA size+1
+    CMPS16 size, rot_acc+4 : BPL behind     ; z <= -(size + slack): not drawn
+    \ in the view's pyramid, with the slack?
+    LDA rot_acc+4 : ASL A : STA z2 : LDA rot_acc+5 : ROL A : STA z2+1
+    LDA z2 : CLC : ADC #LO(3 * ROT_SLACK) : STA z2 : LDA z2+1 : ADC #HI(3 * ROT_SLACK) : STA z2+1
+    LDA #0 : SEC : SBC z2 : STA nz2 : LDA #0 : SBC z2+1 : STA nz2+1
+    CMPS16 rot_acc, nz2 : BMI near_test
+    CMPS16 z2, rot_acc : BMI near_test
+    CMPS16 rot_acc+2, nz2 : BMI near_test
+    CMPS16 z2, rot_acc+2 : BMI near_test
+    SEC : RTS
+.behind
+    CMPS16 rot_acc+4, #-NEAR_BOX : BMI none
+.near_test
+    \ within NEAR_BOX on every axis?
+    LDX #4
+.axis
+    LDA rot_acc+1,X : ZA_INDEXEDBY {0, 2, 4}
+    BPL pos
+    LDA #0 : SEC : SBC rot_acc,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mag : LDA #0 : SBC rot_acc+1,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mag+1
+    BRA got
+.pos
+    STA mag+1 : LDA rot_acc,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mag
+.got
+    CMPS16 mag, #NEAR_BOX + 1 : BPL none
+    DEX : DEX : BPL axis
+    SEC : RTS
+.none
+    CLC : RTS
 }
 
 \ ---------------------------------------------------------------------------
