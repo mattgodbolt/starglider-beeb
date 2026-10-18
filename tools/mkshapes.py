@@ -54,6 +54,7 @@ import st_shapes  # noqa: E402
 BEAM = 11
 BEAM_G = 256
 K_UNIT = 4                          # K is kept in fours of n x world units
+RADII = []                          # each shape's radius, as shape_source makes it
 
 
 def cross(a, b):
@@ -119,6 +120,7 @@ def shape_source(s, alias=None):
     # the radius in world units, rounded up: how far any frame's vertex
     # (as the port has it, g k) is from the object's centre
     radius = math.ceil(max(math.sqrt(sum((round(c / g) * g) ** 2 for c in v)) for fr in unique for v in fr) / 16)
+    RADII.append(radius)
     out.append(f".shape{k}")
     out.append(f"    EQUB {nv}, {ne}, {nf}, {colour}, {g // 32}, {len(frames)}, {len(still)}, {len(rigid)}")
     out.append(f"    EQUW {radius}")
@@ -178,6 +180,8 @@ def main():
             body += shape_source(s, first.get(key))
             first.setdefault(key, s["index"])
     names = [f"shape{s['index']}" if s["nverts"] else "0" for s in shapes]
+    # the least radius, which bounds how near a far object can be (render.6502)
+    src.append(f"SHAPE_RADIUS_MIN = {min(RADII)}")
     src += [".shape_lo", "    EQUB " + ", ".join(f"LO({n})" for n in names),
             ".shape_hi", "    EQUB " + ", ".join(f"HI({n})" for n in names)]
     src += body
