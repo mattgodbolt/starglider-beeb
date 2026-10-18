@@ -3,7 +3,9 @@
 \ ***************************************************************************
 
 \ screen_mode: MODE 1's CRTC cut to 25 character rows from SCREEN, its
-\ vertical sync moved to keep them central.
+\ vertical sync moved to keep them central, not interlaced, so the sync,
+\ and the palette split timed from it, falls on the same scan line every
+\ field, and no cursor.
 .screen_mode
 {
     LDX #0
@@ -16,6 +18,21 @@
 .crtc_values
     EQUB 6, SCREEN_ROWS
     EQUB 7, 34 - (32 - SCREEN_ROWS) DIV 2
+    EQUB 8, 0
+    EQUB 10, &20                    ; no cursor
     EQUB 12, HI(SCREEN DIV 8), 13, LO(SCREEN DIV 8)
     EQUB &FF
+}
+
+\ erase_init: both screens' erase lists empty (each screen's window
+\ cleared some other way first).
+.erase_init
+{
+    LDX #1
+.each
+    LDA erase_list_lo,X : STA erase_stop_lo,X
+    LDA erase_list_hi,X : STA erase_stop_hi,X
+    STZ erase_full,X
+    DEX : BPL each
+    RTS
 }

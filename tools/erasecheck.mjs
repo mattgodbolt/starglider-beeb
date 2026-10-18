@@ -1,5 +1,6 @@
-// The disc's double buffer: after each erase, the screen about to be drawn
-// into must be empty (every line drawn there two frames before erased).
+// The disc's double buffer: after each erase, the window of the screen
+// about to be drawn into must be empty (every line drawn there two frames
+// before erased).
 //
 //   node tools/erasecheck.mjs [FRAMES]
 //
@@ -18,22 +19,8 @@ const q = console.log; console.log = () => {}; await tm.runUntilInput(); console
 const cpu = tm.processor, ram = cpu.ramRomOs;
 const bank = (n) => cpu.romOffset + n * 16384;
 // unpack the disc's files from the .ssd by name
-const ssd = fs.readFileSync(path.join(root, "build/starglider.ssd"));
-const files = {};
-const n = ssd[0x105] / 8;
-for (let i = 0; i < n; i++) {
-  const name = ssd.subarray(8 + i * 8, 15 + i * 8).toString("latin1").trim();
-  const o = 0x108 + i * 8;
-  const len = ssd[o + 4] | (ssd[o + 5] << 8) | (((ssd[o + 6] >> 4) & 3) << 16);
-  const sector = ssd[o + 7] | ((ssd[o + 6] & 3) << 8);
-  files[name] = ssd.subarray(sector * 256, sector * 256 + len);
-}
-ram.set(files.SG, 0x0e00);
-ram.set(files.SHAPES, bank(4));
-ram.set(files.WORLD, bank(sym.BANK_WORLD));
-ram.set(files.TABLES, 0x5000);
-ram.set(files.CODE2, 0x6000);
-cpu.pc = sym.start;
+const { loadDisc } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
+loadDisc(cpu, path.join(root, "build/starglider.ssd"), sym);
 const erased = sym["frame.erased"];
 let bad = 0;
 const frames = Number(process.argv[2] ?? 700);
@@ -42,8 +29,13 @@ for (let f = 0; f < frames; f++) {
   if (cpu.pc !== erased) throw new Error("no erase at frame " + f);
   const buf = ram[sym.draw_buffer];
   const base = buf ? 0x8000 : 0;
+  // the window (src/cockpit.6502), all that's drawn in or cleared
   let lit = 0;
-  for (let a = 0x4180; a < 0x8000; a++) if (ram[base + a]) lit++;
+  for (let y = sym.VIEW_YMIN; y <= sym.VIEW_YMAX; y++)
+    for (let c = 0; c < sym.WINDOW_COLS; c++) {
+      const a = sym.SCREEN + (y >> 3) * 640 + (y & 7) + (sym.WINDOW_COL0 + c) * 8;
+      if (ram[base + a]) lit++;
+    }
   if (lit) { bad++; if (bad < 8) console.log(`frame ${f} buffer ${buf}: ${lit} bytes left, model ${ram[sym.model_i]} t ${ram[sym.model_t]}`); }
 }
 console.log(`erasecheck: ${frames} frames, ${bad} with something left`);

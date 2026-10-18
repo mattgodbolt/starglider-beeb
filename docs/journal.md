@@ -247,3 +247,34 @@ first target. Second, the ST's order (lists, drawing, logic) maps onto
 the steps if the last step before a frame draws between its lists and
 its logic, which needs no copy of anything for the drawing. The model
 viewer on the disc runs at 12.5 frames a second (`make fps`).
+
+### The cockpit
+
+While the optimisation pass's agents worked on the renderer, the screen
+layer began: the ST's cockpit (RESULT.TRA) on both screens, around the
+view's window, with a palette split at the view's bottom edge (decision
+3).
+
+- **Four colours from eight shades.** The cockpit is mostly eight blues
+  and cyans, plus red, yellow and green lights. The BBC has eight colours
+  and no shades, so `tools/mkcockpit.py` ordered-dithers each ST colour
+  between the pair of a band's four that mixes nearest it. It renders the
+  options as pictures for Matt to choose from (decision 3 left the
+  colours open). The disc uses option b for now: the view and its frame
+  in black, red, cyan and white, the panel in black, red, cyan and blue.
+  That makes the split one logical colour, white to blue: four palette
+  writes, which fit one horizontal blank.
+- **The split's timing** came from a sweep in jsbeeb.
+  `-D SPLIT_SWEEP=n` builds with `n` in place of the adjustment and paints
+  scan lines 126-131 whole in logical 3, so a split that lands mid-line
+  shows as a line half white and half blue. The clean window was -242 to
+  -202 microseconds; -222 is its middle. CE2's constant was five lines
+  late here, as its sync is elsewhere. Real hardware may differ:
+  something to check on Matt's Master.
+- **Steady timing.** MODE 1's interlaced sync puts alternate fields half
+  a line apart, which would move the split, so `screen_mode` turns
+  interlace off. It also turns off the cursor, which was still showing.
+- **Both screens.** `!BOOT` now stages HAZEL's files in bank 7 and loads
+  the cockpit into the screen. `start` copies the cockpit to the shadow
+  screen a page at a time, and only the window is ever cleared, by code
+  below &3000, where ACCCON's X changes nothing.

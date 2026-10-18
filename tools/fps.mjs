@@ -23,21 +23,8 @@ console.log = q;
 const cpu = tm.processor;
 const ram = cpu.ramRomOs;
 const bank = (n) => cpu.romOffset + n * 16384;
-const ssd = fs.readFileSync(path.join(root, "build/starglider.ssd"));
-const files = {};
-for (let i = 0; i < ssd[0x105] / 8; i++) {
-    const name = ssd.subarray(8 + i * 8, 15 + i * 8).toString("latin1").trim();
-    const o = 0x108 + i * 8;
-    const len = ssd[o + 4] | (ssd[o + 5] << 8) | (((ssd[o + 6] >> 4) & 3) << 16);
-    const sector = ssd[o + 7] | ((ssd[o + 6] & 3) << 8);
-    files[name] = ssd.subarray(sector * 256, sector * 256 + len);
-}
-ram.set(files.SG, 0x0e00);
-ram.set(files.SHAPES, bank(sym.BANK_SHAPES));
-ram.set(files.WORLD, bank(sym.BANK_WORLD));
-ram.set(files.TABLES, 0x5000);
-ram.set(files.CODE2, 0x6000);
-cpu.pc = sym.start;
+const { loadDisc } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
+loadDisc(cpu, path.join(root, "build/starglider.ssd"), sym);
 const word = (a) => ram[a] | (ram[a + 1] << 8);
 const read = () => ({ frames: word(sym.frames), steps: word(sym.steps) });
 const secs = Number(process.argv[2] ?? 20);

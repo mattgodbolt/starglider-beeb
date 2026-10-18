@@ -6,10 +6,11 @@
 \ renderer into a double-buffered MODE 1 screen at the ST's 320 x 200.
 \
 \ !BOOT (*EXEC'd) sets the mode and palette through BASIC and the OS, puts
-\ the shapes and the sine table into sideways RAM (*SRLOAD), and leaves
-\ the files bound for HAZEL in screen memory: the filing system keeps its
-\ workspace in HAZEL, so they can't go there until it's done with. SG
-\ copies them into HAZEL and makes no OS call after.
+\ the shapes and the world into sideways RAM (*SRLOAD), leaves the files
+\ bound for HAZEL in bank 7 (the filing system keeps its workspace in
+\ HAZEL, so they can't go there until it's done with), and loads the
+\ cockpit into the screen. SG copies them into HAZEL, the cockpit into the
+\ shadow screen, and makes no OS call after.
 \ ***************************************************************************
 
 INCLUDE "defs.6502"
@@ -27,10 +28,11 @@ ELSE
     build_stamp = "DEV"
 ENDIF
 
-\ Where !BOOT leaves the HAZEL files, in screen memory.
-TABLES_AT = &5000
-CODE2_AT  = &6000
-ASSERT TABLES_AT >= SCREEN AND CODE2_AT + &1000 <= &8000
+\ Where !BOOT leaves the HAZEL files: bank 7, the loading area (docs/plan.md,
+\ section 3), free until the game loads into it.
+BANK_STAGE = 7
+TABLES_AT = &8000
+CODE2_AT  = &9000
 
 SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*| STARGLIDER for the BBC Master ", build_stamp, 13
@@ -38,8 +40,9 @@ SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "VDU 19,2,6;0;", 13                    ; logical 2 is cyan
     EQUS "*SRLOAD SHAPES 8000 ", AS_STRING(BANK_SHAPES), 13
     EQUS "*SRLOAD WORLD 8000 ", AS_STRING(BANK_WORLD), 13
-    EQUS "*LOAD TABLES ", ~TABLES_AT, 13
-    EQUS "*LOAD CODE2 ", ~CODE2_AT, 13
+    EQUS "*SRLOAD TABLES ", ~TABLES_AT, " ", AS_STRING(BANK_STAGE), 13
+    EQUS "*SRLOAD CODE2 ", ~CODE2_AT, " ", AS_STRING(BANK_STAGE), 13
+    EQUS "*LOAD COCKPIT ", ~SCREEN, 13
     EQUS "*RUN SG", 13
 ENDSECTION
 
@@ -49,16 +52,54 @@ SECTION Main, org = &0E00, filename = "SG", guard = MAIN_TOP, cmos = TRUE
     SEI
     \ HAZEL in, and its files copied from where !BOOT left them
     LDA acccon : AND #NOT(ACCCON_X OR ACCCON_D) AND &FF : ORA #ACCCON_Y : STA acccon
+    BANK BANK_STAGE
     LDA #HI(TABLES_AT) : LDX #HI(TABLES) : JSR copy_4k
     LDA #HI(CODE2_AT) : LDX #HI(CODE2) : JSR copy_4k
     JSR mul_init
     JSR line_draw
     JSR screen_mode
-    STZ draw_bank : JSR screen_clear
-    LDA #ACCCON_X : STA draw_bank : JSR screen_clear
+    \ the cockpit on both screens, their windows empty
+    JSR screen_copy
+    STZ draw_bank : JSR window_clear
+    LDA #ACCCON_X : STA draw_bank : JSR window_clear
+IF DEFINED(SPLIT_SWEEP)
+    JSR split_test
+ENDIF
     JMP models
 
+IF DEFINED(SPLIT_SWEEP)
+\ split_test: scan lines 126-131 whole in logical 3, on both screens, so a
+\ split's place in its line shows (-D SPLIT_SWEEP=n moves it: engine.6502).
+.split_test
+{
+    ZA_AUTO2 p
+    LDX #126
+.line
+    TXA : LSR A : LSR A : LSR A : TAY
+    TXA : AND #7 : CLC : ADC screen_row_lo,Y : STA p
+    LDA screen_row_hi,Y : ADC #0 : STA p+1
+    LDY #0
+.byte
+    LDA #&FF : STA (p),Y
+    LDA #ACCCON_X : TSB acccon
+    LDA #&FF : STA (p),Y
+    LDA #ACCCON_X : TRB acccon
+    TYA : CLC : ADC #8 : TAY : BNE byte
+    INC p+1
+.byte2
+    LDA #&FF : STA (p),Y
+    LDA #ACCCON_X : TSB acccon
+    LDA #&FF : STA (p),Y
+    LDA #ACCCON_X : TRB acccon
+    TYA : CLC : ADC #8 : TAY : CMP #(80 * 8) AND &FF : BNE byte2
+    INX : CPX #132 : BNE line
+    RTS
+}
+ASSERT P% <= &3000
+ENDIF
+
 INCLUDE "engine.6502"
+INCLUDE "cockpit.6502"
 
 \ copy_4k: 4K from page A to page X.
 .copy_4k
@@ -159,6 +200,11 @@ MODELS = P% - model_types
     EQUB &00, &0F, &0F, &0F, &0F, &0F, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &FF
 
 INCLUDE "code.6502"
+ENDSECTION
+
+\ The cockpit's screen (tools/mkcockpit.py), which !BOOT loads.
+SECTION Cockpit, org = SCREEN, filename = "COCKPIT"
+INCBIN "../build/gen/cockpit.bin"
 ENDSECTION
 
 \ The models' own state, in the workspace.

@@ -18,29 +18,68 @@
 STEP_FIELDS = 4                     ; decision 4: 12.5 steps a second
 MAX_STEPS   = 4                     ; a frame's most: more, and the game slows
 
-\ install_irq: irq_handler on IRQ1V, and only the vertical sync's
-\ interrupt on: nothing goes to the OS, whose IRQ entry (MOS 3.20, &E59E)
-\ reads nothing but IRQ1V, so HAZEL can stay paged over its code.
+\ The palette split at the view's bottom edge (decision 3): only logical
+\ colour 3 changes, the view's (VIEW_COLOUR_3) to the panel's
+\ (PANEL_COLOUR_3), so its four ULA entries (10, 11, 14 and 15: MODE 1
+\ picks among a logical colour's four by the pixels beside it) are
+\ written in the horizontal blank before the panel's first scan line.
+\ T1 is started at the vertical sync, which screen_mode puts
+\ SYNC_TO_TOP scan lines before the screen's first.
+VIEW_COLOUR_3  = 7                  ; white
+PANEL_COLOUR_3 = 4                  ; blue
+PANEL_LINE     = VIEW_YMAX + 1
+SYNC_TO_TOP    = (39 - (34 - (32 - SCREEN_ROWS) DIV 2)) * 8
+SCAN_US        = 64
+\ SPLIT_ADJ is measured on jsbeeb, the middle of the window in which the
+\ writes land in the blank (docs/journal.md, "The cockpit", 2026-10-18):
+\ -D SPLIT_SWEEP=n builds with n instead, and main.6502's split_test.
+IF DEFINED(SPLIT_SWEEP)
+    SPLIT_ADJ = SPLIT_SWEEP
+ELSE
+    SPLIT_ADJ = -222
+ENDIF
+SPLIT_T1 = (SYNC_TO_TOP + PANEL_LINE) * SCAN_US - 2 + SPLIT_ADJ
+FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
+
+\ install_irq: irq_handler on IRQ1V, and only the vertical sync's and the
+\ split's interrupts on: nothing goes to the OS, whose IRQ entry (MOS
+\ 3.20, &E59E) reads nothing but IRQ1V, so HAZEL can stay paged over its
+\ code.
 .install_irq
     SEI
     LDA #&7F : STA sysvia_ier : STA usrvia_ier  ; anything not serviced would
                                                 ; hold IRQ asserted
     LDA #LO(irq_handler) : STA irq1v
     LDA #HI(irq_handler) : STA irq1v+1
+    LDA usrvia_acr : AND #&3F : STA usrvia_acr  ; T1 one-shot
     LDA #2 : STA sysvia_ifr                     ; a vertical sync already flagged
     LDA #&82 : STA sysvia_ier                   ; CA1: the vertical sync
+    LDA #&C0 : STA usrvia_ier                   ; T1: the split
     CLI
     RTS
 
-\ irq_handler: each vertical sync counted, and a frame drawn shown from
+\ irq_handler: the split, when T1 comes; at each vertical sync the view's
+\ colours back, T1 started, the field counted, and a frame drawn shown from
 \ it, by ACCCON's D (TSB and TRB, which the line drawer's X changes can't
 \ split). It must lie below &3000, which X moves to shadow RAM.
 .irq_handler
 {
     ZA_INTERRUPT
     TXA : PHA
+    BIT usrvia_ifr : BVC not_split              ; (T1 is bit 6)
+    LDA usrvia_t1cl                             ; acknowledged
+    FOR e = {10, 11, 14, 15}
+        LDA #ula_entry(e, PANEL_COLOUR_3) : STA ula_pal
+    NEXT
+    BRA done
+.not_split
     LDA sysvia_ifr : AND #2 : BEQ done
     STA sysvia_ifr                              ; acknowledged
+    LDA #LO(SPLIT_T1) : STA usrvia_t1cl
+    LDA #HI(SPLIT_T1) : STA usrvia_t1ch         ; starts the count
+    FOR e = {10, 11, 14, 15}
+        LDA #ula_entry(e, VIEW_COLOUR_3) : STA ula_pal
+    NEXT
     INC fields
     LDA frame_ready : BEQ done
     STZ frame_ready

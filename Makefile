@@ -46,7 +46,7 @@ DISC     = starglider.ssd
 
 all: $(TARGET) build/spike/SPIKE
 
-$(TARGET): $(SOURCES) $(GEN) | build
+$(TARGET): $(SOURCES) $(GEN) build/gen/cockpit.bin | build
 	$(ASM) -D 'BUILD="$(BUILD)"' -o $@ --title STARGLIDER --opt 3 --warn 2 --symbols $(@:.ssd=.json) src/main.6502
 
 build:
@@ -84,6 +84,10 @@ build/gen/xform.6502: tools/mkxform.py | build/gen
 
 build/gen/objects.6502 build/gen/objects.json &: tools/mkobjects.py | build/gen
 	python3 -I tools/mkobjects.py build/gen
+
+# The cockpit, from the ST's RESULT.TRA (on its disc, beside STAR.PRG).
+build/gen/cockpit.bin: $(PRG) tools/mkcockpit.py | build/gen
+	$(PYTHON) -I tools/mkcockpit.py build/st/disc/RESULT.TRA --screen $@
 
 build/spike/SPIKE: $(SOURCES) $(GEN) | build/spike
 	$(ASM) --warn 2 -p build/spike --symbols build/spike/symbols.json src/spike.6502

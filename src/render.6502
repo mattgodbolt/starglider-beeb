@@ -40,17 +40,6 @@ IF DEFINED(SPIKE)
     RTS
 ENDIF
 
-\ erase_init: both screens' erase lists empty, and both screens to be
-\ cleared whole before they're first drawn.
-.erase_init
-    LDX #1
-.erase_each
-    LDA erase_list_lo,X : STA erase_stop_lo,X
-    LDA erase_list_hi,X : STA erase_stop_hi,X
-    LDA #&FF : STA erase_full,X
-    DEX : BPL erase_each
-    RTS
-
 \ draw_phase: the draw list's objects into the screen draw_buffer names
 \ (draw_bank set to match), each line onto its erase list (memory.6502).
 .draw_phase
