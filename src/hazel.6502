@@ -24,8 +24,10 @@ NEXT
     LDA draw_bank : TSB acccon
     STZ p : LDA #HI(SCREEN) : STA p+1
     LDY #LO(SCREEN) : LDA #0
+    ASSERT LO(SCREEN) MOD 4 = 0
 .clear
-    STA (p),Y : INY : BNE clear
+    STA (p),Y : INY : STA (p),Y : INY : STA (p),Y : INY : STA (p),Y : INY
+    BNE clear
     INC p+1 : BPL clear                 ; to &7FFF
     LDA draw_bank : TRB acccon
     RTS

@@ -230,21 +230,43 @@ emit("""    LDY #7 : BRA tv_m
 .line_pix                           ; each block's pixel, by block * 2
     EQUB &88, 0, &44, 0, &22, 0, &11
 
-\\ A row: dx + 1 pixels rightwards from block (X - 16) / 2, drawn by the
-\\ blocks (sr_row) or, erasing, its bytes zeroed (sr_row_erase): line_draw
-\\ and line_erase patch the JMP.
+\\ A row: dx + 1 pixels rightwards from block (X - 16) / 2, its bytes
+\\ drawn (sr_row) or, erasing, zeroed (sr_row_erase): line_draw and
+\\ line_erase patch the JMP, so sr_row's writes are only ever ORs.
 .sr_single
     JMP sr_row
     ZA_CANJUMP sr_row, sr_row_erase
-.sr_row                             ; one virtual y-step after dx pixels
-    LDA #1
-    CMP sr_sbc0+1 : BEQ sr_row_set      ; the blocks' SBCs as the last row left them""")
-for p in range(4):
-    emit(f"    STA sr_sbc{p}+1")
-emit(""".sr_row_set
-    STA line_cnt : STA line_ls
-    LDA line_dx : SEC : JMP (line_entries,X)
-    ZA_CANJUMP sr_s0, sr_s1, sr_s2, sr_s3
+.sr_row
+    TXA : LSR A : AND #3 : TAX              ; the first pixel's position, C = 0
+    ADC line_dx : STA line_err              ; the last's from the first byte's left, C its bit 8
+    ROR A : LSR A : STA line_cnt            ; the bytes after the first
+    LDA line_rf,X : AND set_colour+1        ; the first byte: pixels p..3
+    LDX line_cnt : BEQ sr_one
+    ORA (line_scr),Y : STA (line_scr),Y
+.sr_right
+    LDA line_scr : CLC : ADC #8 : STA line_scr
+    BCC sr_col
+    INC line_scr+1
+.sr_col
+    DEX : BEQ sr_last
+    LDA set_colour+1                        ; a whole byte
+    ORA (line_scr),Y : STA (line_scr),Y
+    BRA sr_right
+.sr_one                                     ; first and last in one byte
+    STA line_cnt
+    LDA line_err : AND #3 : TAX
+    LDA line_lt,X : AND line_cnt
+    BRA sr_end
+.sr_last
+    LDA line_err : AND #3 : TAX
+    LDA line_lt,X : AND set_colour+1        ; the last byte: pixels 0..its own
+.sr_end
+    ORA (line_scr),Y : STA (line_scr),Y
+    RTS
+.line_lt                                    ; pixels 0..p, then (line_rf) p..3
+    EQUB &88, &CC, &EE
+line_rf = P%
+    EQUB &FF, &77, &33, &11
 .sr_row_erase
     TXA : LSR A : AND #3 : ADC line_dx      ; the last pixel: C = 0 from the LSR, and after it bit 8
     ROR A : LSR A : TAX : INX               ; the bytes
@@ -343,6 +365,23 @@ for v, order, step in (("sr", [0, 1, 2, 3], +1), ("sl", [3, 2, 1, 0], -1)):
     emit("    RTS")
     for p in order[:2]:
         shallow_exits(v, p, f"{v}_done0")
+    # The step to the next byte sits before the first block, to fall into it.
+    emit(f".{v}_byte                             ; end of a byte with no y-step: C = 1")
+    emit("    STA line_err")
+    emit("    TXA")
+    write(f"{v}_wb")
+    emit(f".{v}_next")
+    emit("    LDA line_scr")
+    if step > 0:
+        emit("    ADC #7 : STA line_scr             ; C = 1 on every path here: +8")
+        emit(f"    BCC {v}_col_ok")
+        emit("    INC line_scr+1")
+    else:
+        emit("    SBC #8 : STA line_scr             ; C = 1 on every path here")
+        emit(f"    BCS {v}_col_ok")
+        emit("    DEC line_scr+1")
+    emit(f".{v}_col_ok")
+    emit(f"    LDA line_err : SEC")
     for i, p in enumerate(order):
         last = i == 3
         nxt = order[i + 1] if not last else None
@@ -369,23 +408,6 @@ for v, order, step in (("sr", [0, 1, 2, 3], +1), ("sl", [3, 2, 1, 0], -1)):
             emit("    LDA line_err")  # falls into the next block's run start
         else:
             emit(f"    BRA {v}_next")
-    emit(f".{v}_byte                             ; end of a byte with no y-step: C = 1")
-    emit("    STA line_err")
-    emit("    TXA")
-    write(f"{v}_wb")
-    emit(f".{v}_next")
-    emit("    LDA line_scr")
-    if step > 0:
-        emit("    ADC #7 : STA line_scr             ; C = 1 on every path here: +8")
-        emit(f"    BCC {v}_col_ok")
-        emit("    INC line_scr+1")
-    else:
-        emit("    SBC #8 : STA line_scr             ; C = 1 on every path here")
-        emit(f"    BCS {v}_col_ok")
-        emit("    DEC line_scr+1")
-    emit(f".{v}_col_ok")
-    emit(f"    LDA line_err : SEC")
-    emit(f"    JMP {v}_a{order[0]}")
     for p in order[2:]:
         shallow_exits(v, p, f"{v}_done")
     emit(f".{v}_done")
