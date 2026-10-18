@@ -770,26 +770,29 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 }
 
 \ proj_z: ready proj_x for the depth pz (2 or more): the reciprocal's
-\ bytes patched into proj_x's reads, and its shift (recip.6502).
-ZA_AUTO1 proj_shift
+\ bytes patched into proj_x's reads, and its shift S (recip.6502) as
+\ where proj_x jumps to make it.
 .proj_z
 {
     ZA_AUTO1 m
     LDA pz+1 : BNE big
     LDX pz
     LDY zsmall_idx,X
-    LDA zsmall_sh,X : STA proj_shift
+    LDA zsmall_sh,X : TAX
+    LDA proj_x.shift_lo-10,X : STA proj_x.shift+1
+    LDA proj_x.shift_hi-10,X : STA proj_x.shift+2
     BRA exact
 .big
     TAX
-    LDA zhigh_sh,X : TAX
-    CLC : ADC #17 : STA proj_shift
+    LDY zhigh_sh,X                          ; S = 17 + Y
+    LDA proj_x.shift_lo+7,Y : STA proj_x.shift+1
+    LDA proj_x.shift_hi+7,Y : STA proj_x.shift+2
     LDA pz : STA m
     LDA pz+1
-    CPX #0 : BEQ shifted
+    CPY #0 : BEQ shifted
 .shift
     LSR A : ROR m
-    DEX : BNE shift
+    DEY : BNE shift
     LDY m
     LDA rcp_lo,Y : PHA : LDA rcp_hi,Y : TAY : PLA
     BRA got
@@ -814,7 +817,7 @@ ZA_AUTO1 proj_shift
 \ |x| >= 256 z) it's the ST's result instead, the low word of x << 7.
 .proj_x
 {
-    ZA_AUTO1 xl, xh, t, u0, u1, w0, p1, p2, p3
+    ZA_AUTO1 xl, xh, t, u0, u1, w0, p1
     LDA px+1 : BPL pos
     LDA #0 : SEC : SBC px : STA xl
     LDA #0 : SBC px+1 : STA xh
@@ -828,7 +831,8 @@ ZA_AUTO1 proj_shift
     LDA #0 : ROR A : STA pq
     RTS
 .fits
-    \ |x| R: R's low byte by x's low (its high byte), then the rest
+    \ |x| R: R's low byte by x's low (its high byte), then the rest, the
+    \ product >> 8 into X:pq:p1
     LDY xl
     SEC
 .a  LDA sqr_hi,Y
@@ -840,7 +844,7 @@ ZA_AUTO1 proj_shift
     STA p1
 .e  LDA sqr_hi,Y
 .f  SBC neg_hi,Y
-    STA p2
+    STA pq
     LDY xh
     SEC
 .g  LDA sqr_lo,Y
@@ -855,40 +859,84 @@ ZA_AUTO1 proj_shift
     STA w0
 .m  LDA sqr_hi,Y
 .n  SBC neg_hi,Y
-    STA p3
+    TAX
     CLC
     LDA p1 : ADC t : STA p1
-    LDA p2 : ADC u1 : STA p2
+    LDA pq : ADC u1 : STA pq
     BCC c1
-    INC p3
+    INX
 .c1
     CLC
     LDA p1 : ADC u0 : STA p1
-    LDA p2 : ADC w0 : STA p2
+    LDA pq : ADC w0 : STA pq
     BCC c2
-    INC p3
+    INX
 .c2
-    \ >> S: p3:p2:p1 is the product >> 8
-    LDA proj_shift : SEC : SBC #16 : BCC under16
-    TAX : BEQ word
-.shift16
-    LSR p3 : ROR p2
-    DEX : BNE shift16
-.word
-    LDA p2 : STA pq : LDA p3 : STA pq+1
+    \ >> S, unrolled: each S has its own way in (shift_lo, shift_hi),
+    \ which shifts A:pq:p1 left or right, whichever is fewer bits
+    TXA
+.shift
+    JMP right0                              ; patched by proj_z
+    ZA_CANJUMP right24_2, right24_3, right24_4, left24_3, left24_2, left24_1, right0, right16_1, right16_2, right16_3, right16_4, right16_5, left16_2, left16_1
+\ S = 10-12: right 2-4, the low word
+.right24_4
+    LSR A : ROR pq : ROR p1
+.right24_3
+    LSR A : ROR pq : ROR p1
+.right24_2
+    LSR A : ROR pq : ROR p1
+    LSR A : ROR pq : ROR p1
+    LDA pq : STA pq+1 : LDA p1 : STA pq
     BRA sign
-.under16
-    ADC #8 : TAX                    ; S - 8, 2 to 7 (C = 0)
-.shift24
-    LSR p3 : ROR p2 : ROR p1
-    DEX : BNE shift24
-    LDA p1 : STA pq : LDA p2 : STA pq+1
+\ S = 13-15: left 3-1, the middle word
+.left24_3
+    ASL p1 : ROL pq : ROL A
+.left24_2
+    ASL p1 : ROL pq : ROL A
+.left24_1
+    ASL p1 : ROL pq : ROL A
+    STA pq+1
+    BRA sign
+\ S = 22, 23: left 2, 1, the high word
+.left16_2
+    STZ pq+1
+    ASL pq : ROL A : ROL pq+1
+    ASL pq : ROL A : ROL pq+1
+    STA pq
+    BRA sign
+.left16_1
+    STZ pq+1
+    ASL pq : ROL A : ROL pq+1
+    STA pq
+    BRA sign
+\ S = 16-21: right 0-5, the high word
+.right16_5
+    LSR A : ROR pq
+.right16_4
+    LSR A : ROR pq
+.right16_3
+    LSR A : ROR pq
+.right16_2
+    LSR A : ROR pq
+.right16_1
+    LSR A : ROR pq
+.right0
+    STA pq+1
 .sign
     BIT px+1 : BPL done
     LDA #0 : SEC : SBC pq : STA pq
     LDA #0 : SBC pq+1 : STA pq+1
 .done
     RTS
+\ the ways in, by S from 10
+.shift_lo
+    EQUB LO(right24_2), LO(right24_3), LO(right24_4), LO(left24_3), LO(left24_2), LO(left24_1)
+    EQUB LO(right0), LO(right16_1), LO(right16_2), LO(right16_3), LO(right16_4), LO(right16_5)
+    EQUB LO(left16_2), LO(left16_1)
+.shift_hi
+    EQUB HI(right24_2), HI(right24_3), HI(right24_4), HI(left24_3), HI(left24_2), HI(left24_1)
+    EQUB HI(right0), HI(right16_1), HI(right16_2), HI(right16_3), HI(right16_4), HI(right16_5)
+    EQUB HI(left16_2), HI(left16_1)
 }
 
 \ edge (&04D66): the edge from vertex va to vb, clipped at z = 2 if it
