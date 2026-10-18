@@ -80,6 +80,8 @@ MACRO WORLD acc, t, out
     LDA acc+1 : ADC t+1 : STA out+1
 ENDMACRO
 
+\ BANK n: page sideways bank n. bank_now first, so an interrupt that pages
+\ a bank of its own and puts back bank_now never puts back the bank before.
 MACRO BANK n
-    LDA #n : STA romsel : STA bank_now
+    LDA #n : STA bank_now : STA romsel
 ENDMACRO

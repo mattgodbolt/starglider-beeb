@@ -9,6 +9,8 @@
 #                 disc's erasing (tools/erasecheck.mjs)
 #   make spike    the spike on every captured scene, checked against the
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
+#   make memory   what each region of the memory map holds (tools/memmap.py)
+#   make fps      the disc's frames and steps a second (tools/fps.mjs)
 #   make scenes   capture the scenes in Hatari (tests/st/*.txt; needs
 #                 Hatari and EmuTOS, docs/research/st.md)
 #   make fetch    download every version of the original into original/
@@ -38,7 +40,7 @@ BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short 
 TARGET   = build/starglider.ssd
 DISC     = starglider.ssd
 
-.PHONY: all run disc check spike scenes fetch venv clean
+.PHONY: all run disc check spike memory fps scenes fetch venv clean
 
 all: $(TARGET) build/spike/SPIKE
 
@@ -101,6 +103,12 @@ spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	    node tools/scenerun.mjs build/scenes/$$s/beeb.json build/scenes/$$s/run.json > /dev/null && \
 	    $(PYTHON) -I tools/scenecheck.py build/scenes/$$s/beeb.json build/scenes/$$s/run.json --tolerance 8 || exit 1; \
 	done
+
+memory: $(TARGET)
+	python3 -I tools/memmap.py build/starglider.json
+
+fps: $(TARGET)
+	node tools/fps.mjs 30
 
 # Capturing is slow (Hatari runs in real time) and needs Hatari, so it's
 # its own target; the captures stay in build/scenes.

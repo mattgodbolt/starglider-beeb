@@ -296,15 +296,39 @@ for p in range(4):
     emit(f"    TXA : AND #&{LT[p]:02X} : STA sl_a{p}+1")
 emit("    RTS")
 emit()
-emit("\\ line_plot: line, into the screen draw_bank names: 0 for main RAM's,")
-emit("\\ ACCCON_X for shadow RAM's. X is set only for the line, as it moves every")
-emit("\\ access to &3000-&7FFF, code's too, and this runs from HAZEL.")
-emit(".line_plot")
-emit("    LDA draw_bank : TSB acccon")
-emit("    JSR line")
-emit("    LDA draw_bank : TRB acccon")
-emit("    RTS")
-emit()
+emit("""\\ line_plot: line, into the screen draw_bank names: 0 for main RAM's,
+\\ ACCCON_X for shadow RAM's, and onto that screen's erase list at erase_ptr
+\\ (memory.6502), up to erase_end; past it, erase_over is set, and the
+\\ screen is cleared whole next time. X is set only while it's needed, as it
+\\ moves every access to &3000-&7FFF, code's too: this runs from HAZEL.
+ZA_AUTO2 erase_ptr, erase_end
+ZA_AUTO1 erase_over
+.line_plot
+{
+    LDA #ACCCON_X : TSB acccon              ; the erase lists
+    LDA erase_ptr : CMP erase_end
+    LDA erase_ptr+1 : SBC erase_end+1 : BCS full
+    LDY #0
+    LDA line_x0 : STA (erase_ptr),Y : INY
+    LDA line_x0+1 : STA (erase_ptr),Y : INY
+    LDA line_y0 : STA (erase_ptr),Y : INY
+    LDA line_x1 : STA (erase_ptr),Y : INY
+    LDA line_x1+1 : STA (erase_ptr),Y : INY
+    LDA line_y1 : STA (erase_ptr),Y
+    LDA erase_ptr : CLC : ADC #ERASE_ENTRY : STA erase_ptr
+    BCC logged
+    INC erase_ptr+1
+    BRA logged
+.full
+    LDA #&FF : STA erase_over
+.logged
+    LDA #ACCCON_X : TRB acccon
+    LDA draw_bank : TSB acccon
+    JSR line
+    LDA draw_bank : TRB acccon
+    RTS
+}
+""")
 emit("\\ line_draw and line_erase: ORA (line_scr),Y in every write, or AND #0,")
 emit("\\ which stores a zero over the byte.")
 emit(".line_draw")

@@ -1,0 +1,36 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the memory map (docs/plan.md, section 3)
+\
+\ Each region's guard is its budget, so a part that grows says so when it
+\ outgrows it; `make memory` (tools/memmap.py) shows what each holds.
+\
+\ - zero page: zp.6502; the OS's pages &0400-&0CFF: the workspace (zp.6502);
+\   &0D00: the disc reader's NMI routine;
+\ - main RAM from &0E00: the code, then the lists and the object table
+\   (objects.6502) up to the screen;
+\ - shadow RAM's &3000 up to the shadow screen: the erase lists, which only
+\   code in HAZEL reads or writes, as only ACCCON's X shows them;
+\ - HAZEL: the tables and the code that runs with X set (banks.6502);
+\ - sideways RAM: the shapes (bank 4), the world (5: the list phase, the
+\   sine table, and the game's logic to come).
+\ ***************************************************************************
+
+\ The lists: slot numbers, in the order pushed (world.6502), below the
+\ object table.
+LISTS = OBJECTS - 3 * OB_SLOTS
+SECTION Lists, org = LISTS, guard = OBJECTS, virtual = TRUE
+.coarse_slots SKIP OB_SLOTS
+.near_slots SKIP OB_SLOTS
+.draw_slots SKIP OB_SLOTS
+ENDSECTION
+
+\ The top of main RAM's code.
+MAIN_TOP = LISTS
+
+\ The erase lists: each screen's lines as the line drawer drew them
+\ (x0 word, y0, x1 word, y1), in shadow RAM below the shadow screen.
+ERASE_LIST  = &3000
+ERASE_ENTRY = 6
+ERASE_LINES = (SCREEN - ERASE_LIST) DIV 2 DIV ERASE_ENTRY
+ERASE_BYTES = ERASE_LINES * ERASE_ENTRY
+ASSERT ERASE_LIST + 2 * ERASE_BYTES <= SCREEN

@@ -12,11 +12,13 @@ arithmetic: check before relying on it).*
   goes on drawing, 9% on the ground dots, 9% waiting for the raster, 6% on
   the game's logic, 4% on printing the score and messages, 4% on the
   panel [measured: `tools/st_profile.py`].
-- **The Master's frame** is about 6.7 fields drawn plus a logic step every
-  4 fields, so about 6.5 frames a second at the ST's game speed
-  (decision 4); after the optimisation pass, about 9. The ST manages 12.5
-  [inferred, from the measured renderer and the ST's split]. There's no
-  co-processor edition (decision 8): the plain Master is the machine.
+- **The Master's frame**: the list phase is the game's logic too, so it
+  runs every step, 12.5 a second (decision 14), and takes 30% of the CPU
+  in flight; a frame's drawing is about 5.3 fields. That's about 5 frames
+  a second at the ST's game speed (decision 4); after the optimisation
+  pass, about 8. The ST manages 12.5 [inferred, from the measured
+  renderer and the ST's split]. There's no co-processor edition
+  (decision 8): the plain Master is the machine.
 - **Memory was the harder limit, and the disc lifts it.** The whole game,
   as the ST has it, wants about 117K on the Master; about 96K is there.
   Loading by phase, as Elite does (the front end and the title, the
@@ -54,21 +56,26 @@ which do nothing, and the collisions over the near list.
 
 ### The Master's frame
 
+*Revised 2026-10-18 after the engine skeleton (decision 14): the list
+phase is in each step, not each frame.*
+
 | Work | Cycles | |
 |---|---|---|
-| The renderer (lists, objects, lines) | 226,000 mean in flight; 331,000 at the towers | [measured: `make spike`] |
+| A step's list phase (camera and lists) | 58,000 mean in flight; 42,000 at the towers | [measured: `make spike`, after the object table's arrays] |
+| A frame's objects and lines, logged for erasing | 167,000 mean in flight; 292,000 at the towers | [measured: `make spike`] |
+| Erasing: the lines drawn two frames before | 16,000 in flight; 40,000 at the towers; 61,000 in the silo tunnel | [measured: `make spike`] |
 | Ground dots: 33, each a transform and a reciprocal | 13,000-23,000 | [inferred] |
 | Panel: scanner dots, gauges, changed digits, waveforms, the sight | about 8,000 | [inferred] |
-| Erasing: the lines and dots drawn two frames before | about 14,000 | [inferred: a line erased costs what it cost to draw] |
-| **A frame drawn** | **about 265,000: 6.7 fields** | |
-| A logic step (decision 4: one every 4 fields) | 15,000-30,000 | [inferred: the ST's 6% is exact 16- and 32-bit work, dearer on a 6502] |
+| **A frame drawn** | **about 210,000: 5.3 fields** | |
+| A step's logic (decision 4: one every 4 fields) | 15,000-30,000 | [inferred: the ST's 6% is exact 16- and 32-bit work, dearer on a 6502] |
 | A sector read from disc, while it reads | 24% of the CPU for 20ms | [measured: CE2S, decision 12] |
 
-At 6.7 fields a frame, 1.7 logic steps fall in each, so a frame is about
-7.6 fields: **6.5 frames a second**. If the optimisation pass takes 30%
-off the renderer, 5.7 fields: **about 9** [inferred]. The ST: 12.5 in
-flight, 9 near the towers [measured, docs/research/st.md]. Memory spent
-on speed (section 2) is the pass's to use.
+A step (list phase and logic) is about 80,000 cycles, 12.5 a second:
+about half the CPU, leaving room for **about 5 frames a second** at 210,000
+each. If the pass halves the list phase and takes 30% off the drawing,
+about **8** [inferred]. The ST: 12.5 in flight, 9 near the towers
+[measured, docs/research/st.md]. Memory spent on speed (section 2) is the
+pass's to use.
 
 ---
 
@@ -186,15 +193,16 @@ that grows says so at once.
   microseconds: CE2 found the glitch very hard to spot and accepted it
   (its decision 50).
 - **The game steps on the field count**, one step every 4 fields
-  (decision 4's 12.5 a second; to be settled by measurement against the
-  ST's mean). The main loop runs every step that's due, then draws a
-  frame of the latest state. A heavy scene drops frames; the game's pace
-  holds.
-- **A frame**: the list phase (in the world bank) fills the draw list;
-  the draw phase draws into the hidden screen, after erasing what was
-  drawn there two frames before, and logs what it draws for the next
-  erase; the panel's changes are drawn into the hidden screen too, each
-  screen remembering what it shows.
+  (decision 4's 12.5 a second). A step is the list phase then the logic,
+  since the logic reads the lists (decision 14). The main loop runs every
+  step that's due, and the last one draws a frame between its lists and
+  its logic, the ST's own order. A heavy scene drops frames; the game's
+  pace holds. Built: `src/engine.6502`.
+- **A frame**: the draw phase draws the draw list's objects into the
+  hidden screen, after erasing what was drawn there two frames before,
+  and logs what it draws for the next erase, in shadow RAM; the panel's
+  changes are drawn into the hidden screen too, each screen remembering
+  what it shows.
 
 ---
 
@@ -236,15 +244,20 @@ to be in memory.
 
 ## 6. The order of work
 
-1. **An engine skeleton**, the renderer kept passing `make spike`:
-   - the memory map of section 3, with each region's budget `ASSERT`ed;
-   - the renderer split into the list phase (world bank) and the draw
-     phase (draw list in);
-   - the sine table compacted, and the object table's fields settled
-     (decision 13);
-   - CE2S's 1770 reader, loading into the loading area in the background;
-   - the interrupts, the field count, the fixed step and the flip, with
-     the disc showing it running.
+1. **An engine skeleton**, the renderer kept passing `make spike`. Built
+   on 2026-10-18:
+   - the memory map of section 3 (`src/memory.6502`), each region's guard
+     its budget, and `make memory` to show them;
+   - the renderer split into the list phase (world bank,
+     `src/world.6502`) and the draw phase;
+   - the sine table compacted, and the object table made an array a
+     field (decision 13), its fields joining as the logic is transcribed;
+   - the interrupts, the field count, the fixed step, the flip and the
+     erase lists (`src/engine.6502`, decision 14), with the disc showing
+     it running, and `make fps` to measure it.
+
+   CE2S's 1770 reader comes with the first layer that loads something
+   (speech or the front end); its NMI page, &0D00, is kept free.
 2. **The optimisation pass**: a team of agents, each in its own worktree
    and owning one area (the lists and rotation; each object's set-up; the
    vertices and projection; faces, edges and the window clip; drawing and

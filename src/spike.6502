@@ -7,19 +7,23 @@
 \ positions and line_log back. The harness loads the banks and HAZEL.
 \ ***************************************************************************
 
+SPIKE = TRUE                        ; render and its log, for the harness
+
 INCLUDE "defs.6502"
 INCLUDE "zp.6502"
 INCLUDE "macros.6502"
 INCLUDE "../build/gen/objects.6502"
+INCLUDE "memory.6502"
 
-SECTION Spike, org = &0E00, filename = "SPIKE", guard = OBJECTS, cmos = TRUE
+SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 .spike_init
     ZA_ENTRY
     LDA acccon : ORA #ACCCON_Y : STA acccon      ; HAZEL
-    STZ draw_bank                               ; main RAM's screen
+    STZ draw_bank : STZ draw_buffer             ; main RAM's screen
     LDA #LO(LOG) : STA log_base : LDA #HI(LOG) : STA log_base+1
     JSR mul_init
     JSR objects_clear
+    JSR erase_init
     JSR line_draw
     JSR screen_mode
     JMP screen_clear
@@ -29,6 +33,12 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = OBJECTS, cmos = TRUE
     JSR render
 .spike_done
     RTS
+
+\ spike_erase: the last frame's lines erased (from its erase list), as the
+\ disc erases a screen before drawing it again.
+.spike_erase
+    ZA_ENTRY
+    JMP erase_screen
 
 \ spike_sines: sincos at every angle, the sine and cosine (4 bytes) for
 \ each into the log's bank in turn, for tools/sinecheck.py.

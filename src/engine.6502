@@ -1,0 +1,109 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the frame (decision 14, docs/plan.md
+\ section 4)
+\
+\ The game owns the machine: its interrupt handler counts the fields and
+\ shows each frame from the field after it's drawn. The game steps on the
+\ field count, one step every STEP_FIELDS fields (decision 4), and draws a
+\ frame of the latest state between steps, into the screen not shown. A
+\ step is the list phase then the game's logic, as an ST frame is without
+\ its drawing, since the logic reads the lists; the last step before a
+\ frame draws it between the two, which is the ST's own order (its
+\ world_render, then the logic), so a frame shows what the ST drew at that
+\ step.
+\
+\ The game supplies step_logic.
+\ ***************************************************************************
+
+STEP_FIELDS = 4                     ; decision 4: 12.5 steps a second
+MAX_STEPS   = 4                     ; a frame's most: more, and the game slows
+
+\ install_irq: irq_handler on IRQ1V, and only the vertical sync's
+\ interrupt on: nothing goes to the OS, whose IRQ entry (MOS 3.20, &E59E)
+\ reads nothing but IRQ1V, so HAZEL can stay paged over its code.
+.install_irq
+    SEI
+    LDA #&7F : STA sysvia_ier : STA usrvia_ier  ; anything not serviced would
+                                                ; hold IRQ asserted
+    LDA #LO(irq_handler) : STA irq1v
+    LDA #HI(irq_handler) : STA irq1v+1
+    LDA #2 : STA sysvia_ifr                     ; a vertical sync already flagged
+    LDA #&82 : STA sysvia_ier                   ; CA1: the vertical sync
+    CLI
+    RTS
+
+\ irq_handler: each vertical sync counted, and a frame drawn shown from
+\ it, by ACCCON's D (TSB and TRB, which the line drawer's X changes can't
+\ split). It must lie below &3000, which X moves to shadow RAM.
+.irq_handler
+{
+    ZA_INTERRUPT
+    TXA : PHA
+    LDA sysvia_ifr : AND #2 : BEQ done
+    STA sysvia_ifr                              ; acknowledged
+    INC fields
+    LDA frame_ready : BEQ done
+    STZ frame_ready
+    LDA #ACCCON_D
+    LDX draw_buffer : BEQ show_main
+    TSB acccon
+    BRA done
+.show_main
+    TRB acccon
+.done
+    PLA : TAX
+    LDA &FC                                     ; the interrupted A, which the OS kept
+    RTI
+}
+ASSERT irq_handler < &3000
+
+\ engine_run: the game, for ever: every step that's due, and between them
+\ a frame. The fields counter wraps; a frame is far shorter than 256 fields.
+.engine_run
+{
+    ZA_AUTO1 due
+.wait
+    LDA fields : SEC : SBC stepped
+    CMP #STEP_FIELDS : BCC wait
+    \ the steps due, no more than MAX_STEPS: past that, the game slows
+    LSR A : LSR A
+    ASSERT STEP_FIELDS = 4
+    CMP #MAX_STEPS + 1 : BCC counted
+    LDA fields : SEC : SBC #MAX_STEPS * STEP_FIELDS : STA stepped
+    LDA #MAX_STEPS
+.counted
+    STA due
+.step
+    LDA stepped : CLC : ADC #STEP_FIELDS : STA stepped
+    BANK BANK_WORLD
+    JSR list_phase
+    DEC due : BNE logic
+    JSR frame                                   ; the last step's frame
+.logic
+    JSR step_logic
+    INC steps : BNE counted_step
+    INC steps+1
+.counted_step
+    LDA due : BNE step
+    BRA wait
+}
+
+\ frame: the lists' objects drawn into the screen not shown, which the
+\ next vertical sync shows.
+.frame
+{
+.shown
+    LDA frame_ready : BNE shown                 ; the last frame not yet up
+    LDA draw_buffer : EOR #1 : STA draw_buffer
+    TAX : LDA buffer_bank,X : STA draw_bank
+    JSR erase_screen
+.erased
+    JSR draw_phase
+    LDA #1 : STA frame_ready
+    INC frames : BNE counted
+    INC frames+1
+.counted
+    RTS
+.buffer_bank
+    EQUB 0, ACCCON_X                            ; main RAM's screen, shadow's
+}

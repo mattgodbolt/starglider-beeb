@@ -30,3 +30,47 @@ NEXT
     LDA draw_bank : TRB acccon
     RTS
 }
+
+\ erase_screen: the screen draw_buffer names (draw_bank set to match)
+\ made empty for drawing: the lines on its erase list drawn again as
+\ zeros, or if the list overflowed, the whole screen cleared.
+.erase_screen
+{
+    ZA_AUTO2 p, stop
+    LDX draw_buffer
+    LDA erase_full,X : BEQ replay
+    JMP screen_clear
+.replay
+    LDA erase_stop_lo,X : STA stop : LDA erase_stop_hi,X : STA stop+1
+    LDA erase_list_lo,X : STA p : LDA erase_list_hi,X : STA p+1
+    JSR line_erase
+.each
+    LDA p : CMP stop : BNE line_on
+    LDA p+1 : CMP stop+1 : BEQ done
+.line_on
+    LDA #ACCCON_X : TSB acccon
+    LDY #0
+    LDA (p),Y : STA line_x0 : INY
+    LDA (p),Y : STA line_x0+1 : INY
+    LDA (p),Y : STA line_y0 : INY
+    LDA (p),Y : STA line_x1 : INY
+    LDA (p),Y : STA line_x1+1 : INY
+    LDA (p),Y : STA line_y1
+    LDA #ACCCON_X : TRB acccon
+    LDA p : CLC : ADC #ERASE_ENTRY : STA p
+    BCC next
+    INC p+1
+.next
+    LDA draw_bank : TSB acccon
+    JSR line
+    LDA draw_bank : TRB acccon
+    BRA each
+.done
+    JMP line_draw
+}
+
+\ Each screen's erase list.
+.erase_list_lo
+    EQUB LO(ERASE_LIST), LO(ERASE_LIST + ERASE_BYTES)
+.erase_list_hi
+    EQUB HI(ERASE_LIST), HI(ERASE_LIST + ERASE_BYTES)

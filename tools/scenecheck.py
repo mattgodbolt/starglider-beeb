@@ -57,7 +57,7 @@ def main():
     run = json.loads(Path(args.run).read_text())
     first = run.get("first", 0)
     st = {k: 0 for k in ("frames", "list_bad", "rel_bad", "rel_approx", "edges_both", "edges_moved",
-                          "only_st", "only_port")}
+                          "only_st", "only_port", "erase_left")}
     worst = 0
     worst_approx = 0
     shown = 0
@@ -69,13 +69,17 @@ def main():
             print(msg)
         shown += 1
 
-    cycles = {k: [] for k in ("camera", "lists", "objects", "total")}
+    cycles = {k: [] for k in ("camera", "lists", "objects", "total", "erase")}
     for i, got in enumerate(run["frames"]):
         n = first + i
         exp = scenes[n]["expect"]
         st["frames"] += 1
         for k in cycles:
-            cycles[k].append(got["cycles"][k])
+            if k in got["cycles"]:
+                cycles[k].append(got["cycles"][k])
+        if got.get("left"):
+            st["erase_left"] += 1
+            show(f"frame {n}: {got['left']} bytes left on the screen after the erase")
         for name in ("coarse", "near", "draw"):
             if got[name] != exp[name]:
                 st["list_bad"] += 1
@@ -126,7 +130,7 @@ def main():
         if xs:
             print(f"{k:8} mean {statistics.mean(xs):9.0f}  median {statistics.median(xs):9.0f}  "
                   f"max {max(xs):9.0f}  ({statistics.mean(xs) / fields:.2f} fields)")
-    bad = st["list_bad"] or st["rel_bad"] or worst > args.tolerance
+    bad = st["list_bad"] or st["rel_bad"] or st["erase_left"] or worst > args.tolerance
     return 1 if bad else 0
 
 

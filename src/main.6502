@@ -16,6 +16,7 @@ INCLUDE "defs.6502"
 INCLUDE "zp.6502"
 INCLUDE "macros.6502"
 INCLUDE "../build/gen/objects.6502"
+INCLUDE "memory.6502"
 
 \ The build stamp comes from the Makefile (-D BUILD="date time sha"), so a
 \ disc says what it is: *TYPE !BOOT shows it. A + after the sha means the
@@ -42,7 +43,7 @@ SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*RUN SG", 13
 ENDSECTION
 
-SECTION Main, org = &0E00, filename = "SG", guard = OBJECTS, cmos = TRUE
+SECTION Main, org = &0E00, filename = "SG", guard = MAIN_TOP, cmos = TRUE
 .start
     ZA_ENTRY
     SEI
@@ -56,6 +57,8 @@ SECTION Main, org = &0E00, filename = "SG", guard = OBJECTS, cmos = TRUE
     STZ draw_bank : JSR screen_clear
     LDA #ACCCON_X : STA draw_bank : JSR screen_clear
     JMP models
+
+INCLUDE "engine.6502"
 
 \ copy_4k: 4K from page A to page X.
 .copy_4k
@@ -74,21 +77,13 @@ SECTION Main, org = &0E00, filename = "SG", guard = OBJECTS, cmos = TRUE
 
 \ ---------------------------------------------------------------------------
 \ models: each type with a model in turn, turning, two radii from the
-\ camera, until the next.
-MODEL_FRAMES = 120                  ; frames each model is shown
-TURN = 24                           ; its heading's step a frame (4096 a turn)
+\ camera, on the engine's step (engine.6502).
+MODEL_STEPS = 120                   ; steps each model is shown
+TURN = 24                           ; its heading's step a step (4096 a turn)
 TILT = 320                          ; and its pitch
 .model_types
     EQUB 1, 2, 3, 4, 5, 7, 8, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28
 MODELS = P% - model_types
-.buffer_bank
-    EQUB 0, ACCCON_X                \ drawing in main RAM's screen, or shadow RAM's ...
-.buffer_shows
-    EQUB 0, ACCCON_D                \ ... and showing it
-.buffer_log_lo
-    EQUB LO(LOG), LO(LOG2)
-.buffer_log_hi
-    EQUB HI(LOG), HI(LOG2)
 
 .models
 {
@@ -105,44 +100,20 @@ MODELS = P% - model_types
 .colours
     LDA model_colours,X : STA colour_map,X
     DEX : BPL colours
-    STZ model_lines : STZ model_lines+1 : STZ model_lines+2 : STZ model_lines+3
     STZ model_i
     JSR set_model
-    STZ model_buffer
-    LDA #2 : STA sysvia_ifr                 ; the VSync flag, cleared
-.frame
-    LDX model_buffer
-    LDA buffer_bank,X : STA draw_bank
-    \ erase what was drawn on this screen two frames ago: its lines again,
-    \ as zeros
-    JSR line_erase                          ; (which takes X)
-    LDX model_buffer
-    LDA buffer_log_lo,X : STA erase_ptr : LDA buffer_log_hi,X : STA erase_ptr+1
-    TXA : ASL A : TAX
-    LDA model_lines,X : STA erase_n : LDA model_lines+1,X : STA erase_n+1
-    LDA #BANK_LOG : STA romsel
-.erase
-    LDA erase_n : ORA erase_n+1 : BEQ erased
-    LDY #2
-    LDA (erase_ptr),Y : STA line_x0 : INY
-    LDA (erase_ptr),Y : STA line_x0+1 : INY
-    LDA (erase_ptr),Y : STA line_y0 : INY
-    LDA (erase_ptr),Y : STA line_x1 : INY
-    LDA (erase_ptr),Y : STA line_x1+1 : INY
-    LDA (erase_ptr),Y : STA line_y1
-    JSR line_plot
-    LDA erase_ptr : CLC : ADC #LOG_ENTRY : STA erase_ptr
-    BCC next_line
-    INC erase_ptr+1
-.next_line
-    LDA erase_n : BNE count_down
-    DEC erase_n+1
-.count_down
-    DEC erase_n
-    BRA erase
-.erased
-    JSR line_draw
-    \ turn it, step its animation, and after a while the next model
+    \ Main RAM's screen shown, and both cleared before they're drawn.
+    JSR erase_init
+    STZ draw_buffer : STZ frame_ready
+    LDA fields : STA stepped
+    JSR install_irq
+    JMP engine_run
+}
+
+\ step_logic (the engine's): turn it, step its animation, and after a
+\ while the next model.
+.step_logic
+{
     LDA ob_heading_lo : CLC : ADC #LO(TURN) : STA ob_heading_lo
     LDA ob_heading_hi : ADC #HI(TURN) : STA ob_heading_hi
     LDA model_t : LSR A : LDX model_shape
@@ -154,26 +125,14 @@ MODELS = P% - model_types
     INC model_t : BNE same_model
     INC model_t+1
 .same_model
-    LDA model_t : CMP #LO(MODEL_FRAMES) : BNE drawing
-    LDA model_t+1 : CMP #HI(MODEL_FRAMES) : BNE drawing
+    LDA model_t : CMP #LO(MODEL_STEPS) : BNE done
+    LDA model_t+1 : CMP #HI(MODEL_STEPS) : BNE done
     INC model_i : LDA model_i : CMP #MODELS : BNE next_model
     STZ model_i
 .next_model
-    JSR set_model
-.drawing
-    LDX model_buffer
-    LDA buffer_log_lo,X : STA log_base : LDA buffer_log_hi,X : STA log_base+1
-    JSR render
-    LDA model_buffer : ASL A : TAX
-    LDA log_n : STA model_lines,X : LDA log_n+1 : STA model_lines+1,X
-    \ show it from the next VSync
-.vsync
-    LDA sysvia_ifr : AND #2 : BEQ vsync
-    STA sysvia_ifr
-    LDX model_buffer
-    LDA acccon : AND #NOT(ACCCON_D) AND &FF : ORA buffer_shows,X : STA acccon
-    TXA : EOR #1 : STA model_buffer
-    JMP frame
+    JMP set_model
+.done
+    RTS
 }
 
 \ set_model: model_i's type in slot 0, two radii from the camera.
@@ -203,17 +162,15 @@ INCLUDE "code.6502"
 ENDSECTION
 
 \ The models' own state, in the workspace.
-SECTION ModelWork, org = work_end, guard = &0E00, virtual = TRUE
+SECTION ModelWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .model_i      SKIP 1
 .model_type   SKIP 1
 .model_shape  SKIP 1
 .model_frames SKIP 1
-.model_buffer SKIP 1
 .model_t      SKIP 2
 .model_z      SKIP 2
-.model_lines  SKIP 4                \ each screen's lines, for erasing
 ENDSECTION
 
-ZA_AUTO2 erase_ptr, erase_n, set_ptr
+ZA_AUTO2 set_ptr
 
 INCLUDE "banks.6502"

@@ -30,9 +30,11 @@ SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
 .bank_now   SKIP 1          ; the sideways bank paged, as BANK pages it
 .draw_bank  SKIP 1          ; the screen drawn into: 0 main RAM's, ACCCON_X shadow's
 .log_base   SKIP 2          ; where render logs its lines (in BANK_LOG)
+.fields     SKIP 1          ; fields shown, counted by the interrupt (engine.6502)
 ENDSECTION
 
-ZA_POOL ZP_FIXED..&FF
+\ The pool stops short of &FC, where the MOS's IRQ entry keeps A.
+ZA_POOL ZP_FIXED..&FB
 
 \ The products (maths.6502)
 ZA_AUTO2 mul_x, mul_y, mul_t, mul_r
@@ -42,7 +44,9 @@ ZA_AUTO2 div_d, div_u, div_q
 ZA_AUTO 4, div_n
 
 \ The renderer (render.6502): what crosses its routines
+IF DEFINED(SPIKE)
 ZA_AUTO2 log_ptr            ; the next line in line_log
+ENDIF
 ZA_AUTO 18, cam             ; the camera's matrix: rows x', y', z' of words on x, y, z
 ZA_AUTO 18, mat             ; the object's (build_matrix's)
 ZA_AUTO 6, ang              ; build_matrix's pitch, heading and roll
@@ -93,12 +97,11 @@ ZA_AUTO2 line_x0, line_x1, line_scr, line_mx
 ZA_AUTO1 line_y0, line_y1, line_my
 ZA_AUTO1 line_dx, line_dy, line_cnt, line_ls, line_errs, line_err
 
+\ The workspace, in the OS's pages, up to the disc reader's NMI page.
 WORK = &0400
-SECTION Work, org = WORK, guard = &0E00, virtual = TRUE
-    \ the lists: slot numbers, in the order pushed (render.6502)
-.coarse_slots SKIP SLOTS + 2
-.near_slots SKIP SLOTS + 2
-.draw_slots SKIP SLOTS + 2
+NMI_PAGE = &0D00
+SECTION Work, org = WORK, guard = NMI_PAGE, virtual = TRUE
+    \ the lists' lengths (the lists: memory.6502)
 .coarse_n   SKIP 1
 .near_n     SKIP 1
 .draw_n     SKIP 1
@@ -108,6 +111,16 @@ SECTION Work, org = WORK, guard = &0E00, virtual = TRUE
 .ground_valid SKIP 1        ; non-zero: mat is ground_matrix's for ground_h
 .ground_h   SKIP 2
 .stamp      SKIP 1          ; the object's stamp on its edges and vertices
+    \ the frame (engine.6502): the screen being drawn, 0 main RAM's or 1
+    \ shadow's, whether it's ready to show, and each screen's erase list
+.draw_buffer SKIP 1
+.frame_ready SKIP 1
+.stepped    SKIP 1          ; the field count the steps taken have reached
+.frames     SKIP 2          ; frames drawn
+.steps      SKIP 2          ; steps taken
+.erase_stop_lo SKIP 2       ; by screen: where its erase list ends ...
+.erase_stop_hi SKIP 2
+.erase_full SKIP 2          ; ... and non-zero if it overflowed
     \ by shape and colour
 .anim_frame SKIP 32         ; each shape's animation frame, as its list numbers them
 .colour_map SKIP 16         ; the ST's colours to the screen's bytes (&00, &0F, &F0, &FF)

@@ -172,6 +172,10 @@ for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
     }
     ram.set(fr.anim, need("anim_frame"));
     ram.set(COLOURS, need("colour_map"));
+    // the last frame's lines erased, which must leave the screen empty
+    const [erase] = await run(need("spike_erase"));
+    let left = 0;
+    for (let a = need("SCREEN"); a < 0x8000; a++) if (ram[a]) left++;
     const [camera, lists, objects, done] = await run(need("spike_frame"), [
         need("render_lists"),
         need("render_objects"),
@@ -192,7 +196,8 @@ for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
         lines.push([ram[a], ram[a + 1], peekw(a + 2), ram[a + 4], peekw(a + 5), ram[a + 7], ram[a + 8]]);
     }
     out.push({
-        cycles: { camera, lists, objects, total: camera + lists + objects + done - stubCost },
+        cycles: { camera, lists, objects, total: camera + lists + objects + done - stubCost, erase: erase - stubCost },
+        left,
         coarse,
         near: list("near_slots", "near_n"),
         draw: list("draw_slots", "draw_n"),

@@ -12,6 +12,9 @@ ACCCON_D   = 1              ; ... D: the CRTC shows shadow RAM
 ACCCON_X   = 4              ; ... X: the CPU's &3000-&7FFF is shadow RAM
 ACCCON_Y   = 8              ; ... Y: HAZEL's RAM at &C000-&DFFF
 sysvia_ifr = &FE4D          ; bit 1: the vertical sync (CA1) has come
+sysvia_ier = &FE4E          ; write bit 7 clear to disable the bits set
+usrvia_ier = &FE6E
+irq1v      = &0204          ; the OS's IRQ vector, which the game takes
 
 \ --- The screen -----------------------------------------------------------
 \ MODE 1 at the ST's 320 x 200 (decision 3): MODE 1's 80 columns and 25 of

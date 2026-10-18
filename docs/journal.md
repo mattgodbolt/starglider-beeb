@@ -213,3 +213,37 @@ Matt's calls on it:
 With the docked screens, the cockpit picture and the front end loaded
 when they're wanted, the plan's map holds about 86K in flight of the
 96K, which leaves room to spend on speed.
+
+### The engine skeleton
+
+The plan's first step, built and checked a piece at a time, each commit
+keeping `make spike` passing.
+
+- **The sine table** is the ST's first quarter plus a bitmap. The rest
+  follows by symmetry, mirrored in the odd quarters and negated as the
+  ST's rounding negates (1 - v). The exceptions are 193 entries, each one
+  off, with the direction fixed by its quarter. Baron computes both from
+  the ST's own formula. It's 2.5K where the table was 10K, for about
+  1,600 cycles a frame. `sinecheck` now runs `sincos` itself at all 4,096
+  angles.
+- **The object table** is an array a field, by slot, in main RAM
+  (decision 13). `tools/mkobjects.py` lays it out and writes a map that
+  the harness uses to put the ST's records in and read them back.
+  Indexing by slot took the list phase from 54K cycles to 48K.
+- **The world bank.** The list phase moved into bank 5 beside the sine
+  table, where the logic will join it. Main RAM's code fell from 10.6K
+  to 5.9K, and bank 6 is free.
+- **The frame** (decision 14). The game owns the IRQ, counts fields,
+  steps every four, and shows each frame from the next vertical sync.
+  Each screen keeps a list of the lines drawn on it in shadow RAM, for
+  erasing. The spike now erases between frames and checks that nothing
+  is left: nothing is, on every captured frame.
+
+Two things came out of building it. First, the lists are the logic's
+input: the ST makes them before its logic and the logic reads them, so a
+fixed step has to make them every step. That puts the list phase at 30%
+of the CPU at 12.5 steps a second, and makes it the optimisation pass's
+first target. Second, the ST's order (lists, drawing, logic) maps onto
+the steps if the last step before a frame draws between its lists and
+its logic, which needs no copy of anything for the drawing. The model
+viewer on the disc runs at 12.5 frames a second (`make fps`).

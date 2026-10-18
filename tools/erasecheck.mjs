@@ -4,7 +4,7 @@
 //   node tools/erasecheck.mjs [FRAMES]
 //
 // It runs build/starglider.ssd's program on jsbeeb's Master, its files put
-// where !BOOT leaves them, and stops after each erase (models.erased).
+// where !BOOT leaves them, and stops after each erase (frame.erased).
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,18 +34,17 @@ ram.set(files.WORLD, bank(sym.BANK_WORLD));
 ram.set(files.TABLES, 0x5000);
 ram.set(files.CODE2, 0x6000);
 cpu.pc = sym.start;
-const erased = sym["models.erased"];
+const erased = sym["frame.erased"];
 let bad = 0;
 const frames = Number(process.argv[2] ?? 700);
 for (let f = 0; f < frames; f++) {
   await tm.runUntilAddress(erased, 2);
   if (cpu.pc !== erased) throw new Error("no erase at frame " + f);
-  const buf = ram[sym.model_buffer];
+  const buf = ram[sym.draw_buffer];
   const base = buf ? 0x8000 : 0;
   let lit = 0;
   for (let a = 0x4180; a < 0x8000; a++) if (ram[base + a]) lit++;
-  if (lit && f >= 2) { bad++; if (bad < 8) console.log(`frame ${f} buffer ${buf}: ${lit} bytes left, model ${ram[sym.model_i]} t ${ram[sym.model_t]}`); }
-  await tm.runFor(10);
+  if (lit) { bad++; if (bad < 8) console.log(`frame ${f} buffer ${buf}: ${lit} bytes left, model ${ram[sym.model_i]} t ${ram[sym.model_t]}`); }
 }
 console.log(`erasecheck: ${frames} frames, ${bad} with something left`);
 process.exit(bad ? 1 : 0);

@@ -46,6 +46,8 @@ make spike      # the spike on every captured scene: checked against the
                 # ST's renderer, and timed (tools/scenecheck.py)
 make check      # sincos against the ST's sine table at every angle, make spike, and the
                 # disc's erasing (tools/erasecheck.mjs)
+make memory     # what each region of the memory map holds (src/memory.6502)
+make fps        # the disc's frames and steps a second
 make scenes     # capture the scenes in Hatari (slow; needs ../hatari)
 make fetch      # download every version into original/ (not committed)
 make venv       # .venv (uv sync): SkoolKit, Capstone, Pillow, NumPy
@@ -60,9 +62,18 @@ and the vertex transforms (`tools/mkline.py`, `mkrotate.py`,
 field, by slot) and writes `build/gen/objects.json`, which the harnesses
 use to put the ST's records into it and read them back.
 
-Where things live: the drawing in main RAM and HAZEL, the objects at the
-top of main RAM, the list phase and the sine table in the world's bank
-(5, `src/world.6502`), the shapes in bank 4.
+Where things live (`src/memory.6502`): the drawing in main RAM and HAZEL,
+the lists and objects at the top of main RAM, the list phase and the sine
+table in the world's bank (5, `src/world.6502`), the shapes in bank 4,
+the erase lists in shadow RAM below the shadow screen. `src/engine.6502`
+is the frame: the interrupt, the fixed step, the flip (decision 14).
+
+- The MOS's IRQ entry keeps A at &FC, so baron's pool stops at &FB, and
+  the interrupt handler ends `LDA &FC : RTI`. It must lie below &3000.
+- `BANK` writes `bank_now` before ROMSEL, so an interrupt that pages a
+  bank and puts `bank_now` back is always right.
+- Code in a bank may call main RAM's only if what it calls leaves the
+  bank paged as it was (`build_matrix` pages the world's bank, its own).
 `node tools/scenerun.mjs SCENES OUT --profile 37` samples where the cycles
 go.
 
