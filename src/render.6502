@@ -95,23 +95,30 @@ ENDIF
     LDA ang_r : STA m_idx : LDA ang_r+1 : AND #1 : STA m_idx+1
     ASL m_idx : ROL m_idx+1 : ASL m_idx : ROL m_idx+1 : ASL m_idx : ROL m_idx+1
     JSR sincos : MOVW m_s3, m_sin : MOVW m_c3, m_cos
-    \ The products, in the ST's order (&04190).
-    FMUL m_s3, m_s1 : MOVW m_d6, mul_r
-    FMUL m_c2, m_c3 : MOVW m_d7, mul_r
-    FMUL m_s2, m_d6 : MOVW mat+0, m_d7 : ADDW mat+0, mul_r          ; x' on x
-    FMUL m_s1, m_s2 : MOVW m_t, mul_r
-    FMUL m_t, m_c3 : MOVW mat+6, mul_r
-    FMUL m_s3, m_c2 : SUBW mat+6, mul_r                             ; y' on x
-    FMUL m_s2, m_c1 : MOVW mat+12, mul_r                            ; z' on x
-    FMUL m_c1, m_s3 : MOVW mat+2, mul_r                             ; x' on y
-    FMUL m_c1, m_c3 : MOVW mat+8, mul_r                             ; y' on y
+    \ The ST's products and sums (&04190), taken by the factor they share,
+    \ each sum built in its entry: the same values in any order.
+    MOVW mul_x, m_s3
+    FMUL_BY m_s1 : MOVW m_d6, mul_r
+    FMUL_BY m_c2 : LDA #0 : SEC : SBC mul_r : STA mat+6 : LDA #0 : SBC mul_r+1 : STA mat+7
+    FMUL_BY m_s2 : MOVW mat+10, mul_r
+    FMUL_BY m_c1 : MOVW mat+2, mul_r                                ; x' on y
+    MOVW mul_x, m_c1
+    FMUL_BY m_c3 : MOVW mat+8, mul_r                                ; y' on y
+    FMUL_BY m_c2 : MOVW mat+16, mul_r                               ; z' on z
+    FMUL_BY m_s2 : MOVW mat+12, mul_r                               ; z' on x
+    MOVW mul_x, m_s2
+    FMUL_BY m_d6 : MOVW mat+0, mul_r
+    FMUL_BY m_s1 : MOVW m_t, mul_r
+    FMUL_BY m_c3 : LDA #0 : SEC : SBC mul_r : STA mat+4 : LDA #0 : SBC mul_r+1 : STA mat+5
+    MOVW mul_x, m_c2
+    FMUL_BY m_c3 : MOVW m_d7, mul_r : ADDW mat+0, mul_r             ; x' on x
+    FMUL_BY m_d6 : ADDW mat+4, mul_r                                ; x' on z
+    MOVW mul_x, m_c3
+    FMUL_BY m_t : ADDW mat+6, mul_r                                 ; y' on x
+    MOVW mul_x, m_s1
+    FMUL_BY m_d7 : ADDW mat+10, mul_r                               ; y' on z
     LDA #0 : SEC : SBC m_s1 : STA mat+14
     LDA #0 : SBC m_s1+1 : STA mat+15                                ; z' on y
-    FMUL m_d6, m_c2 : MOVW mat+4, mul_r
-    FMUL m_s2, m_c3 : SUBW mat+4, mul_r                             ; x' on z
-    FMUL m_s3, m_s2 : MOVW mat+10, mul_r
-    FMUL m_d7, m_s1 : ADDW mat+10, mul_r                            ; y' on z
-    FMUL m_c1, m_c2 : MOVW mat+16, mul_r                            ; z' on z
     RTS
 }
 
@@ -174,10 +181,15 @@ ZA_AUTO 5, ksign            ; ... and signs
     LDA ob_x_lo,X : SEC : SBC pl_x : STA dx : LDA ob_x_hi,X : SBC pl_x+1 : STA dx+1
     LDA pl_y : SEC : SBC ob_y_lo,X : STA objc+2 : LDA pl_y+1 : SBC ob_y_hi,X : STA objc+3
     LDA ob_z_lo,X : SEC : SBC pl_z : STA dz : LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
-    FMUL m_cos, dx : LDA #0 : SEC : SBC mul_r : STA objc : LDA #0 : SBC mul_r+1 : STA objc+1
-    FMUL m_sin, dz : SUBW objc, mul_r
-    FMUL m_sin, dx : MOVW objc+4, mul_r
-    FMUL m_cos, dz : SUBW objc+4, mul_r
+    \ (fmul16 leaves its operands as they were, so each is set once)
+    MOVW mul_x, m_cos : MOVW mul_y, dx : JSR fmul16
+    LDA #0 : SEC : SBC mul_r : STA objc : LDA #0 : SBC mul_r+1 : STA objc+1
+    MOVW mul_y, dz : JSR fmul16
+    LDA #0 : SEC : SBC mul_r : STA objc+4 : LDA #0 : SBC mul_r+1 : STA objc+5
+    MOVW mul_x, m_sin : JSR fmul16
+    SUBW objc, mul_r
+    MOVW mul_y, dx : JSR fmul16
+    ADDW objc+4, mul_r
     RTS
 }
 
