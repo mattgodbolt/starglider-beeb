@@ -10,14 +10,16 @@
 INCLUDE "defs.6502"
 INCLUDE "zp.6502"
 INCLUDE "macros.6502"
+INCLUDE "../build/gen/objects.6502"
 
-SECTION Spike, org = &0E00, filename = "SPIKE", guard = SCREEN, cmos = TRUE
+SECTION Spike, org = &0E00, filename = "SPIKE", guard = OBJECTS, cmos = TRUE
 .spike_init
     ZA_ENTRY
     LDA acccon : ORA #ACCCON_Y : STA acccon      ; HAZEL
     STZ draw_bank                               ; main RAM's screen
     LDA #LO(LOG) : STA log_base : LDA #HI(LOG) : STA log_base+1
     JSR mul_init
+    JSR objects_clear
     JSR line_draw
     JSR screen_mode
     JMP screen_clear
@@ -37,7 +39,7 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = SCREEN, cmos = TRUE
     STZ m_idx : STZ m_idx+1
     LDA #LO(LOG) : STA out : LDA #HI(LOG) : STA out+1
 .each
-    BANK BANK_SINE
+    BANK BANK_WORLD
     JSR sincos
     LDA #BANK_LOG : STA romsel
     LDY #3

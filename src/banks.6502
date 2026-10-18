@@ -24,8 +24,11 @@ SECTION Shapes, org = &8000, filename = "SHAPES", guard = &C000
 INCLUDE "../build/gen/shapes.6502"
 ENDSECTION
 
-SECTION Sine, org = &8000, filename = "SINE", guard = &C000
+\ The world's bank: the list phase, and the sine table its camera and the
+\ objects' matrices read.
+SECTION WorldBank, org = &8000, filename = "WORLD", guard = &C000, cmos = TRUE
     EQUD 0, 0
-    ALIGN 256
+INCLUDE "world.6502"
+INCLUDE "../build/gen/rotate.6502"
 INCLUDE "sine.6502"
 ENDSECTION

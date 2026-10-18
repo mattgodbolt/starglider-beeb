@@ -15,6 +15,7 @@
 INCLUDE "defs.6502"
 INCLUDE "zp.6502"
 INCLUDE "macros.6502"
+INCLUDE "../build/gen/objects.6502"
 
 \ The build stamp comes from the Makefile (-D BUILD="date time sha"), so a
 \ disc says what it is: *TYPE !BOOT shows it. A + after the sha means the
@@ -35,13 +36,13 @@ SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "MODE 1", 13
     EQUS "VDU 19,2,6;0;", 13                    ; logical 2 is cyan
     EQUS "*SRLOAD SHAPES 8000 ", AS_STRING(BANK_SHAPES), 13
-    EQUS "*SRLOAD SINE 8000 ", AS_STRING(BANK_SINE), 13
+    EQUS "*SRLOAD WORLD 8000 ", AS_STRING(BANK_WORLD), 13
     EQUS "*LOAD TABLES ", ~TABLES_AT, 13
     EQUS "*LOAD CODE2 ", ~CODE2_AT, 13
     EQUS "*RUN SG", 13
 ENDSECTION
 
-SECTION Main, org = &0E00, filename = "SG", guard = SCREEN, cmos = TRUE
+SECTION Main, org = &0E00, filename = "SG", guard = OBJECTS, cmos = TRUE
 .start
     ZA_ENTRY
     SEI
@@ -96,6 +97,7 @@ MODELS = P% - model_types
 .zero
     STZ pl_x,X
     DEX : BPL zero
+    JSR objects_clear
     LDA #1 : STA n_slots
     STZ docked : STZ silo_missile : STZ all_faces
     LDA #15 : STA beam_colour
@@ -141,9 +143,8 @@ MODELS = P% - model_types
 .erased
     JSR line_draw
     \ turn it, step its animation, and after a while the next model
-    BANK BANK_OBJECTS
-    LDA OBJECTS + OB_HEADING : CLC : ADC #LO(TURN) : STA OBJECTS + OB_HEADING
-    LDA OBJECTS + OB_HEADING + 1 : ADC #HI(TURN) : STA OBJECTS + OB_HEADING + 1
+    LDA ob_heading_lo : CLC : ADC #LO(TURN) : STA ob_heading_lo
+    LDA ob_heading_hi : ADC #HI(TURN) : STA ob_heading_hi
     LDA model_t : LSR A : LDX model_shape
 .wrap
     CMP model_frames : BCC framed
@@ -186,14 +187,9 @@ MODELS = P% - model_types
     LDY #5 : LDA (set_ptr),Y : STA model_frames     ; its animation's length
     LDY #8 : LDA (set_ptr),Y : STA model_z : INY : LDA (set_ptr),Y : STA model_z+1
     ASL model_z : ROL model_z+1                     ; two radii
-    BANK BANK_OBJECTS
-    LDX #OB_SIZE - 1
-.clear
-    STZ OBJECTS,X
-    DEX : BPL clear
-    LDA model_type : STA OBJECTS + OB_TYPE
-    LDA model_z : STA OBJECTS + OB_Z : LDA model_z+1 : STA OBJECTS + OB_Z + 1
-    LDA #LO(TILT) : STA OBJECTS + OB_PITCH : LDA #HI(TILT) : STA OBJECTS + OB_PITCH + 1
+    LDA model_type : STA ob_type
+    LDA model_z : STA ob_z_lo : LDA model_z+1 : STA ob_z_hi
+    LDA #LO(TILT) : STA ob_pitch_lo : LDA #HI(TILT) : STA ob_pitch_hi
     STZ model_t : STZ model_t+1
     RTS
 }

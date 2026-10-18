@@ -27,7 +27,7 @@ load("SPIKE", sym.spike_init);
 load("TABLES", where(sym.TABLES));
 load("CODE2", where(sym.CODE2));
 load("SHAPES", bank(sym.BANK_SHAPES));
-load("SINE", bank(sym.BANK_SINE));
+load("WORLD", bank(sym.BANK_WORLD));
 
 // The stub: SEI, JSR entry, JMP to itself.
 const STUB = 0x0140;

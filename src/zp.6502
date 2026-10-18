@@ -42,7 +42,6 @@ ZA_AUTO2 div_d, div_u, div_q
 ZA_AUTO 4, div_n
 
 \ The renderer (render.6502): what crosses its routines
-ZA_AUTO2 rec                ; the object's record
 ZA_AUTO2 log_ptr            ; the next line in line_log
 ZA_AUTO 18, cam             ; the camera's matrix: rows x', y', z' of words on x, y, z
 ZA_AUTO 18, mat             ; the object's (build_matrix's)
@@ -109,7 +108,6 @@ SECTION Work, org = WORK, guard = &0E00, virtual = TRUE
 .ground_valid SKIP 1        ; non-zero: mat is ground_matrix's for ground_h
 .ground_h   SKIP 2
 .stamp      SKIP 1          ; the object's stamp on its edges and vertices
-.rot_exact  SKIP SLOTS + 2  ; by slot: 1 if this frame's rotation was exact (decision 11)
     \ by shape and colour
 .anim_frame SKIP 32         ; each shape's animation frame, as its list numbers them
 .colour_map SKIP 16         ; the ST's colours to the screen's bytes (&00, &0F, &F0, &FF)

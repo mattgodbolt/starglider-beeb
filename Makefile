@@ -26,7 +26,7 @@ ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
 SCENES   = flight towers docked
 SOURCES  = $(wildcard src/*.6502)
-GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/rotate.6502 build/gen/xform.6502
+GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502
 
 # A failed step leaves no half-made target behind (asm.sh fails on a
 # warning after baron has written its output).
@@ -77,6 +77,9 @@ build/gen/rotate.6502: tools/mkrotate.py | build/gen
 
 build/gen/xform.6502: tools/mkxform.py | build/gen
 	python3 -I tools/mkxform.py > $@
+
+build/gen/objects.6502 build/gen/objects.json &: tools/mkobjects.py | build/gen
+	python3 -I tools/mkobjects.py build/gen
 
 build/spike/SPIKE: $(SOURCES) $(GEN) | build/spike
 	$(ASM) --warn 2 -p build/spike --symbols build/spike/symbols.json src/spike.6502

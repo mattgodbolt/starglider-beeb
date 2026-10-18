@@ -30,7 +30,7 @@ for (let i = 0; i < n; i++) {
 }
 ram.set(files.SG, 0x0e00);
 ram.set(files.SHAPES, bank(4));
-ram.set(files.SINE, bank(5));
+ram.set(files.WORLD, bank(sym.BANK_WORLD));
 ram.set(files.TABLES, 0x5000);
 ram.set(files.CODE2, 0x6000);
 cpu.pc = sym.start;

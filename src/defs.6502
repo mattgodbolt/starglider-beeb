@@ -22,14 +22,12 @@ SCREEN      = &8000 - SCREEN_ROWS * SCREEN_ROW
 
 \ --- Sideways RAM ---------------------------------------------------------
 BANK_SHAPES  = 4
-BANK_SINE    = 5
-BANK_OBJECTS = 6
+BANK_WORLD   = 5                    ; the list phase and the sine table (world.6502)
 BANK_LOG     = 7                    ; the spike's line log
 
 \ --- Objects --------------------------------------------------------------
 \ The ST's 140 slots, then the silo's tunnel (the ST's &1218) and its
-\ missile (&1258), each 64 bytes, in the objects' bank.
+\ missile (&1258): the table is build/gen/objects.6502 (tools/mkobjects.py).
 SLOTS        = 140
 SLOT_TUNNEL  = SLOTS
 SLOT_MISSILE = SLOTS + 1
-OBJECTS      = &8000

@@ -5,15 +5,21 @@
 INCLUDE "maths.6502"
 INCLUDE "render.6502"
 INCLUDE "screen.6502"
-INCLUDE "../build/gen/rotate.6502"
 INCLUDE "../build/gen/types.6502"
 
-\ each object's record's address, by slot
-.obj_lo
-FOR i = 0..<SLOTS + 2
-    EQUB LO(OBJECTS + i * OB_SIZE)
-NEXT
-.obj_hi
-FOR i = 0..<SLOTS + 2
-    EQUB HI(OBJECTS + i * OB_SIZE)
-NEXT
+
+\ objects_clear: every field of every slot to 0.
+.objects_clear
+{
+    ZA_AUTO2 p
+    STZ p : LDA #HI(OBJECTS) : STA p+1
+    LDY #LO(OBJECTS)
+.clear
+    LDA #0 : STA (p),Y
+    INY : BNE same
+    INC p+1
+.same
+    CPY #LO(SCREEN) : BNE clear
+    LDA p+1 : CMP #HI(SCREEN) : BNE clear
+    RTS
+}

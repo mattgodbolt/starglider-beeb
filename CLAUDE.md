@@ -56,6 +56,13 @@ The build makes the shapes and per-type tables from the ST's STAR.PRG
 and the vertex transforms (`tools/mkline.py`, `mkrotate.py`,
 `mkxform.py`) into `build/gen/`; baron computes the sine table
 (`src/sine.6502`) and the multiply and reciprocal tables.
+`tools/mkobjects.py` lays out the object table (decision 13: an array a
+field, by slot) and writes `build/gen/objects.json`, which the harnesses
+use to put the ST's records into it and read them back.
+
+Where things live: the drawing in main RAM and HAZEL, the objects at the
+top of main RAM, the list phase and the sine table in the world's bank
+(5, `src/world.6502`), the shapes in bank 4.
 `node tools/scenerun.mjs SCENES OUT --profile 37` samples where the cycles
 go.
 

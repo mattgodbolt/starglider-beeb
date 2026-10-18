@@ -1,0 +1,346 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the world's bank: the list phase
+\
+\ The camera and the lists (the ST's &050A2, &05750, &057B8), which are the
+\ game's logic as well as its drawing: the collisions, the scanner and the
+\ laser read them, so they follow the ST's arithmetic exactly (decision 1)
+\ and are made again every step. They run from the world's bank (BANK_WORLD),
+\ with the sine table; the objects are in main RAM (objects.6502).
+\ ***************************************************************************
+
+\ ---------------------------------------------------------------------------
+\ camera (&050A2, &04258): the matrix from the player's angles, the roll
+\ negated.
+.camera
+    MOVW ang_p, pl_pitch
+    MOVW ang_h, pl_heading
+    LDA #0 : SEC : SBC pl_roll : STA ang_r
+    LDA #0 : SBC pl_roll+1 : STA ang_r+1
+    STZ mat_valid                       ; a full build: its sines are wanted below
+    JSR build_matrix                    ; (which invalidates ground_matrix's mat)
+    \ The ground objects' constants (ground_matrix): their pitch and roll
+    \ are the camera's.
+    FMUL build_matrix.m_s1, build_matrix.m_c3
+    MOVW kconst+2, mul_r
+    MOVW kconst, build_matrix.m_d6
+    MOVW kconst+4, build_matrix.m_c1
+    MOVW kconst+6, build_matrix.m_c3
+    MOVW kconst+8, build_matrix.m_s3
+    LDX #8
+.kconst_mag
+    TXA : LSR A : TAY
+    LDA kconst+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    AND #&80 : STA ksign,Y : ZA_INDEXEDBY 0..4
+    LDA kconst,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA ksign,Y : ZA_INDEXEDBY 0..4
+    BPL kconst_pos
+    LDA #0 : SEC : SBC kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA #0 : SBC kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.kconst_pos
+    DEX : DEX : BPL kconst_mag
+    LDX #17
+    ZA_DISCARD cam
+.camera_copy
+    LDA mat,X : ZA_INDEXEDBY 0..17
+    STA cam,X : ZA_INDEXEDBY 0..17
+    DEX : BPL camera_copy
+    STZ mat_valid                       ; mat no longer holds an object's
+    JMP rotate_setup
+
+\ sincos: m_sin, m_cos = the ST's sine table at m_idx (0-4095) and 1024
+\ on, from its first quarter and the entries symmetry misses (sine.6502).
+\ The sine bank must be paged.
+.sincos
+{
+    ZA_AUTO2 p, near, far       ; the quarter at r and at 1024 - r
+    ZA_AUTO1 q, rhi
+    STZ p
+    \ m_idx's quarter, and r, its place in it
+    LDA m_idx+1 : LSR A : LSR A : AND #3 : STA q
+    LDA m_idx+1 : AND #3 : STA rhi
+    ASSERT (HI(sine_qlo) AND 3) = 0 AND sine_qhi = sine_qlo + SINE_QUARTER AND LO(sine_bits) = 0
+    ORA #HI(sine_qlo) : STA p+1
+    LDY m_idx
+    LDA (p),Y : STA near
+    LDA p+1 : CLC : ADC #HI(SINE_QUARTER) : STA p+1
+    LDA (p),Y : STA near+1
+    \ 1024 - r: the quarter's last entry, 16384, isn't kept
+    LDA #0 : SEC : SBC m_idx : TAY
+    LDA #HI(SINE_QUARTER) : SBC rhi
+    CMP #HI(SINE_QUARTER) : BNE in_quarter
+    STZ far : LDA #HI(16384) : STA far+1
+    BRA got
+.in_quarter
+    ORA #HI(sine_qlo) : STA p+1
+    LDA (p),Y : STA far
+    LDA p+1 : CLC : ADC #HI(SINE_QUARTER) : STA p+1
+    LDA (p),Y : STA far+1
+.got
+    \ The sine is in quarter q, the cosine in q + 1: near in the even
+    \ quarters, far in the odd, negated in the third and fourth.
+    LDX q
+    LDA sin_far,X : BMI odd
+    MOVW m_sin, near : MOVW m_cos, far
+    BRA assigned
+.odd
+    MOVW m_sin, far : MOVW m_cos, near
+.assigned
+    LDA sin_neg,X : BPL sin_done
+    LDX #0
+    JSR negate
+.sin_done
+    LDX q
+    LDA cos_neg,X : BPL cos_done
+    LDX #m_cos - m_sin
+    JSR negate
+.cos_done
+    \ The entries symmetry misses: the cosine's is entry m_idx + 1024,
+    \ bit m_idx; the sine's, from the second quarter, bit m_idx - 1024.
+    LDA m_idx : LDX m_idx+1
+    JSR missed : BEQ cos_kept
+    LDA m_idx+1 : CMP #HI(2 * SINE_QUARTER)    ; +1 below entry 3072, -1 from it
+    LDX #m_cos - m_sin
+    JSR nudge
+.cos_kept
+    LDA q : BEQ sin_kept                        ; nothing missed in the first quarter
+    LDA m_idx+1 : SEC : SBC #HI(SINE_QUARTER) : TAX
+    LDA m_idx
+    JSR missed : BEQ sin_kept
+    LDA m_idx+1 : CMP #HI(3 * SINE_QUARTER)
+    LDX #0
+    JSR nudge
+.sin_kept
+    RTS
+\ negate: the word at m_sin + X, if it isn't 0, to 1 - it (the ST's
+\ rounding of the negative half).
+.negate
+    LDA m_sin,X : ZA_INDEXEDBY {0, 2}
+    ORA m_sin+1,X : ZA_INDEXEDBY {0, 2}
+    BEQ negated
+    LDA #1 : SEC : SBC m_sin,X : ZA_INDEXEDBY {0, 2}
+    STA m_sin,X : ZA_INDEXEDBY {0, 2}
+    LDA #0 : SBC m_sin+1,X : ZA_INDEXEDBY {0, 2}
+    STA m_sin+1,X : ZA_INDEXEDBY {0, 2}
+.negated
+    RTS
+\ missed: Z clear if entry 1024 + k (k: A low, X high, 0-4095) is one
+\ symmetry misses.
+.missed
+    STA p
+    AND #7 : TAY
+    TXA
+    LSR A : ROR p : LSR A : ROR p : LSR A : ROR p
+    CLC : ADC #HI(sine_bits) : STA p+1
+    LDA sine_mask,Y : STA rhi
+    LDY p : STZ p
+    LDA (p),Y : AND rhi
+    RTS
+\ nudge: the word at m_sin + X one more if carry is clear, one less if
+\ it's set.
+.nudge
+    BCS down
+    INC m_sin,X : ZA_INDEXEDBY {0, 2}
+    BNE nudged
+    INC m_sin+1,X : ZA_INDEXEDBY {0, 2}
+.nudged
+    RTS
+.down
+    LDA m_sin,X : ZA_INDEXEDBY {0, 2}
+    BNE low
+    DEC m_sin+1,X : ZA_INDEXEDBY {0, 2}
+.low
+    DEC m_sin,X : ZA_INDEXEDBY {0, 2}
+    RTS
+\ by the sine's quarter: whether it's from far (the odd quarters), and
+\ whether the sine and the cosine are negated
+.sin_far
+    EQUB 0, &80, 0, &80
+.sin_neg
+    EQUB 0, 0, &80, &80
+.cos_neg
+    EQUB 0, &80, &80, 0
+}
+
+\ ---------------------------------------------------------------------------
+\ coarse_list (&05750): every object within &2020 of the player in z, or
+\ further behind and within &2020 in x (the test as the ST has it, which
+\ keeps the whole band in z). Docked, the tunnel and the silo's missile.
+\ Each slot's list flags are cleared, as the ST clears them.
+.coarse_list
+{
+    ZA_AUTO1 dx, dz             ; their low bytes
+    STZ coarse_n
+    LDA docked : BEQ open
+    LDA #SLOT_TUNNEL : STA coarse_slots
+    INC coarse_n
+    LDA silo_missile : BEQ done
+    LDA #SLOT_MISSILE : STA coarse_slots+1
+    INC coarse_n
+.done
+    RTS
+.open
+    LDX #0
+.slot
+    STZ ob_drawn,X : STZ ob_near,X
+    LDA ob_type,X : BEQ next
+    \ dz = z - the player's, within (-&2020, &2020]: the high byte
+    \ decides all but its two edges
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA dz
+    LDA ob_z_hi,X : SBC pl_z+1
+    CMP #&20 : BCC keep                 ; 0 to &1FFF
+    BEQ z_top
+    CMP #&80 : BCC next                 ; more than &2020 ahead
+    CMP #&DF : BCC behind
+    BNE keep                            ; -&2000 to -1
+    LDA dz : CMP #&E1 : BCS keep        ; -&201F up
+    BRA behind
+.z_top
+    LDA dz : CMP #&21 : BCC keep        ; up to &2020
+    BRA next
+.behind
+    \ further behind: kept if within &2020 in x, [-&2020, &2020]
+    LDA ob_x_lo,X : SEC : SBC pl_x : STA dx
+    LDA ob_x_hi,X : SBC pl_x+1
+    CMP #&20 : BCC keep
+    BEQ x_top
+    CMP #&DF : BCC next
+    BNE keep
+    LDA dx : CMP #&E0 : BCS keep
+    BRA next
+.x_top
+    LDA dx : CMP #&21 : BCS next
+.keep
+    TXA : LDY coarse_n : STA coarse_slots,Y
+    INC coarse_n
+.next
+    INX : CPX n_slots : BEQ done2
+    JMP slot
+.done2
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ rotate_lists (&057B8): the coarse list read from its top, each object
+\ rotated into camera space (&04092) and stored; the near list (all but
+\ the exploding) and the draw list (in front, within the view's pyramid),
+\ pushed in that order.
+.rotate_lists
+{
+    ZA_AUTO1 list_i
+    ZA_AUTO2 z2, nz2, t16
+    STZ near_n : STZ draw_n
+    LDX coarse_n : BNE each
+    RTS
+.each
+    DEX : STX list_i
+    LDA coarse_slots,X : STA slot : TAX
+    LDA ob_type,X : STA otype : BNE live
+    JMP next
+.live
+    LDA ob_x_lo,X : SEC : SBC pl_x : STA rot_d
+    LDA ob_x_hi,X : SBC pl_x+1 : STA rot_d+1
+    LDA ob_y_lo,X : SEC : SBC pl_y : STA rot_d+2
+    LDA ob_y_hi,X : SBC pl_y+1 : STA rot_d+3
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA rot_d+4
+    LDA ob_z_hi,X : SBC pl_z+1 : STA rot_d+5
+    JSR rotate_abs
+    JSR rotate_approx
+    JSR relevant : BCS exactly
+    \ Approximately: kept for the scanner, never drawn (decision 11).
+    LDX slot : STZ ob_exact,X
+    JSR store_rel
+    JMP next
+.exactly
+    JSR rotate_exact
+    LDX slot : LDA #1 : STA ob_exact,X
+    JSR store_rel
+    CMPS16 rot_acc+4, #&2001 : BMI ahead    ; more than &2000 away: not drawn
+    JMP next
+.ahead
+    LDX otype
+    LDA #0 : SEC : SBC size_z_lo,X : STA t16
+    LDA #0 : SBC size_z_hi,X : STA t16+1
+    CMPS16 t16, rot_acc+4 : BPL next        ; wholly behind: z <= -size
+    LDA rot_acc+4 : ASL A : STA z2 : LDA rot_acc+5 : ROL A : STA z2+1
+    LDA #0 : SEC : SBC z2 : STA nz2 : LDA #0 : SBC z2+1 : STA nz2+1
+    CMPS16 rot_acc, nz2 : BMI next
+    CMPS16 z2, rot_acc : BMI next
+    CMPS16 rot_acc+2, nz2 : BMI next
+    CMPS16 z2, rot_acc+2 : BMI next
+    LDX slot : LDA #&FF : STA ob_drawn,X
+    TXA : LDY draw_n : STA draw_slots,Y
+    INC draw_n
+.next
+    LDX list_i : BEQ done
+    JMP each
+.done
+    RTS
+\ store_rel: rot_acc into slot X's camera-space position, and the
+\ object onto the near list unless it's exploding.
+.store_rel
+    LDA rot_acc : STA ob_cx_lo,X : LDA rot_acc+1 : STA ob_cx_hi,X
+    LDA rot_acc+2 : STA ob_cy_lo,X : LDA rot_acc+3 : STA ob_cy_hi,X
+    LDA rot_acc+4 : STA ob_cz_lo,X : LDA rot_acc+5 : STA ob_cz_hi,X
+    LDA ob_exploding,X : BNE far_off
+    LDA #&FF : STA ob_near,X
+    TXA : LDY near_n : STA near_slots,Y
+    INC near_n
+.far_off
+    RTS
+}
+
+\ relevant (decision 11): C set if an object at rot_acc, rotated
+\ approximately (within ROT_SLACK), could be drawn or meet the player:
+\ in front, short of &2000 and within the view's pyramid, or within
+\ NEAR_BOX on every axis (the largest collision box is 2000). Only those
+\ need the exact rotation: nothing else the game decides reads the rest.
+ROT_SLACK = 512
+NEAR_BOX = 2000 + ROT_SLACK
+.relevant
+{
+    ZA_AUTO2 z2, nz2, size, mag
+    \ ahead of &2000 (with the slack), it's neither drawn nor near
+    CMPS16 rot_acc+4, #&2001 + ROT_SLACK : BMI not_far
+.no
+    CLC : RTS
+.not_far
+    LDX otype
+    LDA #0 : SEC : SBC size_z_lo,X : STA size : LDA #0 : SBC size_z_hi,X : STA size+1
+    LDA size : SEC : SBC #LO(ROT_SLACK) : STA size : LDA size+1 : SBC #HI(ROT_SLACK) : STA size+1
+    CMPS16 size, rot_acc+4 : BPL behind     ; z <= -(size + slack): not drawn
+    \ in the view's pyramid, with the slack?
+    LDA rot_acc+4 : ASL A : STA z2 : LDA rot_acc+5 : ROL A : STA z2+1
+    LDA z2 : CLC : ADC #LO(3 * ROT_SLACK) : STA z2 : LDA z2+1 : ADC #HI(3 * ROT_SLACK) : STA z2+1
+    LDA #0 : SEC : SBC z2 : STA nz2 : LDA #0 : SBC z2+1 : STA nz2+1
+    CMPS16 rot_acc, nz2 : BMI near_test
+    CMPS16 z2, rot_acc : BMI near_test
+    CMPS16 rot_acc+2, nz2 : BMI near_test
+    CMPS16 z2, rot_acc+2 : BMI near_test
+    SEC : RTS
+.behind
+    CMPS16 rot_acc+4, #-NEAR_BOX : BMI none
+.near_test
+    \ within NEAR_BOX on every axis?
+    LDX #4
+.axis
+    LDA rot_acc+1,X : ZA_INDEXEDBY {0, 2, 4}
+    BPL pos
+    LDA #0 : SEC : SBC rot_acc,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mag : LDA #0 : SBC rot_acc+1,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mag+1
+    BRA got
+.pos
+    STA mag+1 : LDA rot_acc,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mag
+.got
+    CMPS16 mag, #NEAR_BOX + 1 : BPL none
+    DEX : DEX : BPL axis
+    SEC : RTS
+.none
+    CLC : RTS
+}
+

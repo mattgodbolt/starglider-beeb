@@ -3,10 +3,12 @@
 //
 //   node tools/scenerun.mjs SCENES.json OUT.json [--build build/spike] [--frames A-B] [--profile N]
 //
-// SCENES.json is tools/mkscene.py's: each frame's objects, inputs and
-// animation frames. The build directory holds the spike's binaries
-// (SPIKE, SHAPES, SINE) and its symbols.json. Each frame is written into
-// memory, spike_frame is called from a stub with interrupts off, and the
+// SCENES.json is tools/mkscene.py's: each frame's objects (the ST's
+// records), inputs and animation frames. The build directory holds the
+// spike's binaries (SPIKE, SHAPES, WORLD) and its symbols.json. Each frame
+// is written into memory, the records into the port's object table by
+// build/gen/objects.json (decision 13's layout, tools/mkobjects.py),
+// spike_frame is called from a stub with interrupts off, and the
 // cycles are jsbeeb's own count between the phases' labels (render,
 // render_lists, render_objects, render_done). tools/scenecheck.py
 // compares OUT.json with the ST's renderer.
@@ -65,7 +67,7 @@ load("SPIKE", need("spike_init"));
 load("TABLES", where(need("TABLES")));
 load("CODE2", where(need("CODE2")));
 load("SHAPES", bank(need("BANK_SHAPES")));
-load("SINE", bank(need("BANK_SINE")));
+load("WORLD", bank(need("BANK_WORLD")));
 
 // The stub: SEI, JSR entry, JMP to itself.
 const STUB = 0x0140;
@@ -149,12 +151,21 @@ const stubCost = (await run(need("spike_done")))[0];
 const scenes = JSON.parse(fs.readFileSync(scenesPath, "utf8")).frames;
 let [lo, hi] = [0, scenes.length - 1];
 if (frameRange) [lo, hi] = frameRange.split("-").map(Number);
-const objBank = bank(need("BANK_OBJECTS")) + (need("OBJECTS") - 0x8000);
-const OB = { cx: 0x28 };
+// The object table's arrays, and how a record's bytes go into them.
+const layout = JSON.parse(fs.readFileSync("build/gen/objects.json", "utf8"));
+const arrays = layout.arrays.map((a) => ({ at: need(a.name), st: a.st }));
+function putObjects(records) {
+    for (let slot = 0; slot < layout.slots; slot++) {
+        const rec = records.subarray(64 * slot, 64 * slot + 64);
+        if (rec[1] !== 0) throw new Error(`slot ${slot}: type ${rec[0] | (rec[1] << 8)} doesn't fit a byte`);
+        for (const a of arrays) ram[a.at + slot] = a.st === null ? 0 : rec[a.st];
+    }
+}
+const word = (lo, hi, slot) => ram[need(lo) + slot] | (ram[need(hi) + slot] << 8);
 const out = [];
 for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
     const fr = scenes[n];
-    ram.set(Buffer.from(fr.objects, "hex"), objBank);
+    putObjects(Buffer.from(fr.objects, "hex"));
     for (const [name, v] of Object.entries(fr.zp)) {
         if (name.startsWith("pl_")) pokew(need(name), v);
         else ram[need(name)] = v & 0xff;
@@ -171,9 +182,8 @@ for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
     const rel = {};
     const exact = {};
     for (const s of coarse) {
-        const r = objBank + s * 64 + OB.cx;
-        rel[s] = [signed(peekw(r)), signed(peekw(r + 2)), signed(peekw(r + 4))];
-        exact[s] = ram[need("rot_exact") + s] !== 0;
+        rel[s] = ["cx", "cy", "cz"].map((f) => signed(word(`ob_${f}_lo`, `ob_${f}_hi`, s)));
+        exact[s] = ram[need("ob_exact") + s] !== 0;
     }
     const lines = [];
     const logN = peekw(need("log_n"));
