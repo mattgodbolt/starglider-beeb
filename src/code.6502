@@ -65,7 +65,6 @@ INCLUDE "step.6502"
     JMP dots_wipe
 .none
     RTS
-INCLUDE "sound.6502"
 
 
 \ objects_clear: every field of every slot to 0.

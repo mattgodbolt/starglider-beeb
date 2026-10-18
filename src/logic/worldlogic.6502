@@ -742,7 +742,9 @@ DOT_K = 3 * DOT_B
 .full
     LDA #&1E : STA launch_state : STZ launch_state+1
     \ the docking speech, if none is playing, on a frame count's low byte 0
-    LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3 : BNE quiet
+    PHP : SEI                           ; (the interrupt counts sample_left down: read it whole)
+    LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3
+    PLP : CMP #0 : BNE quiet
     LDA frame_count : BNE quiet
     LDA #SAMPLE_DOCKED : STA sample_clip
     LDA #LO(&1D00) : STA sample_len : LDA #HI(&1D00) : STA sample_len+1

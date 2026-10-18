@@ -7,8 +7,12 @@
 #                 links it)
 #   make check    sincos against the ST's sine table, the spike, the
 #                 disc's erasing (tools/erasecheck.mjs), its own disc
-#                 reader (tools/disccheck.mjs) and its controls
-#                 (tools/inputcheck.mjs)
+#                 reader (tools/disccheck.mjs), its controls
+#                 (tools/inputcheck.mjs) and its sound effects (make sfx)
+#   make sfx      the disc's sound effects against the ST's YM writes
+#                 (tools/sfxcheck.mjs, on build/sfx's capture)
+#   make sfxcapture  capture the ST's sound effects in Hatari
+#                 (tests/st/sfx_all.txt; slow, needs Hatari)
 #   make spike    the spike on every captured scene, checked against the
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
 #   make logic    the port's game logic against the ST's, routine by
@@ -39,7 +43,7 @@ ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
 SCENES   = flight towers docked missile
 SOURCES  = $(wildcard src/*.6502 src/logic/*.6502)
-GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/sight.6502 build/gen/ground.6502 build/gen/window.6502 build/gen/panel.6502
+GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/sight.6502 build/gen/ground.6502 build/gen/window.6502 build/gen/panel.6502 build/gen/sfx.6502
 
 # A failed step leaves no half-made target behind (asm.sh fails on a
 # warning after baron has written its output).
@@ -51,7 +55,7 @@ BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short 
 TARGET   = build/starglider.ssd
 DISC     = starglider.ssd
 
-.PHONY: all run disc check spike logic view panel rot steps memory fps scenes fetch venv clean
+.PHONY: all run disc check spike logic view panel rot sfx sfxcapture steps memory fps scenes fetch venv clean
 
 all: $(TARGET) build/spike/SPIKE
 
@@ -113,6 +117,10 @@ build/gen/objects.6502 build/gen/objects.json &: tools/mkobjects.py | build/gen
 build/gen/collide.6502: $(PRG) tools/mkcollide.py | build/gen
 	$(PYTHON) -I tools/mkcollide.py $(PRG) build/gen
 
+# The sound effects' tables, from the ST's STAR.PRG.
+build/gen/sfx.6502 build/gen/sfx.json &: $(PRG) tools/mksfx.py tools/st_prg.py | build/gen
+	$(PYTHON) -I tools/mksfx.py $(PRG) build/gen/sfx.6502 build/gen/sfx.json
+
 # The level layouts (init_objects's), from the ST's STAR.PRG.
 build/gen/levels.6502: $(PRG) tools/mklevels.py tools/st_prg.py | build/gen
 	$(PYTHON) -I tools/mklevels.py $(PRG) build/gen
@@ -141,11 +149,21 @@ build/st build/gen build/spike:
 build/scenes/%/beeb.json: build/scenes/%/scenes.json $(PRG) tools/mkscene.py tools/st_render.py
 	$(PYTHON) -I tools/mkscene.py $(PRG) $< $@
 
-check: build/spike/SPIKE spike panel view rot $(TARGET)
+check: build/spike/SPIKE spike panel view rot sfx $(TARGET)
 	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike
 	node tools/erasecheck.mjs
 	node tools/disccheck.mjs
 	node tools/inputcheck.mjs
+
+# The sound effects on the disc against the ST's YM writes, captured in
+# Hatari (make sfxcapture: slow, needs Hatari), and their gates
+# (tools/sfxcheck.mjs).
+sfx: $(TARGET) build/gen/sfx.json
+	node tools/sfxcheck.mjs
+
+sfxcapture:
+	$(PYTHON) -I tools/st_sfx.py run tests/st/sfx_all.txt build/sfx/all \
+	    --disk "$(ST_STX)" --hatari $(HATARI) --tos $(HATARI_TOS)
 
 spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	@for s in $(SCENES); do \

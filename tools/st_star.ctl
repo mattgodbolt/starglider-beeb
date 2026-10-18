@@ -25,6 +25,35 @@ l &01A50 sample_start
 l &00110 sfx_start
 l &01854 sfx_table
 
+# The sound effects (docs/research/st.md, "Music and effects")
+l &004A8 sfx_noise
+; &004A8 Effects 0-3: noise period, envelope period and shape from the block; mixer &47, R8-R10 at the envelope; the lock &29C = 22 VBLs
+l &0052E sfx_sweep1
+l &005AC sfx_sweep1_tick
+; &005AC Timer A: tone A's period up 1 a tick to the end, again from the start d1 times; then Timer A off, R8 = 0
+l &00626 sfx_sweep4
+l &006A4 sfx_sweep4_tick
+l &00180 sfx_two
+l &00228 sfx_two_tick
+; &00228 Timer A: the other of two periods every 32 ticks, d1 halves; then Timer A off, R8 = 0
+l &0071E sfx_siren
+l &007C2 sfx_siren_tick
+; &007C2 Timer A: stores the interrupted d0 as the period (a bug), and at its end installs itself again, not &0083A
+c &0083A sfx_siren_up
+; &0083A Timer A (never installed): &0071E's second part, the period up 1 a tick
+c &008D6 sfx_siren2
+; &008D6 Unreferenced: a working two-part siren the other way round, up a tick (&0097C) then down (&00A00), d1 times
+l &0097C sfx_siren2_up
+l &00A00 sfx_siren2_down
+l &002C8 sfx_registers
+; &002C8 Effects 12-15: all fourteen registers from a block
+c &00392 sfx_registers_b
+; &00392 Unreferenced: registers 0-3, 6-9, 11-13 from a block
+c &00432 sfx_registers_c
+; &00432 Unreferenced: registers 0, 1, 6-8, 11-13 from a block
+c &0268A sfx_tester
+; &0268A Unreferenced: each key wait_key_timeout reads plays the next effect (d1 = 1); Q leaves
+
 # Start-up
 l &0A534 linea_hide_mouse
 l &08CA0 init_resolution

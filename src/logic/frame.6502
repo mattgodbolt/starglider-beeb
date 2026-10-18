@@ -188,7 +188,9 @@
 \ frame count a multiple of 128.
 .quiet
 {
-    LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3 : BNE done
+    PHP : SEI                           ; (the interrupt counts sample_left down: read it whole)
+    LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3
+    PLP : CMP #0 : BNE done
     LDA frame_count : AND #&7F
 .done
     RTS

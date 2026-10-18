@@ -29,6 +29,7 @@ The tools (all in `tools/`, all run with `.venv/bin/python -I`):
 | `st_workload.py` | counts lines, pixels, vertices, objects and dots per rendered frame in Hatari, and reports their distributions |
 | `st_scenes.py` | captures scenes in Hatari: each frame's variables, objects and shape table, and every line drawn, by object (scripts in `tests/st/`) |
 | `st_render.py` | a model of the renderer, exact to the 68000's arithmetic, checked against the captured lines |
+| `st_sfx.py` | captures the sound effects in Hatari: every YM2149 register write, timed, for each effect the game's own tester plays (`tests/st/sfx_all.txt`) |
 
 ## Summary for the port
 
@@ -41,6 +42,7 @@ The tools (all in `tools/`, all run with `.venv/bin/python -I`):
 | Trig tables | sine 6,145 words (&13D6C-&16D6E, 2.14 fixed point, 4096 steps a turn; cosine is the same table 1024 entries on); two arctan tables of 513 words (&13568, &1396A) | [measured] |
 | World | a 65,536-unit torus (16-bit x and z wrap); 100 x 100 sectors of &290 (656) units; four object layouts of 82, 89, 97 and 114 objects | [measured] &0A6AE, &17C88 |
 | Samples | four speech clips, 27,136 bytes played (0.94-1.21 s each at 6144 Hz) and the title song, 179,200 bytes (18.2 s at 9830 Hz); 8-bit, through the YM2149's three volume registers from MFP Timer A | [measured] `st_samples.py`, &01AF8 |
+| Sound effects | 24 in the table, 8 started: four enveloped noises (2.1-3.4 s), two fast chirps (33 ms), the laser's falling sweep (244 ms) and docking's two tones; tone A or the noise, never both, and no music | [measured] `st_sfx.py`, "Music and effects" |
 | Screen | ST low res, 320 x 200, 16 colours; the 3D view is 288 x 119 at (16, 10); double-buffered at &70000 and &78000 | [measured] &08CA0, &0A56E, screenshots |
 | Line colour | one colour per object (the shape's face colour), ORed into the bitplanes | [measured] &04B1C, &09128 |
 | Hidden lines | back faces of each object are culled; objects never hide one another | [measured] &04BE8, screenshots |
@@ -746,18 +748,93 @@ launched, docked/rearmed, shields low, energy low. Listen to check:
 
 ### Music and effects
 
-The only music found is the sampled title song: none of the reached code
-or the effect routines' entry points looks like a tune player [inferred:
-check by tracing YM writes (`--trace psg_write`) through a game]. In play, effects
-come from `sfx_start` (&00110, effect number in d0): 24 effects in the
-table &01854, each a routine and a parameter block: &004A8 (0-3), &0071E
-(4-7), &0052E (8-11, 17), &002C8 (12-15), &00180 (16, 19), &00626 (18,
-20-23) [measured]. They drive the YM from Timer A (e.g. &00180 installs
-&00228) and are skipped while a sample plays or with sound off (`$2CB`).
-Effects used: 0 enemy laser hit, 1 mine and ramming, 2 laser hit, 3
-scraping the ground and the launch countdown, 8 the cheat prompt and
-refuelling, 9 the cheat's end, &10 docking, &14 laser fire and the
-Interrogate keys [measured] the `sfx_start` calls. How each routine shapes its sound is open.
+The only music is the sampled title song. In play the YM is written by
+nothing but the noise routine (&004A8), the Timer A effects' routines and
+the sample player [measured: `--trace psg_write` through about 30 s of
+flight with the laser fired, F, and a missile launched and its speech].
+
+`sfx_start` (&00110) takes the effect in d0 and a count in d1 (a long). It
+does nothing while a sample plays (&01E56), with the sound off (`$2CB`) or
+while &29C, the lock, isn't 0; otherwise it sets `$2D1` (which nothing
+reads) and jumps to the routine in the table at &01854, 24 entries of a
+routine and its parameter block [measured]. The routines:
+
+| Routine | Effects | What it does |
+|---|---|---|
+| &004A8 | 0-3 | the noise's period (R6), the envelope's period (R11-R12) and shape (R13, whose write restarts it) from the block; the mixer &47 (noise on all three channels, every tone off) and R8-R10 &10 (each at the envelope's level); &29C = 22, so no effect starts for 22 VBLs. It sets no timer: the envelope shapes the sound, and a Timer A effect running ticks on beneath it |
+| &0052E | 8-11, 17 | Timer A's handler &005AC, its control and data from the block, and two words, a start and an end; the mixer &7E (tone A alone), R8 = 15, the count = d1. Each tick adds 1 to the period and writes R0-R1 with it, until it equals the end; that tick writes nothing and the period starts again. At the d1-th end Timer A stops and R8 = 0. The first period written is the start's next |
+| &00626 | 18, 20-23 | the same, by 4 (handler &006A4) |
+| &00180 | 16, 19 | handler &00228, Timer A's control and data and two periods: the first written at once, R7 &7E, R8 15; every 32nd tick the other, each counting d1 down; at 0 Timer A stops and R8 = 0 |
+| &0071E | 4-7 | meant as a two-part siren, down a period a tick from one word to another at one rate, then up at a second, d1 times. Its handler (&007C2) stores the d0 it interrupts as the period, and at the first part's end installs itself again, not its partner &0083A, so what it plays depends on the code it interrupts (in the tester, period 0 throughout). A working two-part siren the other way round (&008D6, handlers &0097C and &00A00) is in the program, unreferenced |
+| &002C8 | 12-15 | all fourteen registers from a block, once: sounds on repeating envelopes that last until something else writes. &00392 and &00432 do the same for fewer registers, unreferenced |
+
+The 24 as each plays [measured: `st_sfx.py` on `tests/st/sfx_all.txt`,
+each with d1 = 1 from the game's own tester (&0268A, which nothing
+calls), docking's also with its 10]. A tone of period P is 125 kHz / P,
+the noise of period N (0 taken as 1) changes 125 kHz / N times a second,
+and the envelope of period E steps every E / 250 kHz, 32 steps a fall
+[source: Hatari's `src/sound.c`, measured there on an STF]; Timer A's rate
+is 2.4576 MHz over its prescaler (4, 10, 16, 50, 64, 100, 200 by its
+control, 1-7) and its data (0 for 256).
+
+| # | Routine | What | Started by |
+|---|---|---|---|
+| 0 | noise | period 0 (125 kHz), envelope &3F00 falling (shape 0): 2.06 s | an enemy's laser hitting (&07ED0) |
+| 1 | noise | 31 (4.0 kHz), &6000: 3.15 s | a mine (&07B8A), ramming (&020C4) |
+| 2 | noise | 24 (5.2 kHz), &6800: 3.41 s | the laser's hit (&087EE), the missile's end (&07A4C) |
+| 3 | noise | 20 (6.25 kHz), &6000: 3.15 s | scraping the ground (&0209A), the launch's countdown (&0566A) |
+| 4-7 | siren | broken, above | nothing |
+| 8 | sweep by 1 | 2 to 255 (62.5 kHz to 490 Hz) at 7680 Hz: 33 ms | the cheat's prompt (&02898), refuelling (&0858E) |
+| 9 | sweep by 1 | 201 to 511 (622 to 245 Hz) at 9600 Hz: 32.5 ms | the cheat's end, a wrong key (&028AA) |
+| 10 | sweep by 1 | 2 to 99 at 7680 Hz: 12.9 ms | nothing |
+| 11 | sweep by 1 | 101 to 299 at 7680 Hz: 26 ms | nothing |
+| 12 | registers | tone A 255 (490 Hz) and noise 23 on B and C, on a rising sawtooth envelope (&0A00, shape &C) again every 0.33 s | nothing |
+| 13 | registers | noise 31 on all three, the same envelope | nothing |
+| 14 | registers | noise 16 on all three, a triangle envelope (&0F00, shape &A) | nothing |
+| 15 | registers | noise 16, a rising sawtooth (&1400) | nothing |
+| 16 | two tones | 254 and 342 (492 and 365 Hz), the other every 32 ticks at 96 Hz (333 ms): 3.33 s with docking's 10 halves | docking (&085D2) |
+| 17 | sweep by 1 | 2 to 383 at 1536 Hz: 250 ms | nothing |
+| 18 | sweep by 4 | from 516 up by 4 at 2458 Hz, never meeting its end, 1: endless | nothing |
+| 19 | two tones | 200 (625 Hz) and 1 (silent), halves of 195 ms | nothing |
+| 20 | sweep by 4 | 20 to 252 (6.25 kHz to 496 Hz) at 245.76 Hz: 244 ms | the laser (&086BE), the beep (&04B14: F, M, Interrogate's keys) |
+| 21 | sweep by 4 | endless, as 18 | nothing |
+| 22 | sweep by 4 | 1575 up by 4 through the word's wrap to 287, at 2048 Hz: 7.8 s | nothing |
+| 23 | sweep by 4 | 20, 24, 28 at 410 Hz: 10 ms | nothing |
+
+Only one of tone A and the noise sounds at once, and nothing uses the
+other two tones or the envelope on a tone. How the effects meet
+[measured: the capture's meetings]:
+
+- A noise leaves a Timer A effect ticking: its periods go on being
+  written, unheard under the mixer's &47, and its end's R8 = 0 takes
+  channel A out of the noise, which sounds on B and C to its end.
+- The lock, 22 VBLs from a noise's start (0.44 s at the PAL ST's
+  50.05 Hz), keeps every effect out, another noise too. Timer A's
+  effects set none: any effect cuts one, the next Timer A effect by taking
+  its handler.
+- A Timer A effect started over a noise's envelope silences it (the
+  mixer's &7E); B and C stay at the envelope's level with their tone and
+  noise off, a steady level heard only as a click.
+- A sample's start takes Timer A, the mixer all off (&3F) and the periods
+  0; its end stops Timer A and leaves the volumes at its last sample's.
+  Nothing resumes.
+- Q (the sound off) stops no effect playing, only new ones.
+- Timer A's first tick after an effect starts comes when its counter,
+  left running from its last use, next reaches 0: the routines write its
+  control before its data, which a running timer takes only at its next
+  reload. In the capture a sweep's first tick came from 0.15 ms after its
+  start to 12.3 ms (the laser after effect 19's data, 150).
+- Under EmuTOS five of the six Timer A handlers stop every MFP interrupt
+  of their priority and below after their first tick, through their
+  `move.b $DF.l` (`docs/research/st-logic.md`); `st_sfx.py` writes &DF to
+  the byte at &DF, which gives them the immediate's effect.
+
+The levels [source: Paulo Simoes' measurements of an ST's YM2149, as
+Hatari keeps them in `src/includes/ym2149_fixed_vol.h`]: one channel at
+volume 15 gives 34469, two 55377 and three 65119, so the noise's three
+channels at the envelope's top are 5.5 dB louder than tone A at 15. The
+envelope's 32 levels fall about 43 dB from the top to the step before
+silence, about 1.4 dB a step.
 
 ## Running it in Hatari
 
@@ -795,9 +872,9 @@ shot docked
 
 ## Open questions
 
-1. **The sound-effect routines** (&00180-&00A9E, table &01854): how each
-   shapes the YM; capture the register writes in Hatari
-   (`--trace psg_write`) for each effect number.
+1. **The sound-effect routines**: settled (2026-10-18), "Music and
+   effects" above, from each effect's register writes captured in Hatari
+   (`tools/st_sfx.py`).
 2. **The gauges and the top-centre readout**: which bar is which, and
    what the red digit and green letter show. Poke energy, shields and
    laser energy in Hatari, turn, and watch the panel.
@@ -819,6 +896,7 @@ shot docked
 7. **What the &60000/&68000 slots swapped with the screens are for in
    flight** (&0A56E): read them in Hatari mid-flight.
 8. **The ground dots** (&047AA): the pattern and its spacing.
-9. **The code not yet reached** (about 14K of the code area): mostly the
-   sound routines, the printers and the high-score entry; add roots to
-   `st_star.ctl` as they're identified.
+9. **The code not yet reached** (about 14K of the code area, less the
+   sound routines, whose unreferenced ones are now roots): mostly the
+   printers and the high-score entry; add roots to `st_star.ctl` as
+   they're identified.

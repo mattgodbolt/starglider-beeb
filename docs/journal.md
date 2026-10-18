@@ -1136,3 +1136,63 @@ for 0.3% of the dots off the ST's pixel. It is left out.
 held turning (measured 2026-10-18). Bank 7 holds most of the cost, 1.8K of
 its window section.
 
+### The sound effects
+
+On 2026-10-18 the ST's 24 effects were read and captured, and the eight
+the game starts were put onto the SN76489 (decision 5; decisions 34-36).
+
+- **The capture.** `tools/st_sfx.py` traces every YM register write in
+  Hatari, timed to the CPU cycle. The game has its own effect tester at
+  &0268A, which nothing calls: each key plays the next effect. The
+  capture jumps into it at a frame's end, and sets a breakpoint on the
+  tester's call of `sfx_start` before each key, so a script can play any
+  effect with any count, alone or close behind another. Under EmuTOS five
+  of the six Timer A handlers block the MFP after their first tick
+  (st-logic.md's `move.b $DF.l`); writing &DF to that byte gives them the
+  intended effect.
+- **What they are.** Four noises on all three channels, shaped by the
+  YM's own envelope, which lock out every effect for 22 VBLs. Sweeps of
+  tone A's period at Timer A's rate: the laser falls from 6.25 kHz to 496
+  Hz in a quarter second, and the cheat's and refuelling's are 33 ms
+  chirps. Docking alternates two tones. Tone A or the noise sounds, never
+  both, and there's no music in play. Effects 4-7 are a broken siren, with
+  a working one unreferenced beside it.
+- **On the SN.** Both chips make a tone of 125 kHz over its period, so
+  tone A's periods go onto tone 0 unchanged. The noise goes on the noise
+  channel, clocked by a silent tone 2 at the YM's noise period. The
+  envelope's 32 levels become the SN's nearest attenuations, once a
+  field, from measurements of an ST's YM: three channels, or two once a
+  sweep ending under the noise has put channel A's volume to 0, as the
+  capture shows the ST doing. The SN stops 28 dB down, so the last third
+  of each noise's fall is silent. The tone sits 6 dB under the noise's
+  peak, as one YM channel does against three.
+- **Timer A becomes the System VIA's T1,** the OS's centisecond timer,
+  free once the game owns the machine. Each effect's start is a record of
+  the state it sets and the bytes it writes to the chip, generated from
+  STAR.PRG into the logic bank's own first 4K, which only data can use.
+- **The fastest sweeps can't tick at the ST's rate.** The vertical sync's
+  handler runs longer than the ST's 104 µs ticks, and the VIA's flag
+  counts two ticks as one, so effects 8 and 9 take 7 and 8 of the ST's
+  ticks a tick, still 37 and 38 steps a chirp (decision 35).
+- **The palette split.** A tick in progress when the split's timer ran
+  out held the split up, by a line and more: with the laser firing, 23
+  fields in 1,499 were late. Now a tick due within 256 µs of the split
+  waits for it, the interrupt handles a split that arrived during a tick
+  at once, and an effect's start, which writes its record with interrupts
+  off, waits for the split to pass. After that, none were late in 2,999
+  fields.
+- **The samples' count.** Nothing plays speech yet, so `sample_left` never
+  fell, and the first warning would have silenced every effect after it.
+  `sound_field` counts it down at the speeches' rate until the player
+  does it itself, and a sample's start silences an effect, as the ST's
+  mixer does. Since the interrupt now changes it, the logic reads its
+  four bytes with interrupts held off, as the 68000 reads it in one.
+- **The check** (`make sfx`, in `make check`) plays the capture's 35
+  plays into the disc's `sfx_start` at their moments and compares the
+  chip's writes with the ST's converted: 556 changes matched in value,
+  order and time.
+
+The sound's interrupt costs about 120 cycles a field while a noise sounds
+and about 220 a tick: with the laser held, 1.8% of the CPU (measured
+2026-10-18).
+

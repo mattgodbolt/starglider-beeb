@@ -104,7 +104,7 @@ it must be in memory, and so whether it can come from disc.
 | Panel | 5.3K (with the mono paths) | ~3K + ~1K of bitmaps | in flight |
 | Text: printers, messages | 2.2K + ~1.5K strings | ~1.5K + ~1.5K strings | in play |
 | Docked: Interrogate, rearming, their descriptions | ~1K + ~3K strings | ~1.5K + ~3K strings | docked |
-| Sound effects (24, to the SN76489) and the speech player | 2.0K | ~2.5K | in play |
+| Sound effects (the 8 the game starts, to the SN76489; built: about 0.9K) and the speech player | 2.0K | ~2.5K | in play |
 | Front end: title, credits, keys, high scores, the end screen | ~2K + strings | ~4K + ~2K | outside play |
 | Shapes | 34K | 16.1K | in play |
 | Sine table | 12K | 10.5K now; ~3K as a quarter wave and corrections | in play |

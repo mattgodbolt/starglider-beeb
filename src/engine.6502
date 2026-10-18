@@ -68,12 +68,14 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
 \ colours back, T1 started, the field counted, a frame drawn shown from
 \ it, by ACCCON's D (TSB and TRB, which the line drawer's X changes can't
 \ split), with its colour 0 (decision 24: the ST writes its flash as its
-\ frame is shown), and the controls read (input.6502). It must lie below
-\ &3000, which X moves to shadow RAM.
+\ frame is shown), the controls read (input.6502) and the sound's field
+\ (sound.6502); between, the sound effect's ticks, on System VIA T1 while
+\ one plays. It must lie below &3000, which X moves to shadow RAM.
 .irq_handler
 {
     ZA_INTERRUPT
     TXA : PHA
+.dispatch
     BIT usrvia_ifr : BVC not_split              ; (T1 is bit 6)
     LDA usrvia_t1cl                             ; acknowledged
     FOR e = {10, 11, 14, 15}
@@ -81,6 +83,12 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
     NEXT
     BRA done
 .not_split
+    LDA ta_kind : BEQ not_sound                 ; (the OS left T1 running)
+    BIT sysvia_ifr : BVC not_sound
+    JSR sound_tick
+    BIT usrvia_ifr : BVS dispatch               ; a split come meanwhile at once
+    BRA done
+.not_sound
     LDA sysvia_ifr : AND #2 : BEQ done
     STA sysvia_ifr                              ; acknowledged
     LDA #LO(SPLIT_T1) : STA usrvia_t1cl
@@ -104,6 +112,7 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
     TRB acccon
 .shown
     JSR input_irq
+    JSR sound_vsync
 .done
     PLA : TAX
     LDA &FC                                     ; the interrupted A, which the OS kept

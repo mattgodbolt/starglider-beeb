@@ -62,6 +62,9 @@ make view       # the view besides the objects (the gunsight, the ground dots,
                 # the bolt, the shots, the missile view's window) against the
                 # ST's on those captures, and the shots against the scenes'
                 # own lines (tools/viewrun.mjs)
+make sfx        # the sound effects on the disc against the ST's YM writes,
+                # converted (in make check; tools/sfxcheck.mjs)
+make sfxcapture # capture the ST's effects in Hatari (slow; build/sfx/all)
 make memory     # what each region of the memory map holds (src/memory.6502)
 make fps        # the disc's frames and steps a second
 make scenes     # capture the scenes in Hatari (slow; needs ../hatari)
