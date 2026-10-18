@@ -311,9 +311,11 @@ counts here, as CE2 found: jsbeeb's 1770 is kinder than the chip.
 `object_handlers` (the ST's &07A54) and every handler its table reaches
 are in `src/logic/handlers.6502`, in the world bank beside the sine
 table, with `angle_to_player` (&08390) and its arctan tables. `make
-logic` checks them against the flight capture and six captures of their
-own, 507 frames in all, with every variable and field the map holds the
-same as the ST's, and d0 too.
+logic` checks them against the flight capture and seven captures of
+their own, 701 frames in all, with every variable and field the map
+holds the same as the ST's, and d0 too. Between them they reach every
+branch the game can take but two: an enemy's laser at camera z 0, and
+the count of hits taken carrying past 255.
 
 - **The table is the ST's.** `tools/mkhandlers.py` reads the 62 handler
   pointers at &08252 and names the port's routine for each, so the five
@@ -340,7 +342,11 @@ same as the ST's, and d0 too.
   -32768, and checks both.
 
 The captures teleport the player (and set the level, the freeze, the
-docked flag, counts and types) with Hatari's `w` between steps. What
+docked flag, counts and types) with Hatari's `w` between steps; the
+rarest draws (a beam going out, 1 step in 2048) were made likely by
+turning 51 far objects into beams. A coverage run of the port's code
+(jsbeeb's instruction hook, every branch both ways) showed what each
+capture still missed. What
 the ST draws or prints from here, the enemies' laser lines and the
 mines' messages, isn't in the port yet: the logic runs in steps, the
 drawing in frames, and the two need a way to meet.
