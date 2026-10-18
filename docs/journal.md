@@ -146,3 +146,27 @@ multiply and reciprocal tables, the line drawer and the transforms) and
 the shapes' bank. So the brief's estimate (3-4 fields in flight) was
 optimistic: per-object and per-vertex work costs more than its sums
 said.
+
+### The first disc
+
+With the repository on GitHub, the README links a disc to run in jsbeeb,
+so the renderer got a disc of its own before the game has one
+(`src/main.6502`, `make disc` makes `starglider.ssd`): the ST's models
+turning one after another, as its Interrogate screen shows them.
+
+- !BOOT sets the mode and palette through BASIC, puts the shapes and the
+  sine table into sideways RAM with `*SRLOAD`, and leaves the files bound
+  for HAZEL in screen memory, as the filing system's workspace is in
+  HAZEL; the program copies them in and makes no OS call after.
+- Both screens are at the same address in main and shadow RAM (decision
+  3). ACCCON's X moves every access to &3000-&7FFF, the CPU's own fetches
+  too, and the code reaches past &3000, so X is set only around each line
+  (`line_plot`) and the screen's clear, which run from HAZEL.
+- Each screen keeps the lines drawn into it (in a sideways bank) and
+  erases them two frames later by drawing them again as zeros.
+
+The first run left trails on the shadow screen only.
+`tools/erasecheck.mjs` (now in `make check`) stops after every erase and
+looks at what's left: the shadow screen was erasing the main screen's
+lines, because `line_erase` uses X and the frame was still holding the
+screen's number in it.

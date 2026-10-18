@@ -1,0 +1,223 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the disc
+\
+\ For now the disc shows the renderer: the ST's models turning one after
+\ another, as its Interrogate screen shows them, drawn by the port's
+\ renderer into a double-buffered MODE 1 screen at the ST's 320 x 200.
+\
+\ !BOOT (*EXEC'd) sets the mode and palette through BASIC and the OS, puts
+\ the shapes and the sine table into sideways RAM (*SRLOAD), and leaves
+\ the files bound for HAZEL in screen memory: the filing system keeps its
+\ workspace in HAZEL, so they can't go there until it's done with. SG
+\ copies them into HAZEL and makes no OS call after.
+\ ***************************************************************************
+
+INCLUDE "defs.6502"
+INCLUDE "zp.6502"
+INCLUDE "macros.6502"
+
+\ The build stamp comes from the Makefile (-D BUILD="date time sha"), so a
+\ disc says what it is: *TYPE !BOOT shows it. A + after the sha means the
+\ tree had uncommitted changes.
+IF DEFINED(BUILD)
+    build_stamp = BUILD
+ELSE
+    build_stamp = "DEV"
+ENDIF
+
+\ Where !BOOT leaves the HAZEL files, in screen memory.
+TABLES_AT = &5000
+CODE2_AT  = &6000
+ASSERT TABLES_AT >= SCREEN AND CODE2_AT + &1000 <= &8000
+
+SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
+    EQUS "*| STARGLIDER for the BBC Master ", build_stamp, 13
+    EQUS "MODE 1", 13
+    EQUS "VDU 19,2,6;0;", 13                    ; logical 2 is cyan
+    EQUS "*SRLOAD SHAPES 8000 ", AS_STRING(BANK_SHAPES), 13
+    EQUS "*SRLOAD SINE 8000 ", AS_STRING(BANK_SINE), 13
+    EQUS "*LOAD TABLES ", ~TABLES_AT, 13
+    EQUS "*LOAD CODE2 ", ~CODE2_AT, 13
+    EQUS "*RUN SG", 13
+ENDSECTION
+
+SECTION Main, org = &0E00, filename = "SG", guard = SCREEN, cmos = TRUE
+.start
+    ZA_ENTRY
+    SEI
+    \ HAZEL in, and its files copied from where !BOOT left them
+    LDA acccon : AND #NOT(ACCCON_X OR ACCCON_D) AND &FF : ORA #ACCCON_Y : STA acccon
+    LDA #HI(TABLES_AT) : LDX #HI(TABLES) : JSR copy_4k
+    LDA #HI(CODE2_AT) : LDX #HI(CODE2) : JSR copy_4k
+    JSR mul_init
+    JSR line_draw
+    JSR screen_mode
+    STZ draw_bank : JSR screen_clear
+    LDA #ACCCON_X : STA draw_bank : JSR screen_clear
+    JMP models
+
+\ copy_4k: 4K from page A to page X.
+.copy_4k
+{
+    ZA_AUTO2 from, to
+    STA from+1 : STX to+1 : STZ from : STZ to
+    LDX #&10
+    LDY #0
+.copy
+    LDA (from),Y : STA (to),Y
+    INY : BNE copy
+    INC from+1 : INC to+1
+    DEX : BNE copy
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ models: each type with a model in turn, turning, two radii from the
+\ camera, until the next.
+MODEL_FRAMES = 120                  ; frames each model is shown
+TURN = 24                           ; its heading's step a frame (4096 a turn)
+TILT = 320                          ; and its pitch
+.model_types
+    EQUB 1, 2, 3, 4, 5, 7, 8, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25, 26, 27, 28
+MODELS = P% - model_types
+.buffer_bank
+    EQUB 0, ACCCON_X                \ drawing in main RAM's screen, or shadow RAM's ...
+.buffer_shows
+    EQUB 0, ACCCON_D                \ ... and showing it
+.buffer_log_lo
+    EQUB LO(LOG), LO(LOG2)
+.buffer_log_hi
+    EQUB HI(LOG), HI(LOG2)
+
+.models
+{
+    \ The player at the origin, looking along z; one object.
+    LDX #pl_roll + 1 - pl_x
+.zero
+    STZ pl_x,X
+    DEX : BPL zero
+    LDA #1 : STA n_slots
+    STZ docked : STZ silo_missile : STZ all_faces
+    LDA #15 : STA beam_colour
+    LDX #15
+.colours
+    LDA model_colours,X : STA colour_map,X
+    DEX : BPL colours
+    STZ model_lines : STZ model_lines+1 : STZ model_lines+2 : STZ model_lines+3
+    STZ model_i
+    JSR set_model
+    STZ model_buffer
+    LDA #2 : STA sysvia_ifr                 ; the VSync flag, cleared
+.frame
+    LDX model_buffer
+    LDA buffer_bank,X : STA draw_bank
+    \ erase what was drawn on this screen two frames ago: its lines again,
+    \ as zeros
+    JSR line_erase                          ; (which takes X)
+    LDX model_buffer
+    LDA buffer_log_lo,X : STA erase_ptr : LDA buffer_log_hi,X : STA erase_ptr+1
+    TXA : ASL A : TAX
+    LDA model_lines,X : STA erase_n : LDA model_lines+1,X : STA erase_n+1
+    LDA #BANK_LOG : STA romsel
+.erase
+    LDA erase_n : ORA erase_n+1 : BEQ erased
+    LDY #2
+    LDA (erase_ptr),Y : STA line_x0 : INY
+    LDA (erase_ptr),Y : STA line_x0+1 : INY
+    LDA (erase_ptr),Y : STA line_y0 : INY
+    LDA (erase_ptr),Y : STA line_x1 : INY
+    LDA (erase_ptr),Y : STA line_x1+1 : INY
+    LDA (erase_ptr),Y : STA line_y1
+    JSR line_plot
+    LDA erase_ptr : CLC : ADC #LOG_ENTRY : STA erase_ptr
+    BCC next_line
+    INC erase_ptr+1
+.next_line
+    LDA erase_n : BNE count_down
+    DEC erase_n+1
+.count_down
+    DEC erase_n
+    BRA erase
+.erased
+    JSR line_draw
+    \ turn it, step its animation, and after a while the next model
+    BANK BANK_OBJECTS
+    LDA OBJECTS + OB_HEADING : CLC : ADC #LO(TURN) : STA OBJECTS + OB_HEADING
+    LDA OBJECTS + OB_HEADING + 1 : ADC #HI(TURN) : STA OBJECTS + OB_HEADING + 1
+    LDA model_t : LSR A : LDX model_shape
+.wrap
+    CMP model_frames : BCC framed
+    SBC model_frames : BRA wrap
+.framed
+    STA anim_frame,X
+    INC model_t : BNE same_model
+    INC model_t+1
+.same_model
+    LDA model_t : CMP #LO(MODEL_FRAMES) : BNE drawing
+    LDA model_t+1 : CMP #HI(MODEL_FRAMES) : BNE drawing
+    INC model_i : LDA model_i : CMP #MODELS : BNE next_model
+    STZ model_i
+.next_model
+    JSR set_model
+.drawing
+    LDX model_buffer
+    LDA buffer_log_lo,X : STA log_base : LDA buffer_log_hi,X : STA log_base+1
+    JSR render
+    LDA model_buffer : ASL A : TAX
+    LDA log_n : STA model_lines,X : LDA log_n+1 : STA model_lines+1,X
+    \ show it from the next VSync
+.vsync
+    LDA sysvia_ifr : AND #2 : BEQ vsync
+    STA sysvia_ifr
+    LDX model_buffer
+    LDA acccon : AND #NOT(ACCCON_D) AND &FF : ORA buffer_shows,X : STA acccon
+    TXA : EOR #1 : STA model_buffer
+    JMP frame
+}
+
+\ set_model: model_i's type in slot 0, two radii from the camera.
+.set_model
+{
+    LDX model_i : LDA model_types,X : STA model_type
+    TAX : LDA type_shape,X : STA model_shape
+    BANK BANK_SHAPES
+    LDX model_shape
+    LDA shape_lo,X : STA set_ptr : LDA shape_hi,X : STA set_ptr+1
+    LDY #5 : LDA (set_ptr),Y : STA model_frames     ; its animation's length
+    LDY #8 : LDA (set_ptr),Y : STA model_z : INY : LDA (set_ptr),Y : STA model_z+1
+    ASL model_z : ROL model_z+1                     ; two radii
+    BANK BANK_OBJECTS
+    LDX #OB_SIZE - 1
+.clear
+    STZ OBJECTS,X
+    DEX : BPL clear
+    LDA model_type : STA OBJECTS + OB_TYPE
+    LDA model_z : STA OBJECTS + OB_Z : LDA model_z+1 : STA OBJECTS + OB_Z + 1
+    LDA #LO(TILT) : STA OBJECTS + OB_PITCH : LDA #HI(TILT) : STA OBJECTS + OB_PITCH + 1
+    STZ model_t : STZ model_t+1
+    RTS
+}
+
+\ The ST's colours, for now: reds colour 1 (red), blues and cyans colour 2
+\ (cyan), white colour 3 (decision 3 leaves the choice to make).
+.model_colours
+    EQUB &00, &0F, &0F, &0F, &0F, &0F, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &FF
+
+INCLUDE "code.6502"
+ENDSECTION
+
+\ The models' own state, in the workspace.
+SECTION ModelWork, org = work_end, guard = &0E00, virtual = TRUE
+.model_i      SKIP 1
+.model_type   SKIP 1
+.model_shape  SKIP 1
+.model_frames SKIP 1
+.model_buffer SKIP 1
+.model_t      SKIP 2
+.model_z      SKIP 2
+.model_lines  SKIP 4                \ each screen's lines, for erasing
+ENDSECTION
+
+ZA_AUTO2 erase_ptr, erase_n, set_ptr
+
+INCLUDE "banks.6502"

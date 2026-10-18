@@ -28,6 +28,8 @@ SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
 .all_faces  SKIP 1          ; &80: every face visible (the Interrogate screen's H, $2BD)
 .beam_colour SKIP 1         ; the beam's colour, which animate_shapes cycles
 .bank_now   SKIP 1          ; the sideways bank paged, as BANK pages it
+.draw_bank  SKIP 1          ; the screen drawn into: 0 main RAM's, ACCCON_X shadow's
+.log_base   SKIP 2          ; where render logs its lines (in BANK_LOG)
 ENDSECTION
 
 ZA_POOL ZP_FIXED..&FF
@@ -124,6 +126,7 @@ SECTION Work, org = WORK, guard = &0E00, virtual = TRUE
 .v_sxhi     SKIP 128
 .v_sylo     SKIP 128
 .v_syhi     SKIP 128
+.work_end                   ; (a build's own workspace can follow)
 ENDSECTION
 
 \ HAZEL, which the spike pages in (it makes no OS calls): the tables and
@@ -136,6 +139,7 @@ CODE2 = &D000
 LOG = &8000
 LOG_ENTRY = 9
 LOG_LINES = 400
+LOG2 = &A000                ; a second, for the other screen (main.6502)
 SECTION Log, org = LOG, guard = &C000, virtual = TRUE
 .line_log   SKIP LOG_ENTRY * LOG_LINES
 ENDSECTION

@@ -1,7 +1,12 @@
 # STARGLIDER — BBC Master 128 port
 #
-#   make          the speed spike's build (build/spike: SPIKE, SHAPES, SINE)
-#   make check    the sine table against the ST's, and the spike
+#   make          the disc (build/starglider.ssd) and the speed spike's build
+#                 (build/spike)
+#   make run      boot the disc in jsbeeb, screenshot to shots/run.png
+#   make disc     the disc from a clean tree, as starglider.ssd (the README
+#                 links it)
+#   make check    the sine table against the ST's, the spike, and the
+#                 disc's erasing (tools/erasecheck.mjs)
 #   make spike    the spike on every captured scene, checked against the
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
 #   make scenes   capture the scenes in Hatari (tests/st/*.txt; needs
@@ -27,9 +32,32 @@ GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/
 # warning after baron has written its output).
 .DELETE_ON_ERROR:
 
-.PHONY: all check spike scenes fetch venv clean
+# Stamped into !BOOT, so a disc says what it is: UTC build time and the
+# commit, with + if the tree had changes.
+BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short HEAD 2>/dev/null || echo NOGIT)$(shell git diff --quiet HEAD -- . ':(exclude)starglider.ssd' 2>/dev/null || echo +)
+TARGET   = build/starglider.ssd
+DISC     = starglider.ssd
 
-all: build/spike/SPIKE
+.PHONY: all run disc check spike scenes fetch venv clean
+
+all: $(TARGET) build/spike/SPIKE
+
+$(TARGET): $(SOURCES) $(GEN) | build
+	$(ASM) -D 'BUILD="$(BUILD)"' -o $@ --title STARGLIDER --opt 3 --warn 2 --symbols $(@:.ssd=.json) src/main.6502
+
+build:
+	mkdir -p build
+
+# The release disc, from a clean tree (so its stamp names the commit),
+# copied to starglider.ssd, which the README links.
+disc:
+	@git diff --quiet HEAD -- . ':(exclude)$(DISC)' || { echo "commit first: the stamp would say +"; exit 1; }
+	rm -f $(TARGET)
+	$(MAKE) $(TARGET)
+	cp $(TARGET) $(DISC)
+
+run: $(TARGET)
+	node tools/play.mjs '6,!run' shots/ --disc $(TARGET) --until start
 
 # The ST's program, off TOSEC's clean image: the shapes and tables come
 # from it at build time, so nothing of the original is committed.
@@ -60,8 +88,9 @@ build/st build/gen build/spike:
 build/scenes/%/beeb.json: build/scenes/%/scenes.json $(PRG) tools/mkscene.py tools/st_render.py
 	$(PYTHON) -I tools/mkscene.py $(PRG) $< $@
 
-check: build/spike/SPIKE spike
-	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike/SINE
+check: build/spike/SPIKE spike $(TARGET)
+	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike/SINE build/spike/symbols.json
+	node tools/erasecheck.mjs
 
 spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	@for s in $(SCENES); do \

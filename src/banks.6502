@@ -1,0 +1,31 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - HAZEL and the sideways banks, for every
+\ build
+\ ***************************************************************************
+
+\ HAZEL: the tables and what runs with ACCCON's X set (hazel.6502) ...
+SECTION Tables, org = TABLES, filename = "TABLES", guard = CODE2, cmos = TRUE
+INCLUDE "squares.6502"
+INCLUDE "recip.6502"
+INCLUDE "hazel.6502"
+ENDSECTION
+
+\ ... and more code.
+SECTION Code2, org = CODE2, filename = "CODE2", guard = &E000, cmos = TRUE
+INCLUDE "../build/gen/line.6502"
+INCLUDE "../build/gen/xform.6502"
+ENDSECTION
+
+\ A bank's first bytes are where the OS looks for a ROM's header: a zero
+\ there (no copyright string at &8000) keeps it from taking the data for
+\ one after a BREAK.
+SECTION Shapes, org = &8000, filename = "SHAPES", guard = &C000
+    EQUD 0, 0
+INCLUDE "../build/gen/shapes.6502"
+ENDSECTION
+
+SECTION Sine, org = &8000, filename = "SINE", guard = &C000
+    EQUD 0, 0
+    ALIGN 256
+INCLUDE "sine.6502"
+ENDSECTION

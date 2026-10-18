@@ -1,0 +1,32 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - what runs with ACCCON's X set
+\
+\ X sends every access to &3000-&7FFF to shadow RAM, the CPU's own fetches
+\ included, so whatever runs or is read while it's set lives here, in
+\ HAZEL: the line drawer (line.6502) and these.
+\ ***************************************************************************
+
+\ Each character row's address, for the line drawer.
+.screen_row_lo
+FOR r = 0..<SCREEN_ROWS
+    EQUB LO(SCREEN + r * SCREEN_ROW)
+NEXT
+.screen_row_hi
+FOR r = 0..<SCREEN_ROWS
+    EQUB HI(SCREEN + r * SCREEN_ROW)
+NEXT
+
+\ screen_clear: the screen draw_bank names (0 main, ACCCON_X shadow),
+\ from SCREEN to the top of RAM.
+.screen_clear
+{
+    ZA_AUTO2 p
+    LDA draw_bank : TSB acccon
+    STZ p : LDA #HI(SCREEN) : STA p+1
+    LDY #LO(SCREEN) : LDA #0
+.clear
+    STA (p),Y : INY : BNE clear
+    INC p+1 : BPL clear                 ; to &7FFF
+    LDA draw_bank : TRB acccon
+    RTS
+}

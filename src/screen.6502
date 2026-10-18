@@ -2,16 +2,6 @@
 \ STARGLIDER for the BBC Master - the screen's addresses
 \ ***************************************************************************
 
-\ Each character row's address, for the line drawer.
-.screen_row_lo
-FOR r = 0..<SCREEN_ROWS
-    EQUB LO(SCREEN + r * SCREEN_ROW)
-NEXT
-.screen_row_hi
-FOR r = 0..<SCREEN_ROWS
-    EQUB HI(SCREEN + r * SCREEN_ROW)
-NEXT
-
 \ screen_mode: MODE 1's CRTC cut to 25 character rows from SCREEN, its
 \ vertical sync moved to keep them central.
 .screen_mode

@@ -4,21 +4,23 @@
 \ The renderer alone, driven by tools/scenerun.mjs: it writes a scene
 \ captured from the ST (tools/st_scenes.py) into the objects' bank and the
 \ frame's inputs, calls spike_frame and reads the lists, the camera-space
-\ positions and line_log back. The banks are loaded by the harness: the
-\ shapes into BANK_SHAPES, the sine table into BANK_SINE.
+\ positions and line_log back. The harness loads the banks and HAZEL.
 \ ***************************************************************************
 
 INCLUDE "defs.6502"
 INCLUDE "zp.6502"
+INCLUDE "macros.6502"
 
 SECTION Spike, org = &0E00, filename = "SPIKE", guard = SCREEN, cmos = TRUE
 .spike_init
     ZA_ENTRY
-    LDA acccon : ORA #ACCCON_Y : STA acccon      ; HAZEL, for line_log
+    LDA acccon : ORA #ACCCON_Y : STA acccon      ; HAZEL
+    STZ draw_bank                               ; main RAM's screen
+    LDA #LO(LOG) : STA log_base : LDA #HI(LOG) : STA log_base+1
     JSR mul_init
     JSR line_draw
     JSR screen_mode
-    RTS
+    JMP screen_clear
 
 .spike_frame
     ZA_ENTRY
@@ -26,41 +28,7 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = SCREEN, cmos = TRUE
 .spike_done
     RTS
 
-INCLUDE "maths.6502"
-INCLUDE "render.6502"
-INCLUDE "screen.6502"
-INCLUDE "../build/gen/rotate.6502"
-INCLUDE "../build/gen/types.6502"
-
-\ each object's record's address, by slot
-.obj_lo
-FOR i = 0..<SLOTS + 2
-    EQUB LO(OBJECTS + i * OB_SIZE)
-NEXT
-.obj_hi
-FOR i = 0..<SLOTS + 2
-    EQUB HI(OBJECTS + i * OB_SIZE)
-NEXT
-
-.spike_end
+INCLUDE "code.6502"
 ENDSECTION
 
-\ The tables, in HAZEL (the spike pages it in) beside the line log.
-SECTION Tables, org = TABLES, filename = "TABLES", guard = CODE2
-INCLUDE "squares.6502"
-INCLUDE "recip.6502"
-ENDSECTION
-
-\ More code, in HAZEL.
-SECTION Code2, org = CODE2, filename = "CODE2", guard = &E000, cmos = TRUE
-INCLUDE "../build/gen/line.6502"
-INCLUDE "../build/gen/xform.6502"
-ENDSECTION
-
-SECTION Shapes, org = &8000, filename = "SHAPES", guard = &C000
-INCLUDE "../build/gen/shapes.6502"
-ENDSECTION
-
-SECTION Sine, org = &8000, filename = "SINE", guard = &C000
-INCLUDE "sine.6502"
-ENDSECTION
+INCLUDE "banks.6502"

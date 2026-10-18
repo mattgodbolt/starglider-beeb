@@ -34,10 +34,15 @@ buildings").
 ## Commands
 
 ```sh
-make            # the speed spike's build, build/spike (src/spike.6502)
+make            # build/starglider.ssd (src/main.6502) and the speed
+                # spike's build, build/spike (src/spike.6502)
+make run        # boot the disc in jsbeeb, screenshot to shots/run.png
+make disc       # the disc from a clean tree, as starglider.ssd: the
+                # README links it (github: in jsbeeb's URL, not gh:)
 make spike      # the spike on every captured scene: checked against the
                 # ST's renderer, and timed (tools/scenecheck.py)
-make check      # the sine table against the ST's, and make spike
+make check      # the sine table against the ST's, make spike, and the
+                # disc's erasing (tools/erasecheck.mjs)
 make scenes     # capture the scenes in Hatari (slow; needs ../hatari)
 make fetch      # download every version into original/ (not committed)
 make venv       # .venv (uv sync): SkoolKit, Capstone, Pillow, NumPy
@@ -82,6 +87,10 @@ says how):
   indexed access to a `ZA_AUTO` wants its `ZA_INDEXEDBY`; a patched or
   computed jump wants `ZA_CANJUMP`; an array rebuilt by indexed stores
   wants `ZA_DISCARD`.
+- ACCCON's X sends the CPU's own fetches to shadow RAM too: only code in
+  HAZEL may set it (`line_plot`, `screen_clear`).
+- A routine that patches code may take X or Y (`line_erase`, `line_draw`):
+  reload what you were holding there.
 - `ROL` and `ASL` don't touch V; `BIT abs,Y`, `STY abs,X` and `STA zp,Y`
   don't exist (baron says "No such addressing mode" or uses abs,Y).
 - Generated code with patched operands: assert that each copy's labels
@@ -90,6 +99,8 @@ says how):
 
 ## House rules
 
+- `main` is on GitHub (mattgodbolt/starglider-beeb): never force-push it.
+  Rebuild `starglider.ssd` with `make disc` when the disc changes.
 - Commit messages end at `Co-Authored-By:`. Never include a claude.ai
   session link or a `Claude-Session:` trailer. Never force-push a pushed
   branch.

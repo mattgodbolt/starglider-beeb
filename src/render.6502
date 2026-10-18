@@ -39,90 +39,11 @@ VIEW_CX   = 143
 VIEW_CY   = 68
 NEAR_Z    = 2
 
-\ CMPS16 a, b: compare two signed words (zero page), a with b or the
-\ constant #b: N set if a < b.
-MACRO CMPS16 a, b
-    SEC
-    LDA a : SBC b
-    LDA a+1 : SBC b+1
-    BVC ok
-    EOR #&80
-.ok
-ENDMACRO
-MACRO CMPS16 a, "#" b
-    SEC
-    LDA a : SBC #LO(b)
-    LDA a+1 : SBC #HI(b)
-    BVC ok
-    EOR #&80
-.ok
-ENDMACRO
-
-\ FMUL a, b: mul_r = fmul16(a, b), words in zero page.
-MACRO FMUL a, b
-    LDA a : STA mul_x : LDA a+1 : STA mul_x+1
-    LDA b : STA mul_y : LDA b+1 : STA mul_y+1
-    JSR fmul16
-ENDMACRO
-
-\ ADDW r, a / SUBW r, a: r = r + a, r - a (words).
-MACRO ADDW r, a
-    CLC
-    LDA r : ADC a : STA r
-    LDA r+1 : ADC a+1 : STA r+1
-ENDMACRO
-MACRO SUBW r, a
-    SEC
-    LDA r : SBC a : STA r
-    LDA r+1 : SBC a+1 : STA r+1
-ENDMACRO
-MACRO MOVW r, a
-    LDA a : STA r : LDA a+1 : STA r+1
-ENDMACRO
-
-\ Working variables several routines (and the macros) share.
-ZA_AUTO2 acc                ; a row's sum
-ZA_AUTO2 m_idx, m_sin, m_cos  ; sincos's index and results
-ZA_AUTO1 ocolour            ; the object's colour, the ST's number
-ZA_AUTO 6, ep               ; an edge's ends in camera space, x y z words
-ZA_AUTO 6, eq
-ZA_AUTO 18, xf_amag         ; the object's matrix scaled to its shape: |A| words ...
-ZA_AUTO 9, xf_asign         ; ... and signs (bit 7), by term (mkxform.py)
-ZA_AUTO 6, objc_mag         ; the camera in the object's space: |c| words ...
-ZA_AUTO 3, objc_sign        ; ... and signs
-
-\ CLAMP v, lo, hi: the word v into lo..hi, below first (&0A2F8, &0A330).
-MACRO CLAMP v, lo, hi
-    CMPS16 v, #lo : BPL not_low
-    LDA #LO(lo) : STA v : LDA #HI(lo) : STA v+1
-    BRA done
-.not_low
-    SEC : LDA #LO(hi) : SBC v : LDA #HI(hi) : SBC v+1
-    BVC ok : EOR #&80
-.ok
-    BPL done
-    LDA #LO(hi) : STA v : LDA #HI(hi) : STA v+1
-.done
-ENDMACRO
-
-MACRO WORLD acc, t, out
-    LDA acc+1
-    CMP #&80 : ROR A : ROR acc
-    CMP #&80 : ROR A : ROR acc
-    STA acc+1
-    LDA acc : CLC : ADC t : STA out
-    LDA acc+1 : ADC t+1 : STA out+1
-ENDMACRO
-
-MACRO BANK n
-    LDA #n : STA romsel : STA bank_now
-ENDMACRO
-
 \ ---------------------------------------------------------------------------
 \ render: the frame's lists and every drawn object's lines.
 .render
     STZ log_n : STZ log_n+1
-    LDA #LO(line_log) : STA log_ptr : LDA #HI(line_log) : STA log_ptr+1
+    LDA log_base : STA log_ptr : LDA log_base+1 : STA log_ptr+1
     JSR camera
 .render_lists
     BANK BANK_OBJECTS
@@ -1420,7 +1341,7 @@ ZA_AUTO1 proj_shift
 .draw
     MOVW line_x0, cx0 : LDA cy0 : STA line_y0
     MOVW line_x1, cx1 : LDA cy1 : STA line_y1
-    JMP line
+    JMP line_plot
 }
 
 \ outcode: A = the window's outcode of (px, pz): 8 right, 4 below, 2 left,
