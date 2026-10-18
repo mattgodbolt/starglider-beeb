@@ -1,8 +1,426 @@
 \ ***************************************************************************
-\ STARGLIDER for the BBC Master - the level change (the ST's &01F06
+\ STARGLIDER for the BBC Master - the level change (the ST's &01F06) and
+\ the new game's set-up (&039FA)
 \
-\ To be transcribed exactly (docs/research/st-logic.md, " the flash, init_objects):The main loop, the post-frame tests, game over, the level change and init_objects").
+\ level_start is the level flash's logic (&026B2: its frame_end; the rest
+\ of it is the palette's) and init_objects (&0A6AE): every record cleared,
+\ the free-record stack given records 0-9, the level's layout copied from
+\ record 10 on with each type's set-up (an energy tower made a group of
+\ six), and the silo's tunnel and its missile placed at random. new_game
+\ (&039FA) is what a game starts from, before its first level_start: its
+\ frame_end (&039B2's), the random numbers seeded, the ground dots
+\ scattered, the game's state, the player's start, the dots scattered
+\ again. Exactly the ST's (docs/research/st-logic.md, "The main loop, the
+\ post-frame tests, game over, the level change and init_objects", and
+\ "The player's flight, the shapes' animation and the random numbers"),
+\ with the ST's d0 in rng_d0 at every random8 call; level_start leaves it
+\ as the ST leaves d0 for the frame after.
+\
+\ The ST's new game also writes what the port keeps nowhere: the model
+\ viewer's eye offset ($288), the panel's waveform state ($266, $268,
+\ $27E), the renderer's angle cache ($180, $184), the table pointers
+\ (&03982), the sound's lockout (&29C), an accumulator nothing reads
+\ (&01846), the always-zero longs after the score (&01510-&0151B) and
+\ the four statistics nothing reads ($B4, $BC, $C8, $CC).
 \ ***************************************************************************
 
+\ OBW lo, hi, v: an object field (a word, as its two arrays) of the record
+\ in X set to the constant v.
+MACRO OBW lo, hi, v
+    LDA #LO(v) : STA lo,X : LDA #HI(v) : STA hi,X
+ENDMACRO
+
 .level_start
+    JSR frame_end_logic                         ; the flash's (&026B6)
+    \ (on into init_objects)
+
+\ init_objects (&0A6AE)
+.init_objects
+{
+    ZA_AUTO2 p                                  ; one of the table's arrays
+    ZA_AUTO2 l_type, l_x, l_z, l_hits           ; the layout's
+    ZA_AUTO1 entry
+    ZA_AUTO1 record                             ; the record being filled
+    \ every record cleared (the silo's two, after them, aren't): each of
+    \ the table's arrays, in main RAM and in ANDY
+    LDA #LO(OBJECTS) : STA p : LDA #HI(OBJECTS) : STA p+1
+    LDX #OB_ARRAYS
+    JSR clear
+    LDA #LO(ANDY) : STA p : LDA #HI(ANDY) : STA p+1
+    LDX #OB_ANDY_ARRAYS
+    JSR clear
+    \ the free-record stack: records 0-9, for the missiles, 9 on top
+    LDX #9
+.free
+    TXA : STA free_stack,X
+    DEX : BPL free
+    LDA #10 : STA free_count
+    \ the level's layout, from record 10 on
+    LDX level : LDY level_layout,X
+    LDA layout_type_lo,Y : STA l_type : LDA layout_type_hi,Y : STA l_type+1
+    LDA layout_x_lo,Y : STA l_x : LDA layout_x_hi,Y : STA l_x+1
+    LDA layout_z_lo,Y : STA l_z : LDA layout_z_hi,Y : STA l_z+1
+    LDA layout_hits_lo,Y : STA l_hits : LDA layout_hits_hi,Y : STA l_hits+1
+    LDA #10 : STA record
+    STZ entry
+.each
+    LDY entry
+    LDA (l_type),Y : BEQ placed                 ; a zero type ends it
+    LDX record
+    STA ob_type,X
+    \ x and z, the sectors times &290
+    LDA (l_x),Y : JSR by_sector
+    LDX record
+    LDA by_sector.r : STA ob_x_lo,X : LDA by_sector.r+1 : STA ob_x_hi,X
+    LDY entry
+    LDA (l_z),Y : JSR by_sector
+    LDX record
+    LDA by_sector.r : STA ob_z_lo,X : LDA by_sector.r+1 : STA ob_z_hi,X
+    LDY entry
+    LDA (l_hits),Y : STA ob_hits_lo,X
+    JSR set_up
+    INC record
+    INC entry
+    BRA each
+.placed
+    LDA record : STA n_slots
+    \ the silo's tunnel (&1218) and its missile (&1258), at random: the
+    \ first random8 adds the zero that ended the layout, each after it the
+    \ one before's result
+    STZ rng_d0 : STZ rng_d0+1
+    LDX #SLOT_TUNNEL
+    LDA #22 : STA ob_type,X
+    LDA #&FF : STA ob_flags,X
+    JSR random8
+    LDX #SLOT_TUNNEL
+    LDA rng_d0 : STA ob_x_lo,X : LDA rng_d0+1 : STA ob_x_hi,X
+    STZ ob_y_lo,X : STZ ob_y_hi,X
+    JSR random8
+    LDX #SLOT_TUNNEL
+    LDA rng_d0 : STA ob_z_lo,X : LDA rng_d0+1 : STA ob_z_hi,X
+    STZ ob_pitch_lo,X : STZ ob_pitch_hi,X
+    JSR random8
+    LDX #SLOT_TUNNEL
+    LDA rng_d0 : STA ob_heading_lo,X : LDA rng_d0+1 : STA ob_heading_hi,X
+    STZ ob_roll_lo,X : STZ ob_roll_hi,X
+    STZ ob_speed_lo,X : STZ ob_speed_hi,X
+    STZ ob_vx_lo,X : STZ ob_vx_hi,X
+    STZ ob_exploding,X
+    STZ ob_timer_a_hi,X                         ; (sf.b +14: its first byte alone)
+    LDX #SLOT_MISSILE
+    LDA #24 : STA ob_type,X
+    LDA #&FF : STA ob_flags,X
+    JSR random8
+    LDX #SLOT_MISSILE
+    LDA rng_d0 : STA ob_x_lo,X : LDA rng_d0+1 : STA ob_x_hi,X
+    STZ ob_y_lo,X : STZ ob_y_hi,X
+    JSR random8
+    LDX #SLOT_MISSILE
+    LDA rng_d0 : STA ob_z_lo,X : LDA rng_d0+1 : STA ob_z_hi,X
+    STZ ob_pitch_lo,X : STZ ob_pitch_hi,X
+    STZ ob_heading_lo,X : STZ ob_heading_hi,X
+    OBW ob_roll_lo, ob_roll_hi, &400
+    STZ ob_speed_lo,X : STZ ob_speed_hi,X
+    STZ ob_vx_lo,X : STZ ob_vx_hi,X
+    STZ ob_exploding,X
     RTS
+
+\ clear: X of the table's arrays from p on, each's records (not the silo's
+\ two) to 0
+.clear
+    LDA #0
+    LDY #SLOTS
+.zero
+    DEY : STA (p),Y : BNE zero
+    LDA p : CLC : ADC #OB_SLOTS : STA p
+    BCC next
+    INC p+1
+.next
+    DEX : BNE clear
+    RTS
+
+\ set_up (&0A758-&0AA92): the set-up for the record's type, the record in
+\ X and in record. The ST's tests are one equality each, so their order
+\ doesn't matter: a table by type does the same. A tower group moves
+\ record on by its five more.
+.set_up
+    LDA ob_type,X : ASL A : TAX
+    JMP (set_ups,X)
+    ZA_CANJUMP set_none, set_walker, set_pyramid, set_box, set_towers, set_5, set_silo, set_drone, set_atv, set_tank, set_bute, set_diamond, set_stomper, set_skim, set_17, set_juno, set_lotus, set_glider
+.set_ups
+    EQUW set_none, set_walker, set_pyramid, set_box, set_towers, set_5, set_silo, set_drone
+    EQUW set_atv, set_tank, set_none, set_none, set_none, set_bute, set_diamond, set_stomper
+    EQUW set_skim, set_17, set_none, set_none, set_juno, set_lotus, set_none, set_none
+    EQUW set_none, set_none, set_none, set_glider
+.set_ups_end
+    ASSERT LAYOUT_TYPES * 2 <= set_ups_end - set_ups   ; every type a layout has
+
+.set_drone                                      ; 7
+    LDX record
+    OBW ob_y_lo, ob_y_hi, -500
+    OBW ob_speed_lo, ob_speed_hi, 250
+.set_none
+    RTS
+.set_glider                                     ; 27, StarGlider One
+    LDX record
+    OBW ob_y_lo, ob_y_hi, -750
+    OBW ob_speed_lo, ob_speed_hi, -300
+    OBW ob_hits_lo, ob_hits_hi, 4
+    LDA #&FF : STA ob_proof,X
+    RTS
+.set_lotus                                      ; 21
+    LDX record
+    OBW ob_y_lo, ob_y_hi, -250
+    OBW ob_speed_lo, ob_speed_hi, -200
+    RTS
+.set_juno                                       ; 20
+    LDX record
+    OBW ob_y_lo, ob_y_hi, -150
+    RTS
+.set_walker                                     ; 1
+    LDX record
+    OBW ob_speed_lo, ob_speed_hi, 20
+    LDA #&FF : STA ob_proof,X
+    RTS
+.set_stomper                                    ; 15
+    LDX record
+    OBW ob_speed_lo, ob_speed_hi, 16
+    LDA #&FF : STA ob_proof,X
+    RTS
+.set_atv                                        ; 8
+    LDX record
+    OBW ob_speed_lo, ob_speed_hi, 25
+    RTS
+.set_tank                                       ; 9 (no layout has one)
+    LDX record
+    OBW ob_heading_lo, ob_heading_hi, &400
+    OBW ob_speed_lo, ob_speed_hi, &40
+    OBW ob_timer_b_lo, ob_timer_b_hi, 100
+    RTS
+.set_bute                                       ; 13
+    LDX record
+    OBW ob_y_lo, ob_y_hi, -1700
+    OBW ob_speed_lo, ob_speed_hi, 200
+    RTS
+.set_skim                                       ; 16
+    LDX record
+    OBW ob_y_lo, ob_y_hi, -100
+    OBW ob_speed_lo, ob_speed_hi, -300
+    RTS
+.set_pyramid                                    ; 2: its bob's period at random
+    LDX record
+    OBW ob_y_lo, ob_y_hi, -300
+    OBW ob_timer_b_lo, ob_timer_b_hi, -15
+    LDA #2 : JSR random_type
+    LDA rng_d0 : AND #&7F
+    STA ob_timer_c_lo,X : STZ ob_timer_c_hi,X
+    STA ob_timer_a_lo,X : STZ ob_timer_a_hi,X
+    RTS
+.set_diamond                                    ; 14
+    LDX record
+    OBW ob_y_lo, ob_y_hi, -400
+    OBW ob_timer_b_lo, ob_timer_b_hi, -20
+    LDA #14 : JSR random_type
+    LDA rng_d0 : AND #&3F
+    STA ob_timer_a_lo,X : STZ ob_timer_a_hi,X
+    STA ob_timer_c_lo,X : STZ ob_timer_c_hi,X
+    RTS
+.set_5                                          ; 5: a random heading, and indestructible
+    LDA #5 : JSR random_heading
+    LDA #&FF : STA ob_flags,X
+    RTS
+.set_17                                         ; 17, an arch: the same
+    LDA #17 : JSR random_heading
+    LDA #&FF : STA ob_flags,X
+    RTS
+.set_box                                        ; 3: a random heading
+    LDA #3
+    \ (on into random_heading)
+\ random_heading: the record's heading random8 & &FFF, d0 the type in A
+.random_heading
+    JSR random_type
+    LDA rng_d0 : STA ob_heading_lo,X
+    LDA rng_d0+1 : AND #&0F : STA ob_heading_hi,X
+    RTS
+\ random_type: random8, d0 the type in A (the ST's d0 holds the type word
+\ there); X the record again
+.random_type
+    STA rng_d0 : STZ rng_d0+1
+    JSR random8
+    LDX record
+    RTS
+.set_silo                                       ; 6: its missile ready, and the reload's count
+    LDX record
+    LDA #&FF : STA ob_flags,X
+    STA ob_timer_a_hi,X                         ; (st.b +14: its first byte alone)
+    OBW ob_timer_b_lo, ob_timer_b_hi, 2000
+    RTS
+
+\ set_towers (&0A9B0): the tower in the layout is the first of a group of
+\ six records: the towers 256 either side of it 4000 on in z, the beam
+\ between the three 2000 on, and two tanks, 1500 either side and 1000
+\ either way in z. Each offset wraps, as the ST's addi.w and subi.w do.
+.set_towers
+    LDX record
+    LDA #&FF
+    STA ob_flags,X : STA ob_flags+1,X : STA ob_flags+2,X : STA ob_flags+3,X
+    LDA #1 : STA ob_timer_c_lo,X                ; the group's own tower (its beam three on)
+    LDA #4 : STA ob_type+1,X : STA ob_type+2,X
+    LDA #11 : STA ob_type+3,X
+    LDA #9 : STA ob_type+4,X : STA ob_type+5,X
+    \ x
+    LDA ob_x_lo,X
+    STA ob_x_lo+1,X : STA ob_x_lo+2,X : STA ob_x_lo+3,X
+    LDA ob_x_hi,X : STA ob_x_hi+3,X
+    DEC A : STA ob_x_hi+1,X
+    INC A : INC A : STA ob_x_hi+2,X
+    LDA ob_x_lo,X : CLC : ADC #LO(1500) : STA ob_x_lo+4,X
+    LDA ob_x_hi,X : ADC #HI(1500) : STA ob_x_hi+4,X
+    LDA ob_x_lo,X : SEC : SBC #LO(1500) : STA ob_x_lo+5,X
+    LDA ob_x_hi,X : SBC #HI(1500) : STA ob_x_hi+5,X
+    \ z
+    LDA ob_z_lo,X : CLC : ADC #LO(2000) : STA ob_z_lo+3,X
+    LDA ob_z_hi,X : ADC #HI(2000) : STA ob_z_hi+3,X
+    LDA ob_z_lo,X : CLC : ADC #LO(4000) : STA ob_z_lo+1,X : STA ob_z_lo+2,X
+    LDA ob_z_hi,X : ADC #HI(4000) : STA ob_z_hi+1,X : STA ob_z_hi+2,X
+    LDA ob_z_lo,X : CLC : ADC #LO(1000) : STA ob_z_lo+4,X
+    LDA ob_z_hi,X : ADC #HI(1000) : STA ob_z_hi+4,X
+    LDA ob_z_lo,X : SEC : SBC #LO(1000) : STA ob_z_lo+5,X
+    LDA ob_z_hi,X : SBC #HI(1000) : STA ob_z_hi+5,X
+    \ the tanks: on their way, heading &400 and &C00, their hits 5 + the
+    \ level (a word's add)
+    LDA #HI(&400) : STA ob_heading_hi+4,X
+    LDA #HI(&C00) : STA ob_heading_hi+5,X
+    LDA #&40 : STA ob_speed_lo+4,X : STA ob_speed_lo+5,X
+    LDA #100 : STA ob_timer_b_lo+4,X : STA ob_timer_b_lo+5,X
+    LDA level : CLC : ADC #5 : STA ob_hits_lo+4,X : STA ob_hits_lo+5,X
+    LDA #0 : ADC #0 : STA ob_hits_hi+4,X : STA ob_hits_hi+5,X
+    \ (the rest of the five as the clear left them)
+    LDA record : CLC : ADC #5 : STA record
+    RTS
+}
+
+\ by_sector: A (a sector) times &290, as the ST's mulu.w keeps it, the
+\ low word, into r. X and Y kept.
+.by_sector
+{
+    ZA_AUTO2 t, r
+    STA t : STZ t+1
+    ASL t : ROL t+1 : ASL t : ROL t+1 : ASL t : ROL t+1 : ASL t : ROL t+1
+    MOVW r, t                                   ; &10
+    ASL t : ROL t+1 : ASL t : ROL t+1 : ASL t : ROL t+1
+    ADDW r, t                                   ; &80
+    ASL t : ROL t+1 : ASL t : ROL t+1
+    ADDW r, t                                   ; &200
+    RTS
+}
+
+\ new_game (&039FA)
+.new_game
+{
+    JSR frame_end_logic                         ; &039B2's, between its pictures
+    JSR random_seed
+    \ the dots scattered round where the title (or the last game) left the
+    \ player, with the turn as it left it, the seed's d0 first
+    JSR dots_scatter
+    LDA #1 : STA level
+    LDA #50 : STA level_msg
+    STZ game_over
+    STZ score : STZ score+1 : STZ score+2 : STZ score+3
+    STZ pending_score : STZ pending_score+1
+    STZ last_kill : STZ last_kill+1
+    STZ last_score_byte
+    LDX #15
+.counts
+    STZ shots_fired,X
+    DEX : BPL counts
+    STZ bolt_timer
+    MOVW sight_x, sight_cx
+    MOVW sight_y, sight_cy
+    STZ sight_dx : STZ sight_dx+1
+    STZ sight_dy : STZ sight_dy+1
+    STZ mouse_x : STZ mouse_x+1
+    STZ mouse_y : STZ mouse_y+1
+    LDA #LO(-20) : STA speed_acc : LDA #HI(-20) : STA speed_acc+1
+    LDA #&FF
+    STA shields : STA shields+1
+    STA energy : STA energy+1
+    STA laser_energy : STA laser_energy+1
+    STZ launch_state : STZ launch_state+1
+    STZ jolt : STZ jolt+1
+    STZ pl_pitch : STZ pl_pitch+1
+    STZ pl_heading : STZ pl_heading+1
+    STZ pl_roll : STZ pl_roll+1
+    \ the player's start: two random32s taken for x and z, then both put
+    \ at &8020, sector 50's
+    JSR random32
+    MOVW pl_x, rng_d0
+    LDA #LO(-48) : STA pl_y : LDA #HI(-48) : STA pl_y+1
+    JSR random32
+    MOVW pl_z, rng_d0
+    LDA #&20 : STA pl_x : STA pl_z
+    LDA #&80 : STA pl_x+1 : STA pl_z+1
+    \ the dots again, round the start, d0 the last random32's
+    JSR dots_scatter
+    LDA #1 : STA missiles
+    STZ missile_view : STZ mv_render : STZ docked
+    LDA #&FF : STA enemies_active
+    STZ cheat
+    RTS
+}
+
+\ random_seed (&0465A): both generators seeded from the word the ST keeps
+\ at $218 (set at start-up, never changed). Its first addx adds the X
+\ flag the palette's fade-in leaves, always 0 (its last add adds 0); the
+\ second, the bit its lsl shifts out. d0 is left with the last byte, over
+\ the fade's 0.
+RANDOM_SEED = &1357
+.random_seed
+    LDA #HI(RANDOM_SEED) : STA rng_lag
+    LDA #LO(RANDOM_SEED) : STA rng_lag+2
+    CLC : ADC rng_lag : STA rng_lag+1
+    ASL A : STA rng_lag+3
+    ADC #LO(RANDOM_SEED) : STA rng_lag+4
+    LSR A : STA rng_lag+5
+    STA rng_d0 : STZ rng_d0+1
+    LDA #&59 : STA rng32
+    LDA #&41 : STA rng32+1
+    LDA #&31 : STA rng32+2
+    STZ rng32+3
+    RTS
+
+\ dots_scatter (&04750): the ground dots at random round the player, x
+\ within &1000 either side and z up to &FFF on, each random8 adding the
+\ word stored before it (the first, the caller's d0). 41 of them, for 40
+\ places: the last lands on the saved copy's first, as the ST's does.
+.dots_scatter
+{
+    ZA_AUTO1 i
+    STZ i
+.dot
+    JSR scatter_x
+    LDX i : STA dot_x_hi,X : LDA rng_d0 : STA dot_x_lo,X
+    JSR scatter_z
+    LDX i : STA dot_z_hi,X : LDA rng_d0 : STA dot_z_lo,X
+    INC i
+    LDA i : CMP #40 : BNE dot
+    JSR scatter_x
+    STA dots_x_hi : LDA rng_d0 : STA dots_x_lo
+    JSR scatter_z
+    STA dots_z_hi : LDA rng_d0 : STA dots_z_lo
+    RTS
+\ a dot's x into rng_d0 (A its high byte): (random8 & &1FFF) - &1000 + x
+.scatter_x
+    JSR random8
+    LDA rng_d0+1 : AND #&1F : SEC : SBC #&10 : STA rng_d0+1
+    ADDW rng_d0, pl_x
+    RTS
+\ and its z: (random8 & &FFF) + z
+.scatter_z
+    JSR random8
+    LDA rng_d0+1 : AND #&0F : STA rng_d0+1
+    ADDW rng_d0, pl_z
+    RTS
+}
+
+INCLUDE "../../build/gen/levels.6502"

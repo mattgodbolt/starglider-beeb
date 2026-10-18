@@ -30,9 +30,12 @@ from, and its result compared with the state the ST's left:
     message  &01F2C  after level_message
     end      &01F30  after frame_end (the post-frame tests' entry)
     level    &01F06  level_start (the level flash and init_objects), when
-                     the post-frame tests go there
+                     the post-frame tests go there, and after newgame
+    newgame  &01F02  the new game's set-up (sub_039FA), from the title
 
-The next frame's `top` is the post-frame tests' result. Every call of
+The next frame's `top` is the post-frame tests' result (or level_start's).
+A new game opens a frame of its own, newgame then level, before its
+first `top`: arm the capture on the title to have it. Every call of
 random8 (&046B2) and random32 (&04692) is logged with d0 (which random8
 adds to its state: some callers leave it over from earlier work) and the
 caller, so a transcription can see what it must reproduce.
@@ -54,6 +57,7 @@ POINTS = [  # (name, text offset)
     ("top", 0x01F10), ("lists", 0x05108), ("render", 0x01F14), ("keys", 0x01F18),
     ("flight", 0x01F1C), ("handlers", 0x01F20), ("animate", 0x01F24), ("collide", 0x01F28),
     ("message", 0x01F2C), ("end", 0x01F30), ("level", 0x01F06),
+    ("newgame", 0x01F02),
 ]
 TAG_POINT = 0x5700                      # + the point's index
 TAG_RANDOM8, TAG_RANDOM32 = 0x5800, 0x5801
@@ -98,9 +102,10 @@ def setup(d):
 
 
 def parse(path):
-    """The frames in a Hatari output, in order, each from a `top` to the
-    next. The first is dropped (the breakpoints were set mid-frame), and
-    a point whose dumps are incomplete is left out."""
+    """The frames in a Hatari output, in order, each from a `top` (or a
+    `newgame`) to the next. The first is dropped (the breakpoints were set
+    mid-frame) unless a new game opened it, and a point whose dumps are
+    incomplete is left out."""
     value = re.compile(r"#(-?\d+)(?:/-?\d+)? \(dec\)")
     dump = re.compile(r"^([0-9A-F]{8}): ((?:[0-9a-f]{2} )+)")
     seg = re.compile(r"^SEG (\S+)")
@@ -135,7 +140,7 @@ def parse(path):
         if TAG_POINT <= tag < TAG_POINT + len(POINTS) and len(pending) == 3:
             close_point()
             name = POINTS[tag - TAG_POINT][0]
-            if name == "top":
+            if name in ("top", "newgame"):
                 if cur is not None:
                     frames.append(cur)
                 cur = {"segment": segment, "vbl": pending[1], "points": {}, "d0": {}, "rng": []}
@@ -152,7 +157,7 @@ def parse(path):
     close_point()
     if cur is not None:
         frames.append(cur)
-    return frames[1:]
+    return frames if frames and "newgame" in frames[0]["points"] else frames[1:]
 
 
 def write(frames, out):

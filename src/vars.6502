@@ -30,6 +30,16 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .mouse_y      SKIP 2        ; {ST P&01844 word} the climb
 .speed_acc    SKIP 2        ; {ST P&01848 word} the speed, negated
 .world_vec    SKIP 2        ; world_call's routine (logic/arith.6502)
+    \ the game's state the panel and the messages show (logic/level.6502
+    \ sets it up)
+.level        SKIP 1        ; {ST $296(a6) word8} 1 to 34
+.score        SKIP 4        ; {ST P&0150C raw 4} eight BCD digits, the most significant first
+.last_kill    SKIP 2        ; {ST $286(a6) word} the last kill's score (BCD)
+.shields      SKIP 2        ; {ST $260(a6) word} &FFFF full
+.energy       SKIP 2        ; {ST $25E(a6) word}
+.laser_energy SKIP 2        ; {ST $28A(a6) word}
+.missiles     SKIP 1        ; {ST $278(a6) word8} carried, 0 to 2
+.bolt_timer   SKIP 1        ; {ST $284(a6) word8} the laser bolt's count, 4 to 0
 .logic_work_end
 ENDSECTION
 
@@ -94,5 +104,18 @@ SECTION LogicAndy, org = ANDY_OBJECTS_END, guard = ANDY_TOP, virtual = TRUE
     \ the frame's end and the post-frame tests (logic/frame.6502)
 
     \ the level change (logic/level.6502)
+.free_stack   SKIP SLOTS    ; {ST &94C slots 140} the free-record stack, free_count of it in use
+.free_count   SKIP 1        ; {ST $25C(a6) word8} (from init_objects on, the ST's top, $9C(a6), is &94C + 4 times it)
+.level_msg    SKIP 1        ; {ST $298(a6) word8} frames of LEVEL n still to show
+.game_over    SKIP 1        ; {ST $12C(a6) word8} 1: the energy's out; 2: the shields
+.pending_score SKIP 2       ; {ST $0D4(a6) word} a kill's score (BCD), for the next world_render to add
+.last_score_byte SKIP 1     ; {ST $2D5(a6) byte} the score's level byte at the last level change
+.enemies_active SKIP 1      ; {ST $2C7(a6) byte} 0 holds the enemies still (cheat mode's M)
+.cheat        SKIP 1        ; {ST $2CD(a6) byte}
+    \ the pilot rating's counts, in this order (new_game clears them together)
+.shots_fired  SKIP 4        ; {ST $0B0(a6) long}
+.hits_scored  SKIP 4        ; {ST $0B8(a6) long}
+.dockings     SKIP 4        ; {ST $0C0(a6) long}
+.hits_on_agav SKIP 4        ; {ST $0C4(a6) long}
 
 ENDSECTION

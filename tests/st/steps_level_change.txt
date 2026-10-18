@@ -1,0 +1,21 @@
+# The level change as play makes it: the score set to 9,900, then the
+# player put 48 units short of a type-3 box (level 1's layout entry 4) at
+# the floor, flying on into it at the start's speed: the ram scores 50.
+# Its explosion runs out, freeing its record onto the free-record stack,
+# and a second ram (entry 8) takes the score to 10,000: two frames on,
+# the level change, with a record exploding.
+wait 38
+key 57
+wait 3
+debug parse {arm}
+debug echo \nSEG change\n
+debug w b $11eca 0 0 $99 0
+debug w w $5c02e $6e30 $ffec $0a10
+debug w w $5c03c 0
+wait 5
+debug w w $5c02e $5720 $ffec $35a0
+debug w w $5c03c 0
+debug echo \nSEG level2\n
+wait 4
+debug echo \nSEG end\n
+quit
