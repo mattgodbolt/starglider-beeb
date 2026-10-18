@@ -41,9 +41,18 @@ IF DEFINED(SPIKE)
 ENDIF
 
 \ erase_init: both screens' windows to be cleared before they're first
-\ drawn, as if their erase lists had overflowed.
+\ drawn, as if their erase lists had overflowed; and the marks wiped, as
+\ until the first frame their pages hold other things (disc.6502's
+\ catalogue, screen_copy's pages).
 .erase_init
     STZ erase_stop : STZ erase_stop+1
+\ marks_wipe: every edge's and vertex's mark 0, and stamp, so the next
+\ stamp is on none of them.
+.marks_wipe
+    LDX #0 : STX stamp
+.wipe
+    STZ edge_mark,X : STZ vert_mark,X
+    INX : BNE wipe
     RTS
 
 \ draw_phase: the draw list's objects into the screen draw_buffer names
@@ -573,10 +582,7 @@ FOR e = 0..8
 NEXT
     \ A new stamp marks this object's edges and vertices.
     INC stamp : BNE stamped
-    LDX #0
-.wipe
-    STZ edge_mark,X : STZ vert_mark,X
-    INX : BNE wipe
+    JSR marks_wipe
     INC stamp
 .stamped
     JSR faces

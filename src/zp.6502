@@ -31,6 +31,9 @@ SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
 .draw_bank  SKIP 1          ; the screen drawn into: 0 main RAM's, ACCCON_X shadow's
 .log_base   SKIP 2          ; where render logs its lines (in BANK_LOG)
 .fields     SKIP 1          ; fields shown, counted by the interrupt (engine.6502)
+    \ the renderer's: the last object's stamp on its edges and vertices,
+    \ which lasts from frame to frame as the marks do
+.stamp      SKIP 1
 ENDSECTION
 
 \ The pool stops short of &FC, where the MOS's IRQ entry keeps A.
@@ -110,7 +113,6 @@ SECTION Work, org = WORK, guard = NMI_PAGE, virtual = TRUE
 .mat_angles SKIP 6
 .ground_valid SKIP 1        ; non-zero: mat is ground_matrix's for ground_h
 .ground_h   SKIP 2
-.stamp      SKIP 1          ; the object's stamp on its edges and vertices
     \ the frame (engine.6502): the screen being drawn, 0 main RAM's or 1
     \ shadow's, whether it's ready to show, and each screen's erase list
 .draw_buffer SKIP 1
