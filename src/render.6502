@@ -888,6 +888,12 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 .edges_far
 {
     LDA sh_nedges : STA edge_i
+    \ each edge to the window's clip, or past it if the object's inside
+    LDA #LO(clip_line.ends) : LDX #HI(clip_line.ends)
+    BIT far_inside : BPL patch
+    LDA #LO(clip_line.ends_in) : LDX #HI(clip_line.ends_in)
+.patch
+    STA call+1 : STX call+2
 .each
     LDY edge_i : BNE test
     RTS
@@ -904,11 +910,9 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     JSR vertex_far
 .b_done
     LDX va : LDY vb
-    BIT far_inside : BPL clip
-    JSR clip_line.ends_in
-    BRA each
-.clip
-    JSR clip_line.ends
+.call
+    JSR clip_line.ends                      ; patched: or clip_line.ends_in
+    ZA_CANCALL clip_line.ends, clip_line.ends_in
     BRA each
 }
 
