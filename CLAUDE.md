@@ -103,6 +103,10 @@ says how):
   against them: the port's drawing is checked against the model.
   `st_profile.py run tests/st/profile_flight.txt DIR` profiles the ST and
   splits its time by area (it needs the patched Hatari: research/st.md).
+  `st_steps.py run tests/st/steps_X.txt build/steps/X ...` captures the
+  logic's state at every routine boundary of the frame loop, and every
+  random number call, for the port's logic to be checked routine by
+  routine (fly on the keys: random8 adds the mouse accumulator).
 - **The Spectrum 128K**: `tools/zx.py`, nm's harness on SkoolKit.
 - **The CPC**: `tools/cpc_emu.py` on the Caprice32 in `../caprice32`.
 - **The C64**: `tools/c64_unfreeze.py` and `tools/c64_run.py` on py65.
