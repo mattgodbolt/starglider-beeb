@@ -55,7 +55,8 @@ SECTION LogicBank, org = &8000, filename = "LOGIC", guard = &C000, cmos = TRUE
     \ From where ANDY ends, and past the world bank's list phase too: Baron
     \ matches its control-flow annotations to their jumps by address alone
     \ (waitingforvsync/baron#29), so a jump here at the address of one of the
-    \ rotations' annotated jumps would take on that jump's targets.
+    \ rotations' annotated jumps would take on that jump's targets. Our #1
+    \ lists what to undo when it's fixed.
     SKIP MAX({ANDY_TOP, world_list_end}) - P%
 INCLUDE "logic/keys.6502"
 INCLUDE "logic/laser.6502"

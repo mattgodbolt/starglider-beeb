@@ -150,6 +150,7 @@ says how):
   targets to any jump at the same address in another. Keep annotated
   jumps' addresses clear of the other banks' code (the logic bank starts
   past the world bank's list phase), or route them through main RAM.
+  Issue #1 lists the workarounds to undo once it's fixed: add to it.
 - Generated code with patched operands: assert that each copy's labels
   sit at the same offsets (`mkrotate.py`) when one routine patches them
   all through a pointer.
