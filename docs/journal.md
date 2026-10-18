@@ -710,3 +710,40 @@ each step still clears every object's drawn and near flags below the
 slot count, as the ST does, rather than only the last lists' (about 750
 cycles a step, against the object table's exact check).
 
+### No y' for the approximated, and B from R's high byte
+
+Decisions 21 and 22 were built and measured on 2026-10-18. Before building
+21, the ST's code was searched for every read of an object's camera-space
+y (+$2A). There are eight:
+
+- the two draw loops, enemy fire and the player's laser read only objects
+  on the draw list, which are always rotated exactly;
+- the scanners load y' and overwrite it before using it;
+- the collisions read it, but test z and x first, and an approximated
+  object is always out of the box on one of those.
+
+So `rotate_approx` now makes only x' and z', and the relevance test asks
+only about those. In flight the list phase falls from 28,856 to 25,487
+cycles a step on average; steps where the craft is banked or pitched
+fall from 56,872 to 49,628, and the worst from 53,419 to 45,426. The same
+objects are rotated exactly as before. The approximate path also got its
+own way out of the loop: while it joined the exact path, baron took y'
+to be read there, and its zero page rose from &F4 to &FA.
+
+Of decision 22's two trims, far objects' B now comes from R's high byte,
+rounded: two byte products where proj_x has four. That saves 1,229
+cycles a frame in flight and 858 at the towers, about half the estimate,
+as the rest of B's set-up stays, and no edge comes to be 2 pixels or more
+from the ST's. The room came from moving `kmul` into the world bank, as
+only ground_matrix's build calls it, after paging that bank. Dropping
+proj_x's lowest product from a shift of 17 failed the silo tunnel: its
+long level lines cross the window's bottom edge, where a pixel's change in
+height slid one clipped end 16 pixels. From a shift of 18 it would pass,
+for 693 cycles in flight, 1,137 at the towers and 136 lost docked, but
+it is left out.
+
+| `make spike`, mean a frame | Flight | Towers | Docked |
+|---|---|---|---|
+| Camera and lists | 34,574 → 31,105 | 16,114 → 15,668 | 1,283 → 1,260 |
+| Objects | 99,226 → 97,997 | 163,400 → 162,542 | 128,303 → 128,341 |
+
