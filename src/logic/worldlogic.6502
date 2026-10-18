@@ -36,6 +36,7 @@ PROJ_SHIFT = 7
 \ the missile view's (L_05248).
 .world_lists
 {
+    STZ dots_ran                        ; (for the drawing: until ground_dots runs)
     LDA mv_render : BEQ normal
     JMP missile_lists
 .normal
@@ -152,10 +153,13 @@ PROJ_SHIFT = 7
 \ a dot within the approximation's bound of the cone's edges. The
 \ approximation is the dots' own (dot_approx). A dot found surely in view
 \ keeps that decision, unrotated, until the camera has moved enough since
-\ to bring it to an edge (dot_setup's drift, dot_keep's margin).
+\ to bring it to an edge (dot_setup's drift, dot_keep's margin). The ST
+\ plots each dot in view as it goes: the drawing (view.6502's dots_draw)
+\ is told which, in dot_seen.
 .ground_dots
 {
     ZA_AUTO1 dot, sines
+    LDA #&FF : STA dots_ran
     JSR dot_setup
     STZ sines
     LDX #0
@@ -181,8 +185,10 @@ PROJ_SHIFT = 7
 .in_view
     \ projected: d0 takes the projection's shift (&0480A)
     LDA #PROJ_SHIFT : STA rng_d0 : STZ rng_d0+1
+    LDX dot : LDA #&FF : STA dot_seen,X
     BRA next
 .outside
+    LDX dot : STZ dot_seen,X
     LDA sines : BNE placed
     INC sines
     JSR respawn_sines

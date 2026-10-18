@@ -12,7 +12,11 @@
 \ world_render, then the logic), so a frame shows what the ST drew at that
 \ step.
 \
-\ The game supplies step_logic.
+\ The game supplies step_logic, and the view's drawing besides the
+\ objects: view_under, in the draw phase before them (the gunsight, the
+\ ground dots), and view_overlays, what the ST draws from the step's logic
+\ (the laser bolt, the enemies' shots), drawn after the last step's logic
+\ onto its frame, before it's shown (call 2, option B).
 \ ***************************************************************************
 
 STEP_FIELDS = 4                     ; decision 4: 12.5 steps a second
@@ -125,11 +129,13 @@ ASSERT irq_handler < &3000
     INC steps+1
 .counted_step
     LDA due : BNE step
+    JSR view_overlays                           ; onto the last step's frame
+    JSR frame_show
     BRA wait
 }
 
-\ frame: the lists' objects drawn into the screen not shown, which the
-\ next vertical sync shows.
+\ frame: the lists' objects drawn into the screen not shown, which
+\ frame_show has the next vertical sync show.
 .frame
 {
 .shown
@@ -139,12 +145,18 @@ ASSERT irq_handler < &3000
     TAX : LDA buffer_bank,X : STA draw_bank
     JSR erase_screen
 .erased
-    JSR draw_phase
+    JSR draw_begin
+    JSR view_under
+    JSR draw_objects
+    JMP draw_end
+.buffer_bank
+    EQUB 0, ACCCON_X                            ; main RAM's screen, shadow's
+}
+.frame_show
+{
     LDA #1 : STA frame_ready
     INC frames : BNE counted
     INC frames+1
 .counted
     RTS
-.buffer_bank
-    EQUB 0, ACCCON_X                            ; main RAM's screen, shadow's
 }

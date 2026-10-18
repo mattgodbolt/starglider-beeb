@@ -182,6 +182,12 @@ MODELS = P% - model_types
     RTS
 }
 
+\ view_under, view_overlays (the engine's): the models have no flight to
+\ draw besides them (the game's are code.6502's, with the logic).
+.view_under
+.view_overlays
+    RTS
+
 \ set_model: model_i's type in slot 0, two radii from the camera.
 .set_model
 {

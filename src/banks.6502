@@ -63,5 +63,6 @@ INCLUDE "logic/laser.6502"
 INCLUDE "logic/collide.6502"
 INCLUDE "logic/frame.6502"
 INCLUDE "logic/level.6502"
+INCLUDE "view.6502"
 ENDSECTION
 ENDIF

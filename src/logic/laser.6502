@@ -28,6 +28,7 @@ LASER_SHIFT = PROJ_SHIFT
 \ window moves.
 .world_after
 {
+    STZ bolt_shown                      ; (for the drawing: until player_laser draws it)
     LDA mv_render : BEQ normal
     LDA m_iris : BNE done
     MOVW draw_p, m_pitch : MOVW draw_h, m_heading
@@ -85,14 +86,19 @@ ZA_AUTO2 draw_p, draw_h, draw_r
 \ player_laser (&0866C): fired (not docked, with energy, a fire key held
 \ and no bolt in flight) at the sight; the bolt's count, stepped more
 \ slowly with fewer drawn; at its end the first drawn object whose
-\ projected box holds the target is hit.
+\ projected box holds the target is hit. The ST draws the bolt whenever
+\ it counts (&087FA), its count as it leaves it: the drawing is told so
+\ (view.6502's bolt_draw).
 .player_laser
 {
     LDA bolt_timer : BNE count
-    LDA laser_energy : ORA laser_energy+1 : BEQ done
-    LDA docked : BNE done
+    LDA laser_energy : ORA laser_energy+1 : BEQ idle
+    LDA docked : BNE idle
     LDA key_state+&74 : ORA key_state+&1C : ORA key_state+&52 : ORA key_state+&72
-    BEQ done
+    BNE fire
+.idle
+    RTS
+.fire
     LDA #4 : STA bolt_timer
     MOVW bolt_target_x, sight_x
     MOVW bolt_target_y, sight_y
@@ -110,6 +116,7 @@ ZA_AUTO2 draw_p, draw_h, draw_r
 .empty
     STZ laser_energy
 .count
+    LDA #&FF : STA bolt_shown
     \ every step with 6 or more drawn, odd frames with 3-5, 3 in 4 with 0-2
     LDA draw_n : CMP #3 : BCS three
     LDA frame_count : AND #3 : BEQ done

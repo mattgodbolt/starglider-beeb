@@ -56,9 +56,23 @@ ENDIF
     RTS
 
 \ draw_phase: the draw list's objects into the screen draw_buffer names
-\ (draw_bank set to match), each line onto its erase list (memory.6502):
-\ line_plot's stores moved to that screen's pages.
+\ (draw_bank set to match), each line onto its erase list (memory.6502).
+\ (The disc's frame, engine.6502, draws more between them.)
+IF DEFINED(SPIKE)
 .draw_phase
+    JSR draw_begin
+    JSR draw_objects
+    JMP draw_end
+ENDIF
+
+\ draw_begin: line_plot's stores moved to the erase list of the screen
+\ draw_buffer names (to that screen's pages), from its start; draw_end
+\ keeps where it got to. erase_more carries the list on from there, for
+\ more drawn onto the same frame (view.6502's over_draw), and erase_keep
+\ keeps it again.
+.draw_begin
+    LDA #ERASE_LINES : STA erase_i
+.erase_aim
     LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
     ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
     STA line_plot.f_lo0+2 : STA line_plot.f_lo1+2 : ADC #2
@@ -67,8 +81,15 @@ ENDIF
     STA line_plot.f_dx+2 : ADC #2
     STA line_plot.f_dy0+2 : STA line_plot.f_dy1+2 : ADC #2
     STA line_plot.f_code+2
-    LDA #ERASE_LINES : STA erase_i
-    JSR draw_objects
+    RTS
+IF DEFINED(SPIKE)                   ; (on the disc with the flight layer)
+.erase_more
+    LDX draw_buffer
+    LDA erase_stop,X : STA erase_i
+    BRA erase_aim
+ENDIF
+.draw_end
+.erase_keep
     LDX draw_buffer
     LDA erase_i : STA erase_stop,X
     RTS
