@@ -657,6 +657,10 @@ input [measured].
 
 ### The cockpit
 
+*`st-panel.md` is the full inventory of what the panel draws (gauges,
+scanner, numbers, gunsight, messages, colour 0's flashes), read later and
+more carefully than this section; where they disagree, it holds.*
+
 RESULT.TRA is the cockpit [measured]: the flight screenshot's palette and
 panel match it, and every frame clears the 288 x 119 window over its side
 walls. Docked and on the end screen the whole picture shows.

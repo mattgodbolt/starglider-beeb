@@ -13,7 +13,9 @@ their tools and docs are the model.
   of work.
 - `docs/journal.md`: how it got here, in order. Add to it as you go.
 - `docs/research/*.md`: the reverse engineering, one file per version;
-  `st-logic.md` is the ST's game logic, inventoried for transcription.
+  `st-logic.md` is the ST's game logic, inventoried for transcription;
+  `st-panel.md` everything the ST draws besides the 3D (the panel, the
+  gunsight, the messages).
 - `docs/decisions.md`: every call the port makes that the original
   didn't, numbered, with the reason. Nothing changes quietly.
 
