@@ -80,16 +80,17 @@ INCLUDE "../build/gen/sight.6502"
 
 \ ---------------------------------------------------------------------------
 \ dots_draw (&047AA): the dots this step's ground_dots kept in view (as it
-\ records in dot_seen), each rotated into camera space, projected by the
-\ drawing's projection (proj_z, proj_x) and plotted if that's inside the
-\ window (strictly, as the ST tests it), as the ST plots it (dot_put), in
-\ the ST's colour 2. A dot whose offset from the camera is under NEAR_D on
-\ both x and z is rotated exactly (rotate_exact, as the logic does), the
-\ rest by ground_x, ground_y and ground_z (build/gen/ground.6502), within a
-\ pixel, a row at a time, depth first, so that one outside the window in x
-\ needs no y. In the missile view the camera is the missile, and the
-\ window its own (L_05248), its bottom where the window's opening leaves
-\ it: the dots are only drawn when it's open.
+\ records in dot_seen), each rotated into camera space, projected and
+\ plotted if that's inside the window (strictly, as the ST tests it), as
+\ the ST plots it (dot_put), in the ST's colour 2. A dot whose offset from
+\ the camera is under NEAR_D on both x and z is rotated exactly
+\ (rotate_exact, as the logic does) and projected by the drawing's
+\ projection (proj_z, proj_x); the rest are rotated by ground_x, ground_y
+\ and ground_z (build/gen/ground.6502), within a pixel, a row at a time,
+\ depth first, so that one outside the window in x needs no y, and
+\ projected by their own (far_x, far_y). In the missile view the camera is
+\ the missile, and the window its own (L_05248), its bottom where the
+\ window's opening leaves it: the dots are only drawn when it's open.
 NEAR_D = 1024
 ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
 .dots_draw
@@ -135,6 +136,10 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     LDA colour_map+2 : STA dot_colour
     LDA #39 : STA dot
 .each
+    \ (far_x's far_pv reads x' alone, but baron takes it to read y' too,
+    \ before ground_y makes it: without this it keeps y' from one dot to
+    \ the next)
+    ZA_DISCARD rot_acc
     LDX dot
     LDA dot_seen,X : BEQ next
     LDA dot_x_lo,X : SEC : SBC at : STA rot_d
@@ -150,9 +155,9 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
 .far
     JSR ground_z
     JSR ground_x
-    JSR dot_x : BCS next
+    JSR far_x : BCS next
     JSR ground_y
-    JSR dot_y : BCS next
+    JSR far_y : BCS next
 .put
     JSR dot_put
 .next
@@ -202,6 +207,7 @@ WIN_MISSILE = 8
     JSR proj_z
     MOVW px, rot_acc
     JSR proj_x
+.win
     LDA pq : CLC : ADC #LO(VIEW_CX) : STA line_x0
     LDA pq+1 : ADC #HI(VIEW_CX) : STA line_x0+1
     LDA pq
@@ -225,6 +231,7 @@ WIN_MISSILE = 8
 {
     MOVW px, rot_acc+2
     JSR proj_x
+.win
     LDA pq : CLC : ADC #LO(VIEW_CY) : STA line_y0
     LDA pq
     CLC
@@ -241,6 +248,194 @@ WIN_MISSILE = 8
     SBC #0
     RTS
 }
+
+\ far_x, far_y: dot_x and dot_y for a far dot (NEAR_D or more on x or z),
+\ which can only be in the window 512 or more deep: |d| is
+\ 1024 or more, and |x| < 1.25 z with |y| < 0.47 z (the view's window, the
+\ wider) has |d| under 1.67 z. The depth's reciprocal is made for both
+\ (far_recip), and each projected by it (far_pv).
+.far_x
+{
+    LDA rot_acc+5 : BMI out
+    CMP #HI(512) : BCC out
+    STA pz+1 : LDA rot_acc+4 : STA pz
+    \ outside if x < -z (128 x / z under -128) or x >= 1.25 z (160 up),
+    \ whichever window it is
+    LDA rot_acc+1 : BPL x_pos
+    LDA rot_acc : CLC : ADC pz : LDA rot_acc+1 : ADC pz+1 : BMI out
+    CLC : RTS
+.x_pos
+    \ 1.25 z, which fits a word
+    LDA pz+1 : LSR A : STA px+1
+    LDA pz : ROR A : LSR px+1 : ROR A
+    CLC : ADC pz : STA px
+    LDA px+1 : ADC pz+1 : STA px+1
+    LDA rot_acc : CMP px : LDA rot_acc+1 : SBC px+1 : BCS out
+    CLC : RTS
+.out
+    SEC : RTS
+}
+\ far_y: and outside if y < -z / 2 or y >= z / 2 (|128 y / z| 64 up);
+\ otherwise both projected, and C set if either is outside the window.
+.far_y
+{
+    LDA pz+1 : LSR A : STA px+1
+    LDA pz : ROR A : STA px
+    LDA rot_acc+3 : BPL y_pos
+    LDA rot_acc+2 : CLC : ADC px : LDA rot_acc+3 : ADC px+1 : BMI out
+    BRA in
+.y_pos
+    LDA rot_acc+2 : CMP px : LDA rot_acc+3 : SBC px+1 : BCS out
+.in
+    JSR far_recip
+    LDX #0 : JSR far_pv
+    JSR dot_x.win : BCS out
+    LDX #2 : JSR far_pv
+    JMP dot_y.win
+.out
+    SEC : RTS
+}
+ASSERT LO(512) = 0
+
+\ far_recip: for the depth z (rot_acc+4, 512 up, so its shift Y is 1 to
+\ 6), R = 2^24 / (m + f) for z = (m + f) 2^Y, m its 9-bit mantissa and f
+\ the rest (recip.6502's 2^24 / m, between m's and m + 1's in proportion
+\ to f: each step under 256, as 2^24 / m^2 is from m = 256), into far_pv's
+\ reads, which then take Y + 1 bits off its high word. It's that much
+\ nearer the ST's divide than proj_z's 2^24 / (m + 1/2), which is out by
+\ up to 1/512 of the projection.
+.far_recip
+{
+    ZA_AUTO1 m, f
+    LDX rot_acc+5
+    LDY zhigh_sh,X
+    LDA far_shift_lo-1,Y : STA far_pv.shift+1
+    LDA far_shift_hi-1,Y : STA far_pv.shift+2
+    LDA rot_acc+4 : STA m
+    STZ f
+    TXA
+.down
+    LSR A : ROR m : ROR f               ; (the rest into f, from its top)
+    DEY : BNE down
+    \ the step to m + 1's (m's low byte 255: 2^24 / 512, whose low byte is 0)
+    LDY m
+    LDA rcpx_lo,Y
+    INY : BEQ last
+    SEC : SBC rcpx_lo,Y
+.last
+    \ R(m) less the step's share, f step / 256, its high byte read without
+    \ the borrow from its low byte's (so 1 more at most: 1 in 2^15 of R)
+    TAY
+    LDA f : STA m_sqhi : EOR #&FF : STA m_nghi
+    SEC
+    LDA (m_sqhi),Y : SBC (m_nghi),Y
+    STA t
+    LDY m
+    LDA rcpx_lo,Y : SEC : SBC t
+    STA far_pv.a+1 : STA far_pv.g+1 : STA far_pv.i+1
+    EOR #&FF
+    STA far_pv.b+1 : STA far_pv.h+1 : STA far_pv.j+1
+    LDA rcpx_hi,Y : SBC #0              ; (the borrow, kept through the EOR)
+    STA far_pv.c+1 : STA far_pv.e+1 : STA far_pv.k+1 : STA far_pv.m+1
+    EOR #&FF
+    STA far_pv.d+1 : STA far_pv.f+1 : STA far_pv.l+1 : STA far_pv.n+1
+    RTS
+.t  SKIP 1                              ; (in the bank's own RAM)
+}
+
+\ far_pv: pq = 128 v / z, truncated towards zero, for v = rot_acc+X (x' or
+\ y') and z far_recip's: |v| R >> (17 + Y), as proj_x makes it.
+.far_pv
+{
+    ZA_AUTO1 vl, vh, u0, u1, w0, p1
+    LDA rot_acc+1,X : ZA_INDEXEDBY {0, 2}
+    STA far_sign
+    BPL pos
+    LDA #0 : SEC : SBC rot_acc,X : ZA_INDEXEDBY {0, 2}
+    STA vl
+    LDA #0 : SBC rot_acc+1,X : ZA_INDEXEDBY {0, 2}
+    STA vh
+    BRA magnitude
+.pos
+    STA vh : LDA rot_acc,X : ZA_INDEXEDBY {0, 2}
+    STA vl
+.magnitude
+    \ |v| R >> 8 into A:pq:p1, as proj_x has it
+    LDY vl
+    SEC
+.c  LDA sqr_lo,Y
+.d  SBC neg_lo,Y
+    STA p1
+.e  LDA sqr_hi,Y
+.f  SBC neg_hi,Y
+    STA pq
+.a  LDA sqr_hi,Y
+.b  SBC neg_hi,Y
+    CLC : ADC p1 : STA p1
+    BCC c1
+    INC pq
+.c1
+    LDY vh : BNE high
+    TYA
+    BRA shift
+.high
+    SEC
+.g  LDA sqr_lo,Y
+.h  SBC neg_lo,Y
+    STA u0
+.i  LDA sqr_hi,Y
+.j  SBC neg_hi,Y
+    STA u1
+.k  LDA sqr_lo,Y
+.l  SBC neg_lo,Y
+    STA w0
+.m  LDA sqr_hi,Y
+.n  SBC neg_hi,Y
+    TAX
+    CLC : LDA p1 : ADC u0
+    LDA pq : ADC u1
+    BCC c2
+    INX
+    CLC
+.c2
+    ADC w0 : STA pq
+    BCC c3
+    INX
+.c3
+    TXA
+    \ the high word, A:pq, >> (Y + 1)
+.shift
+    \ (patched by far_recip: each way in is on the way from right7, which
+    \ is all baron need follow, so the jump needs no ZA_CANJUMP, which in
+    \ this bank would lend its targets to another bank's jump at its
+    \ address: baron#29)
+    JMP right7
+.right7
+    LSR A : ROR pq
+.right6
+    LSR A : ROR pq
+.right5
+    LSR A : ROR pq
+.right4
+    LSR A : ROR pq
+.right3
+    LSR A : ROR pq
+.right2
+    LSR A : ROR pq
+    LSR A : ROR pq
+    STA pq+1
+    BIT far_sign : BPL done
+    LDA #0 : SEC : SBC pq : STA pq
+    LDA #0 : SBC pq+1 : STA pq+1
+.done
+    RTS
+}
+\ far_pv's ways in by Y (1 to 6: Y + 1 bits)
+.far_shift_lo
+    EQUB LO(far_pv.right2), LO(far_pv.right3), LO(far_pv.right4), LO(far_pv.right5), LO(far_pv.right6), LO(far_pv.right7)
+.far_shift_hi
+    EQUB HI(far_pv.right2), HI(far_pv.right3), HI(far_pv.right4), HI(far_pv.right5), HI(far_pv.right6), HI(far_pv.right7)
+.far_sign SKIP 1                        ; v's high byte
 
 \ dot_put (&0976E): the dot at (line_x0, line_y0), rot_acc+4 deep, as the
 \ ST plots it: a column of a pixel, or 2 down when it's under &1000 deep,
