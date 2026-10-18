@@ -752,6 +752,7 @@ ENDMACRO
     WORLD xf_acc+2, ty, cvy, v_ylo, v_yhi
     WORLD xf_acc+4, tz, pz, v_zlo, v_zhi
     \ behind the near plane if z < NEAR_Z (a byte), from z's high byte
+    ASSERT NEAR_Z < 256
     BMI behind
     BNE front
     LDA pz : CMP #NEAR_Z : BCC behind
