@@ -157,4 +157,6 @@ says how):
   the brief record what the originals are, with their own addresses.)
 - Never label a statement "honest" or "candid". Size work by what it
   touches, never by time. Use they/them for Matt.
+- Before committing, run `make check` on its own and look at its exit
+  status: piped through grep in an `&&` chain, a failure goes unseen.
 - Every agent brief carries these rules.
