@@ -41,7 +41,6 @@ ENDMACRO
 
 .object_handlers
 {
-    STZ mine_text                       ; (the port's: a mine's handler sets it)
     LDX #0
     LDA n_slots : BEQ done
 .each
@@ -104,15 +103,17 @@ ENDMACRO
 
 \ ---------------------------------------------------------------------------
 \ h_mine (&07AC6): drawn and within &800 ahead (the N flags of z - &F800
-\ and z - &800, each constant's low byte 0) it warns or goes off; then it
-\ spins and bobs, the pyramid (type 2 alone) turning back at each end of
-\ its bob, the others pitching on to a half turn first.
+\ and z - &800, each constant's low byte 0) it warns or goes off
+\ (collide.6502's mine_proximity, in the logic's bank); then it spins and
+\ bobs, the pyramid (type 2 alone) turning back at each end of its bob,
+\ the others pitching on to a half turn first.
 .h_mine
 {
     LDA ob_drawn,X : BEQ motion
     LDA ob_cz_hi,X : CMP #&F8 : BMI motion
     CMP #&08 : BPL motion
-    JSR mine_near
+    LDA #LO(mine_proximity) : STA logic_vec : LDA #HI(mine_proximity) : STA logic_vec+1
+    JSR logic_bank_call
     LDX h_slot
 .motion
     LDA ob_heading_lo,X : SEC : SBC #&40 : STA ob_heading_lo,X
@@ -139,40 +140,6 @@ ENDMACRO
     LDA ob_timer_c_hi,X : STA ob_timer_a_hi,X
     LDA #0 : SEC : SBC ob_timer_b_lo,X : STA ob_timer_b_lo,X
     LDA #0 : SBC ob_timer_b_hi,X : STA ob_timer_b_hi,X
-    RTS
-}
-
-\ mine_near (&07B28): not while "LEVEL n" shows or docked. Within &600
-\ (z - &600's N flag) it goes off: in the missile view the player's
-\ missile has hit it and the view ends; otherwise a jolt to the roll, the
-\ shields' loss and a flash. Further, the ST prints its warning (the
-\ drawing's). The ST keeps its registers round all of it, so rng_d0 here
-\ is only random8's input.
-.mine_near
-{
-    ZA_AUTO2 jolted
-    LDA level_msg : ORA level_msg+1 : BNE done
-    LDA docked : BNE done
-    LDA ob_cz_hi,X : CMP #&06 : BPL done
-    LDA #&FF : STA ob_exploding,X : STZ ob_explosion,X
-    LDA missile_view : BEQ hurt
-    LDA #&10 : STA m_life : STZ m_life+1
-    STZ m_iris : STZ m_iris+1
-.done
-    RTS
-.hurt
-    JSR random8
-    LDA rng_d0 : AND #&3E : SEC : SBC #&20 : STA jolted
-    LDA #0 : SBC #0 : STA jolted+1
-    ADDW jolt, jolted
-    LDA shields : SEC : SBC #LO(&3A98) : STA shields
-    LDA shields+1 : SBC #HI(&3A98) : STA shields+1
-    BCS shielded
-    STZ shields : STZ shields+1
-.shielded
-    LDA #1 : LDX #1
-    JSR sfx_start
-    LDA #LO(&333) : STA flash0 : LDA #HI(&333) : STA flash0+1
     RTS
 }
 

@@ -49,6 +49,10 @@ SECTION PanelAndy, org = logic_andy_end, guard = ANDY_TOP, virtual = TRUE
     \ the heading in degrees, for the angle it was last worked out for
 .head_for     SKIP 2
 .head_deg     SKIP 2
+    \ what world_render prints on the frame drawn (texts_note)
+.note_texts   SKIP 1        ; TX_*
+.note_colour  SKIP 1        ; the colour its last print leaves
+.note_count   SKIP 2        ; the countdown's number
     \ this frame's
 .want         SKIP 22       ; the glyphs the cells should show
 .num_text     SKIP 6        ; a number's digits, as print_string takes them

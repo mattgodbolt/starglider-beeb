@@ -31,12 +31,16 @@
 }
 
 \ panel_draw: the panel drawn into the screen being drawn (draw_buffer,
-\ draw_bank), after its 3D. panel_reset: both screens' panels to be drawn
-\ whole, as the cockpit's copy leaves them. Each pages the logic's bank
-\ with ANDY, as the logic runs, and puts back the bank it found.
+\ draw_bank), after its 3D. panel_texts: the texts the ST prints on that
+\ frame, after the step's logic. panel_reset: both screens' panels to be
+\ drawn whole, as the cockpit's copy leaves them. Each pages the logic's
+\ bank with ANDY, as the logic runs, and puts back the bank it found.
 ZA_AUTO2 panel_vec
 .panel_draw
     LDA #LO(panel_frame) : LDX #HI(panel_frame)
+    BRA panel_call
+.panel_texts
+    LDA #LO(panel_messages) : LDX #HI(panel_messages)
     BRA panel_call
 .panel_reset
     LDA #LO(panel_init) : LDX #HI(panel_init)
@@ -49,6 +53,6 @@ ZA_AUTO2 panel_vec
     RTS
 .panel_jump
     JMP (panel_vec)
-    ZA_CANJUMP panel_frame, panel_init
+    ZA_CANJUMP panel_frame, panel_messages, panel_init
 
 ASSERT P% <= &3000

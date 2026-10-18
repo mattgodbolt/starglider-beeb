@@ -7,8 +7,9 @@
 \ Exactly the ST's (docs/research/st-logic.md, "The main loop, the
 \ post-frame tests, game over, the level change and init_objects" and
 \ "The frame's end, the score, the interrupts and world_render's logic").
-\ What the ST prints, the panel draws (panel.6502): level_text, dock_text
-\ and collide.6502's mine_text say when, to the next frame drawn.
+\ What the ST prints, the panel draws (panel.6502) on the frame the step
+\ drew, before post_frame runs: level_text and collide.6502's mine_text
+\ say when; the docked texts it tests for as post_frame does.
 \ ***************************************************************************
 
 \ level_message (&0260C): 'LEVEL n' and 'YOU NOW HAVE MANUAL CONTROL!' on
@@ -49,7 +50,7 @@
 \ world_render sets its own before its first.
 .post_frame
 {
-    STZ dock_text
+    STZ dock_text : STZ mine_text
     LDA level_changed : BEQ steady
     RTS
 .steady

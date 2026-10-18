@@ -75,7 +75,7 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .refuelling   SKIP 1        ; {ST $2C3(a6) byte} in a beam whose test passed
 .level_text   SKIP 1        ; the port's own: non-zero when this frame shows 'LEVEL n' (level_message)
 .dock_text    SKIP 1        ; the port's own: non-zero when the docked texts show (post_frame)
-.mine_text    SKIP 1        ; the port's own: a mine's text this step (mine_proximity), 0 from object_handlers
+.mine_text    SKIP 1        ; the port's own: a mine's text this frame (mine_proximity), 0 from post_frame
 .game_over    SKIP 2        ; {ST $12C(a6) word} 1: the energy ran out; 2: the shields
 .sample_clip  SKIP 1        ; the port's own: the speech sample_start plays (the ST's &A0, a pointer)
 .sample_len   SKIP 4        ; {ST &0A4 long} the ST's length of it, in bytes

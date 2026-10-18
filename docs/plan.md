@@ -178,7 +178,7 @@ owns.
 | HAZEL | the multiply and reciprocal tables, the line drawer, the screen's clear, the vertex transforms |
 | ANDY | *as built:* the object fields only the logic reads, and the logic's variables (`src/vars.6502`): paged in with the logic's banks, over their first 4K |
 | Bank 4 | the shapes |
-| Bank 5 | the world: below &9000 the list phase (run with ANDY out), from &9000 the sine table and the logic that reads it (`world_render`'s, the flight, the handlers) |
+| Bank 5 | the world: below &9000 the list phase (run with ANDY out), from &9000 the sine table and the logic that reads it (`world_render`'s, the flight, the handlers); and `kmul`, the drawing's ground matrix product, whose only caller has the bank paged |
 | Bank 6 | *as built:* the rest of the logic, from &9000 (the keys, collisions, the frame's end, the level change); below &9000, later, what play draws without ANDY (panel, text) |
 | Bank 7 | the loading area: flight's speech in flight; the docked screens and their clip when docked; the front end and the title outside play; the cockpit picture on its way to the screens |
 

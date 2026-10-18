@@ -40,11 +40,9 @@ ENDIF
 INCLUDE "sine.6502"
 ASSERT sine_qlo >= ANDY_TOP AND sincos >= ANDY_TOP  ; the logic reads them with ANDY paged
 INCLUDE "logic/animate.6502"
-IF DEFINED(SPIKE)                   ; (on the disc with the flight layer)
 INCLUDE "logic/flight.6502"
 INCLUDE "logic/worldlogic.6502"
 INCLUDE "logic/handlers.6502"
-ENDIF
 ENDSECTION
 
 \ The logic's bank: the rest of the game's logic, which needn't read the
@@ -62,12 +60,10 @@ INCLUDE "panel_data.6502"
 IF P% < world_list_end
     SKIP world_list_end - P%
 ENDIF
-IF DEFINED(SPIKE)                   ; (on the disc with the flight layer)
 INCLUDE "logic/keys.6502"
 INCLUDE "logic/laser.6502"
 INCLUDE "logic/collide.6502"
 INCLUDE "logic/frame.6502"
 INCLUDE "logic/level.6502"
-ENDIF
 INCLUDE "panel.6502"
 ENDSECTION

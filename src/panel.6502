@@ -8,16 +8,18 @@
 \ The ST redraws all of it every frame (waveforms &05872, and its prints).
 \ Here each screen remembers what it shows (ps_*, by draw_buffer), and
 \ only what differs is drawn into the screen being drawn (decision 14), by
-\ the ST's formulas on the state its frame draws from: panel_frame runs
+\ the ST's formulas on the state its frame draws from. panel_frame runs
 \ after the frame's 3D, between the step's lists and its logic, where the
-\ ST's waveforms runs in world_render. What world_render's logic printed,
-\ world_lists records in world_text; what the logic after it prints, it
-\ records as it goes (level_text, mine_text, dock_text), and the next frame
-\ drawn shows it. Texts the ST prints before its 3D are ORed in here, as
-\ its lines are ORed over them; those it prints after are opaque, so lines
-\ don't show through them, and each frame they show they're drawn again,
-\ over what the frame's lines did to them. A text gone has its glyphs'
-\ pixels cleared, with those of the frame's lines they cover.
+\ ST's waveforms runs in world_render, and notes what world_render prints
+\ (world_lists records some in world_text). panel_messages draws the
+\ texts after the step's logic, beside what the logic draws (decision
+\ 16): those world_render printed, and the logic's (level_text,
+\ mine_text, and the docked menu by post_frame's test). Texts the ST
+\ prints before its 3D are ORed in, as its lines are ORed over them;
+\ those it prints after are opaque, so lines don't show through them, and
+\ each frame they show they're drawn again, over what the frame's lines
+\ did to them. A text gone has its glyphs' pixels cleared, with those of
+\ the frame's lines they cover.
 \
 \ panel_draw (cockpit.6502) calls it with the logic's bank and ANDY paged,
 \ so it reads the logic's variables where they lie, and keeps its own in
@@ -60,7 +62,8 @@ ZA_AUTO1 pt, pv             ; scratch
     RTS
 
 \ panel_frame: the panel drawn into the screen draw_buffer names, what this
-\ screen shows of it changed to what this frame's state shows.
+\ screen shows of it changed to what this frame's state shows; and what
+\ world_render prints noted, for panel_messages to draw.
 .panel_frame
 {
     LDA draw_buffer : STA pb
@@ -72,7 +75,7 @@ ZA_AUTO1 pt, pv             ; scratch
     JSR gauges
     JSR scanner
     JSR numbers
-    JSR messages
+    JSR texts_note
     LDA draw_bank : TRB acccon
     RTS
 }
@@ -775,16 +778,17 @@ NEXT
 }
 
 \ ---------------------------------------------------------------------------
-\ messages: the texts this frame shows (now) against those this screen
-\ shows: each gone, or showing other words, has its glyphs' pixels cleared;
-\ then each shown is drawn, in the order the ST prints them.
-.messages
+\ texts_note: what world_render prints on this frame, decided as it is,
+\ before the step's logic (panel_messages draws it after): the colour its
+\ last print leaves (docs/research/st-panel.md, section 7: the refuelling's
+\ white; else, the near list not being empty, the missile count's orange;
+\ else the launch's white, or the score's yellow), its texts (world_lists'
+\ world_text, the countdown only on frames with bit 2 of the frame count
+\ clear once below &38; MISSILE VIEW while the window opens or closes at
+\ a step of &11 or more, &05266; the refuelling's, in the normal view,
+\ &05188), and the countdown's number.
+.texts_note
 {
-    ZA_AUTO1 now, old, gone
-    \ the colour the ST's last print leaves (docs/research/st-panel.md,
-    \ section 7): the refuelling's white; else, the near list not being
-    \ empty, the missile count's orange; else the launch's white, or the
-    \ score's yellow
     LDA refuelling : BNE white
     LDA near_n : BNE orange
     LDA world_text : AND #TX_LAUNCH : BNE white
@@ -796,34 +800,53 @@ NEXT
 .white
     LDA PC_TEXT_15
 .current
-    STA cur_colour
-    \ what world_render printed (world_lists' world_text), the countdown
-    \ only on frames with bit 2 of the frame count clear once below &38
-    LDA world_text : AND #TX_DOCKING OR TX_LAUNCH OR TX_COUNT : STA now
+    STA note_colour
+    LDA world_text : AND #TX_DOCKING OR TX_LAUNCH OR TX_COUNT : STA note_texts
     LDA m_life : CMP #&38 : LDA m_life+1 : SBC #0 : BPL counting
     LDA frame_count : AND #4 : BEQ counting
-    LDA #TX_COUNT : TRB now
+    LDA #TX_COUNT : TRB note_texts
 .counting
-    \ MISSILE VIEW (&05266): the window opening or closing, its step still
-    \ at least &11
+    LDA m_life : SEC : SBC #&0F : STA note_count
+    LDA m_life+1 : SBC #0 : STA note_count+1
     LDA mv_render : BEQ normal
-    LDA m_life : CMP #&0F : LDA m_life+1 : SBC #0 : BMI texts
-    LDA m_iris : CMP #&11 : LDA m_iris+1 : SBC #0 : BMI texts
-    LDA #TX_MVIEW : TSB now
-    BRA texts
+    LDA m_life : CMP #&0F : LDA m_life+1 : SBC #0 : BMI done
+    LDA m_iris : CMP #&11 : LDA m_iris+1 : SBC #0 : BMI done
+    LDA #TX_MVIEW : TSB note_texts
+    RTS
 .normal
-    \ refuelling (&05188, the normal view's only)
-    LDA refuelling : BEQ texts
-    LDA #TX_REFUEL : TSB now
-.texts
-    \ the logic's, from the last step's
+    LDA refuelling : BEQ done
+    LDA #TX_REFUEL : TSB note_texts
+.done
+    RTS
+}
+
+\ panel_messages: the texts the ST prints on the frame panel_frame drew
+\ (draw_buffer), with what the step's logic printed (decision 16): each
+\ this screen shows that's gone, or shows other words, has its glyphs'
+\ pixels cleared; then each shown is drawn, in the order the ST prints
+\ them.
+.panel_messages
+{
+    ZA_AUTO1 now, old, gone
+    LDA draw_buffer : STA pb
+    LDA draw_bank : TSB acccon
+    LDA note_colour : STA cur_colour
+    LDA note_texts : STA now
+    \ the logic's: a mine's (object_handlers), LEVEL (level_message), and
+    \ the docked menu, by post_frame's test (&01FCC), which comes after the
+    \ frame is shown: no level change or game over, shields left, at the
+    \ tunnel's end
     LDA mine_text : BEQ no_mine
     LDA #TX_MINE : TSB now
 .no_mine
     LDA level_text : BEQ no_level
     LDA #TX_LEVEL : TSB now
 .no_level
-    LDA dock_text : BEQ no_dock
+    LDA level_changed : BNE no_dock
+    LDA game_over : ORA game_over+1 : BNE no_dock
+    LDA shields : ORA shields+1 : BEQ no_dock
+    LDA launch_state+1 : BNE no_dock
+    LDA launch_state : CMP #&1E : BNE no_dock
     LDA #TX_DOCKED : TSB now
 .no_dock
     \ gone, or other words: the mine's, the level's, the countdown's
@@ -835,10 +858,8 @@ NEXT
     LDA level : CMP ps_level,X : BEQ same_level
     LDA #TX_LEVEL : TSB gone
 .same_level
-    LDA m_life : SEC : SBC #&0F : STA pt
-    LDA m_life+1 : SBC #0
-    CMP ps_count_hi,X : BNE other_count
-    LDA pt : CMP ps_count_lo,X : BEQ same_count
+    LDA note_count+1 : CMP ps_count_hi,X : BNE other_count
+    LDA note_count : CMP ps_count_lo,X : BEQ same_count
 .other_count
     LDA #TX_COUNT : TSB gone
 .same_count
@@ -856,12 +877,13 @@ NEXT
     LDA now : STA ps_texts,X : BEQ done
     LDA mine_text : STA ps_mine,X : STA tx_mine_v
     LDA level : STA ps_level,X : STA tx_level
-    LDA m_life : SEC : SBC #&0F : STA ps_count_lo,X : STA tx_count
-    LDA m_life+1 : SBC #0 : STA ps_count_hi,X : STA tx_count+1
+    LDA note_count : STA ps_count_lo,X : STA tx_count
+    LDA note_count+1 : STA ps_count_hi,X : STA tx_count+1
     STZ erasing
     LDA now
     JSR texts_do
 .done
+    LDA draw_bank : TRB acccon
     RTS
 }
 

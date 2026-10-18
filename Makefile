@@ -6,12 +6,14 @@
 #   make disc     the disc from a clean tree, as starglider.ssd (the README
 #                 links it)
 #   make check    sincos against the ST's sine table, the spike, the
-#                 disc's erasing (tools/erasecheck.mjs) and its own disc
-#                 reader (tools/disccheck.mjs)
+#                 disc's erasing (tools/erasecheck.mjs), its own disc
+#                 reader (tools/disccheck.mjs) and its controls
+#                 (tools/inputcheck.mjs)
 #   make spike    the spike on every captured scene, checked against the
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
 #   make logic    the port's game logic against the ST's, routine by
-#                 routine, on every capture in build/steps (tools/logicrun.mjs)
+#                 routine and a whole step, on every capture in build/steps
+#                 (tools/logicrun.mjs)
 #   make panel    the panel drawn from every capture's frames, pixel for
 #                 pixel against the ST's formulas (tools/panelcheck.mjs)
 #   make steps    capture the ST's logic in Hatari (tests/st/steps_*.txt;
@@ -127,6 +129,7 @@ check: build/spike/SPIKE spike $(TARGET)
 	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike
 	node tools/erasecheck.mjs
 	node tools/disccheck.mjs
+	node tools/inputcheck.mjs
 
 spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	@for s in $(SCENES); do \
@@ -136,7 +139,7 @@ spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	done
 
 # The logic's routines, each on every capture (tools/logicrun.mjs's ROUTINES).
-LOGIC    = animate flight keys handlers world world_after world_whole collide message frame_end post mine level newgame
+LOGIC    = animate flight keys handlers world world_after world_whole collide message frame_end post mine level newgame step
 STEPS    = $(patsubst tests/st/steps_%.txt,%,$(wildcard tests/st/steps_*.txt))
 
 logic: build/spike/SPIKE

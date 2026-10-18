@@ -100,7 +100,7 @@ async function logic(name) {
     ram[need("logic_bank")] = need("BANK_LOGIC") | need("ROMSEL_ANDY");
     ram[need("logic_call")] = need(name) & 0xff;
     ram[need("logic_call") + 1] = need(name) >> 8;
-    if (profileEvery && name === "panel_frame") return sampled(need("spike_logic"));
+    if (profileEvery && name.startsWith("panel_")) return sampled(need("spike_logic"));
     return run(need("spike_logic"));
 }
 // --profile N: the program counter every N cycles of panel_frame, each
@@ -405,12 +405,16 @@ for (const file of captures) {
         ram[need("world_text")] = flags.world;
         ram[need("kill_shown")] = flags.kill & 0xff;
         ram[need("kill_shown") + 1] = flags.kill >> 8;
-        ram[need("level_text")] = flags.level;
-        ram[need("dock_text")] = flags.dock;
-        ram[need("mine_text")] = flags.mine;
         ram[need("draw_buffer")] = b;
         ram[need("draw_bank")] = b ? need("ACCCON_X") : 0;
-        cycles.push((await logic("panel_frame")) - stubCost);
+        let took = (await logic("panel_frame")) - stubCost;
+        // the texts after the step's logic (frame_show), from the state at
+        // the end point: after frame_end's logic, before the post-frame tests
+        putState(regionsAt(fr, "end"));
+        ram[need("level_text")] = flags.level;
+        ram[need("mine_text")] = flags.mine;
+        took += (await logic("panel_messages")) - stubCost;
+        cycles.push(took);
         const want = model.frame(b, st, flags);
         // (what it showed)
         if (st.mvRender) saw("missile view");
