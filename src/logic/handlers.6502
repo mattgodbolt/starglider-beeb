@@ -10,11 +10,11 @@
 \ number the ST's draws. rng_d0 follows the ST's d0 through every
 \ handler, as a mine's random8 adds whatever the slots before it left.
 \
-\ In the world's bank, for the sine table; ANDY paged. X is the slot; a
-\ handler may take Y, and after any call reloads X from h_slot. What the
-\ ST draws or prints here (the enemies' laser lines, the mines' warnings)
-\ is the drawing's, and isn't here: the laser lines are recorded for it
-\ (enemy_laser).
+\ In the world's bank, for the sine table; ANDY paged. A handler takes its
+\ slot from h_slot into X, may take Y, and after any call reloads X from
+\ h_slot. What the ST draws or prints here (the enemies' laser lines, the
+\ mines' warnings) is the drawing's, and isn't here: the laser lines are
+\ recorded for it (enemy_laser).
 \ ***************************************************************************
 
 ZA_AUTO1 h_slot             ; the slot being handled
@@ -40,25 +40,58 @@ MACRO HASR4 v
     ASRW v : ASRW v : ASRW v : ASRW v
 ENDMACRO
 
+\ The handler by type is handler_gate's (tools/mkhandlers.py): none for
+\ the types whose handler does nothing (type 0's among them), and where
+\ the handler's first test is the draw list's flag or the near list's,
+\ that's tested here, as it costs most of the slots nothing. The ST
+\ clears the homing request ($2D6) after every slot; here the handlers
+\ that make one clear it, so only one there at the start is cleared here,
+\ after the first slot (whose handler sees it, as the ST's does). random32's
+\ state is in zero page meanwhile (h_random32).
 .object_handlers
 {
+    ZA_AUTO1 limit
     STZ shot_n                  ; (for the drawing: this step's shots, enemy_laser's)
     LDX #0
     LDA n_slots : BEQ done
+    LDY homing : BEQ all
+    LDA #1
+.all
+    STA limit
+    LDA rng32 : STA h_rng : LDA rng32+1 : STA h_rng+1
+    LDA rng32+2 : STA h_rng+2 : LDA rng32+3 : STA h_rng+3
 .each
     LDA ob_exploding,X : BNE exploding
-    LDA ob_type,X : BEQ next
+    LDY ob_type,X
+    LDA handler_gate,Y : BEQ next
+    BIT #GATE_DRAWN OR GATE_NEAR : BNE gated
+.call
     STX h_slot
-    TAY
-    LDA handler_lo,Y : STA h_vec
-    LDA handler_hi,Y : STA h_vec+1
+    TAX
     JSR handler_dispatch
     LDX h_slot
 .next
-    STZ homing                  ; (a handler's request, for its own launch)
-    INX : CPX n_slots : BNE each
+    INX : CPX limit : BNE each
+    STZ homing
+    CPX n_slots : BNE rest
+    LDA h_rng : STA rng32 : LDA h_rng+1 : STA rng32+1
+    LDA h_rng+2 : STA rng32+2 : LDA h_rng+3 : STA rng32+3
 .done
     RTS
+.rest
+    LDA n_slots : STA limit
+    BRA each
+.gated
+    \ (N is still the gate's bit 7: BIT # sets Z alone)
+    BMI drawn
+    LDY ob_near,X
+    BRA listed
+.drawn
+    LDY ob_drawn,X
+.listed
+    BEQ next
+    AND #&FF EOR (GATE_DRAWN OR GATE_NEAR)
+    BRA call
 .exploding
     \ frames 0-31, then the slot is freed (beq on &1F: equality)
     LDA ob_explosion,X : CMP #&1F : BEQ free
@@ -70,15 +103,6 @@ ENDMACRO
     INC free_n
     BRA next
 }
-
-\ The types that do nothing (and the loop's tail, on the ST).
-.h_none
-    RTS
-
-\ h_gameover (&0834A, types 28-30): the ST bumps colour 0's hardware
-\ register, which is the drawing's. No code makes these types.
-.h_gameover
-    RTS
 
 \ h_move: on by the velocity, in x and z.
 .h_move
@@ -93,6 +117,7 @@ ENDMACRO
 \ counts) to a missile: +14's byte, the word's high byte here.
 .h_silo
 {
+    LDX h_slot
     HADDX ob_heading_lo, ob_heading_hi, &10
     HDECX ob_timer_b_lo, ob_timer_b_hi
     LDA ob_timer_b_hi,X : BPL done
@@ -111,6 +136,7 @@ ENDMACRO
 \ the others pitching on to a half turn first.
 .h_mine
 {
+    LDX h_slot
     LDA ob_drawn,X : BEQ motion
     LDA ob_cz_hi,X : CMP #&F8 : BMI motion
     CMP #&08 : BPL motion
@@ -176,25 +202,29 @@ ENDMACRO
 \ the one number (frozen fighters still turn and fire).
 .h_fighter
 {
+    LDX h_slot
     LDA enemies_active : BEQ moved
     JSR h_move
 .moved
     JSR near_test : BCC far
     LDA ob_type,X : CMP #27 : BNE near
-    JSR random32
+    JSR h_random32
     LDA rng_d0 : AND #&3F : BEQ laser
     AND #3 : BNE turn
     LDA #&FF : STA homing
+    JSR aim
+    STZ homing
+    RTS
 .to_aim
     JMP aim
 .near
-    JSR random32
+    JSR h_random32
     LDA rng_d0 : AND #&7F : BEQ laser
     AND #7 : BEQ to_aim
 .turn
     JMP turn_to_player
 .far
-    JSR random32
+    JSR h_random32
     LDA rng_d0 : AND #&7F : BEQ laser
     LDA rng_d0 : AND #&1F : BEQ turn
     AND #&0F : BEQ to_aim
@@ -337,8 +367,9 @@ ENDMACRO
 .h_wanderer
 {
     LDA enemies_active : BEQ done
+    LDX h_slot
     JSR h_move
-    JSR random32
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&3F : STA rng_d0 : BEQ turn
     AND #&0F : STA rng_d0 : BEQ laser
@@ -347,7 +378,7 @@ ENDMACRO
 .laser
     JMP enemy_laser
 .turn
-    JSR random32
+    JSR h_random32
     LDA rng_d0 : AND #&1F : SEC : SBC #&10 : STA rng_d0
     LDA #0 : SBC #0 : STA rng_d0+1
     LDA ob_heading_lo,X : CLC : ADC rng_d0 : STA ob_heading_lo,X
@@ -361,6 +392,7 @@ ENDMACRO
 \ count less 1). It doesn't heed the freeze.
 .h_neutron
 {
+    LDX h_slot
     JSR h_move
     LDA pl_y : SEC : SBC ob_y_lo,X : STA rng_d0
     LDA pl_y+1 : SBC ob_y_hi,X : STA rng_d0+1
@@ -409,6 +441,7 @@ ENDMACRO
 \ faces the player again, heading half round from the bearing.
 .h_homing
 {
+    LDX h_slot
     JSR h_move
     LDA pl_y : SEC : SBC ob_y_lo,X : STA rng_d0
     LDA pl_y+1 : SBC ob_y_hi,X : STA rng_d0+1
@@ -450,7 +483,7 @@ ENDMACRO
     STZ shields : STZ shields+1
 .shielded
     LDA ob_cz_lo,X : ORA ob_cz_hi,X : BEQ done
-    JSR random32
+    JSR h_random32
     JSR shot_record
     LDA #LO(&20) : STA flash0 : LDA #HI(&20) : STA flash0+1
     LDA #0 : LDX #1
@@ -492,11 +525,15 @@ ENDMACRO
 .done
     RTS
 .on
+    LDX h_slot
     JSR near_test : BCC far
-    JSR random32
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&7F : STA rng_d0 : BNE asked
-    LDA #&FF : STA homing
+    LDA #&FF : STA homing           ; (the number's low bits 0 too: it aims)
+    JSR aim
+    STZ homing
+    RTS
 .asked
     LDA rng_d0 : AND #3 : STA rng_d0 : BEQ to_aim
     JSR angle_to_player
@@ -517,20 +554,23 @@ ENDMACRO
 .drive
     JSR h_move
     HDECX ob_timer_b_lo, ob_timer_b_hi
-    JSR random32
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&0F : STA rng_d0 : BEQ to_aim
     RTS
 }
 
 \ ---------------------------------------------------------------------------
+\ The handlers object_handlers calls only for an object in the near list
+\ (GATE_NEAR) or the draw list (GATE_DRAWN), the ST's first test in each.
+\
 \ h_juno (&08174): near, 1 in 8 a missile (never homing: nothing asks),
 \ unaligned; else a sixteenth of the way round to face half round from
 \ the bearing. Its freeze is the launch's alone.
 .h_juno
 {
-    LDA ob_near,X : BEQ done
-    JSR random32
+    LDX h_slot
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #7 : STA rng_d0 : BEQ launch_now
     JSR angle_to_player
@@ -539,7 +579,6 @@ ENDMACRO
     JSR turn_by
     LDA ob_heading_lo,X : STA rng_d0                ; (the ST's d0: the heading)
     LDA ob_heading_hi,X : STA rng_d0+1
-.done
     RTS
 .launch_now
     JMP launch
@@ -549,19 +588,20 @@ ENDMACRO
 \ for a homing missile, unaligned.
 .h_pyramid
 {
-    LDA ob_near,X : BEQ done
     LDA level+1 : BNE spin
     LDA level : CMP #1 : BEQ done
 .spin
+    LDX h_slot
     LDA ob_heading_lo,X : SEC : SBC #&40 : STA ob_heading_lo,X
     BCS spun
     DEC ob_heading_hi,X
 .spun
-    JSR random32
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&0F : STA rng_d0 : BNE done
     LDA #&FF : STA homing
-    JMP launch
+    JSR launch
+    STZ homing
 .done
     RTS
 }
@@ -570,15 +610,14 @@ ENDMACRO
 \ spins, and 1 in 8 aims as the tri-launcher does.
 .h_old_pyramid
 {
-    LDA ob_near,X : BEQ done
+    LDX h_slot
     LDA ob_heading_lo,X : SEC : SBC #&40 : STA ob_heading_lo,X
     BCS spun
     DEC ob_heading_hi,X
 .spun
-    JSR random32
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #7 : STA rng_d0 : BEQ to_aim
-.done
     RTS
 .to_aim
     JMP h_tri.aim
@@ -588,7 +627,7 @@ ENDMACRO
 \ it aims, its missiles heading half round from the bearing.
 .h_tri
 {
-    LDA ob_near,X : BEQ done
+    LDX h_slot
     LDA ob_heading_lo,X : SEC : SBC #&60 : STA ob_heading_lo,X
     BCS aim
     DEC ob_heading_hi,X
@@ -605,11 +644,10 @@ ENDMACRO
 \ h_type3 (&0821A): drawn, it fires 1 in 32, frozen or not.
 .h_type3
 {
-    LDA ob_drawn,X : BEQ done
-    JSR random32
+    LDX h_slot
+    JSR h_random32
     STZ rng_d0+1
     LDA rng_d0 : AND #&1F : STA rng_d0 : BEQ laser
-.done
     RTS
 .laser
     JMP enemy_laser
@@ -620,9 +658,10 @@ ENDMACRO
 .h_beam
 {
     LDA level : CMP #3 : LDA level+1 : SBC #0 : BMI done
-    JSR random32
+    JSR h_random32
     LDA rng_d0+1 : AND #&07 : STA rng_d0+1
     ORA rng_d0 : BNE done
+    LDX h_slot
     STZ ob_type,X
 .done
     RTS

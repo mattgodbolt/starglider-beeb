@@ -62,3 +62,27 @@
     LDA rng32+3 : STA rng_d0+1
     RTS
 }
+
+\ h_random32: random32 on h_rng, a copy of its state in zero page, for
+\ object_handlers' many calls a step (it copies rng32 in and out).
+ZA_AUTO 4, h_rng
+.h_random32
+{
+    ASL h_rng : ROL h_rng+1 : ROL h_rng+2 : ROL h_rng+3
+    BCS flip
+    BNE kept                    ; (the top byte isn't 0, so nor is the long)
+    LDA h_rng : ORA h_rng+1 : ORA h_rng+2 : BNE kept
+.flip
+    LDA h_rng : EOR #&41 : STA h_rng
+    LDA h_rng+1 : EOR #&2B : STA h_rng+1
+    LDA h_rng+2 : EOR #&87 : STA h_rng+2
+    LDA h_rng+3 : EOR #&1D : STA h_rng+3
+.kept
+    LDA h_rng : CLC : ADC mouse_x : STA h_rng
+    LDA h_rng+1 : ADC mouse_x+1 : STA h_rng+1
+    LDA h_rng : CLC : ADC rng_lag+3 : STA h_rng
+    LDA h_rng+1 : ADC rng_lag+2 : STA h_rng+1
+    LDA h_rng+2 : ADC rng_lag+1 : STA h_rng+2 : STA rng_d0
+    LDA h_rng+3 : ADC rng_lag : STA h_rng+3 : STA rng_d0+1
+    RTS
+}
