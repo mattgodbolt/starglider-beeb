@@ -145,6 +145,15 @@ for r in range(6):
     emit(f"    LDA ka+{r} : STA rap_k{r}+1 : LDA ke+{r} : STA rot_k{r}+1")
 emit("""    \\ no products: the approximation is exact
     LDA prods : EOR #&80 : STA rot_exactly
+    \\ the identity: d needs no rotating at all
+    STZ rot_identity
+    LDX #17
+.identity
+    LDA cam,X : ZA_INDEXEDBY 0..17
+    CMP rot_unit,X : BNE rotated
+    DEX : BPL identity
+    LDA #&80 : STA rot_identity
+.rotated
     RTS
 
 \\ term: cam's entry X (row row / 2) patched into both routines, and linked.
@@ -245,9 +254,14 @@ emit("""    LDA #RAP_NEG : LDY #RAP_NEG_GO
     RTS
 }
 
-\\ &80 while cam has no products, when rotate_approx is exact
+\\ &80 while cam has no products, when rotate_approx is exact, and while it's
+\\ the identity
 .rot_exactly
     EQUB 0
+.rot_identity
+    EQUB 0
+.rot_unit
+    EQUW 16384, 0, 0, 0, 16384, 0, 0, 0, 16384
 """)
 
 
