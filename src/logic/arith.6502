@@ -45,3 +45,11 @@
 \ annotation's own section (waitingforvsync/baron#30).
 ZA_AUTO2 h_vec                      ; the handler object_handlers calls
 INCLUDE "../../build/gen/dispatch.6502"
+
+\ set_up_dispatch: init_objects' jump to each record's set-up by its type
+\ (level.6502), in main RAM for the same reason as handler_dispatch
+\ (baron#29). The table stays with the set-ups, in the logic bank, which
+\ is paged.
+.set_up_dispatch
+    JMP (init_objects.set_ups,X)
+    ZA_CANJUMP init_objects.set_none, init_objects.set_walker, init_objects.set_pyramid, init_objects.set_box, init_objects.set_towers, init_objects.set_5, init_objects.set_silo, init_objects.set_drone, init_objects.set_atv, init_objects.set_tank, init_objects.set_bute, init_objects.set_diamond, init_objects.set_stomper, init_objects.set_skim, init_objects.set_17, init_objects.set_juno, init_objects.set_lotus, init_objects.set_glider
