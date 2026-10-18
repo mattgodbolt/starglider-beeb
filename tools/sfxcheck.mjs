@@ -278,8 +278,11 @@ for (const file of captures) {
         const t = await m.call(sym.sfx_start, e.effect, 1);
         await m.runTo(m.now() + 0.1 * HZ);
         // a tick the interrupt holds off comes late, but one the VIA's flag
-        // lost puts every tick after it a tick behind its time
-        const ticks = settle(snEvents(m.chip.writes.slice(k), t).t0p).map((x) => x[0]);
+        // lost puts every tick after it a tick behind its time: from the
+        // effect's start, its record's first write, which split_clear holds
+        // back from the call when that comes near the palette split
+        const writes = m.chip.writes.slice(k);
+        const ticks = settle(snEvents(writes, writes.length ? writes[0][0] : t).t0p).map((x) => x[0]);
         const tick = (e.latch + 2) / gen.via_hz;
         const off = ticks.map((x, i) => x - i * tick);
         const base = Math.min(...off);

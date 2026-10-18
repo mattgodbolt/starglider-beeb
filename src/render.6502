@@ -43,17 +43,9 @@ IF DEFINED(SPIKE)
     RTS
 ENDIF
 
-\ erase_init: both screens' windows to be cleared before they're first
-\ drawn, as if their erase lists had overflowed, neither showing the
-\ missile view's window (mview.6502); and the marks wiped, as until the
-\ first frame their pages hold other things (disc.6502's catalogue,
-\ screen_copy's pages).
-.erase_init
-    STZ erase_stop : STZ erase_stop+1
-    STZ dot_wipes : STZ dot_wipes+1
-    LDA #&FF : STA win_shown : STA win_shown+1
 \ marks_wipe: every edge's and vertex's mark 0, and stamp, so the next
-\ stamp is on none of them.
+\ stamp is on none of them (and before the first frame: setup.6502's
+\ erase_init).
 .marks_wipe
     LDX #0 : STX stamp
 .wipe
@@ -301,35 +293,6 @@ OM_SIZE = 6 + 18
 .om_n       EQUB 0                  ; offsets: the end of those kept ...
 .om_next    EQUB 0                  ; ... and the next to fill
 
-\ ground_camera: objc, the camera in the object's space, for an object
-\ with no pitch of its own. Its matrix is the camera's turned by its own
-\ heading h, so the camera is the object's offset from the player turned
-\ back by h alone and negated: x -(cos h dx + sin h dz), y -dy, z sin h
-\ dx - cos h dz. From the world's positions, it takes four products where
-\ the rotated position and the matrix take nine.
-.ground_camera
-{
-    ZA_AUTO2 dx, dz
-    BANK BANK_WORLD
-    LDX slot
-    LDA ob_heading_lo,X : STA m_idx : LDA ob_heading_hi,X : AND #&0F : STA m_idx+1
-    JSR sincos
-    LDX slot
-    LDA ob_x_lo,X : SEC : SBC pl_x : STA dx : LDA ob_x_hi,X : SBC pl_x+1 : STA dx+1
-    LDA pl_y : SEC : SBC ob_y_lo,X : STA objc+2 : LDA pl_y+1 : SBC ob_y_hi,X : STA objc+3
-    LDA ob_z_lo,X : SEC : SBC pl_z : STA dz : LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
-    \ (fmul16 leaves its operands as they were, so each is set once)
-    MOVW mul_x, m_cos : MOVW mul_y, dx : JSR fmul16
-    LDA #0 : SEC : SBC mul_r : STA objc : LDA #0 : SBC mul_r+1 : STA objc+1
-    MOVW mul_y, dz : JSR fmul16
-    LDA #0 : SEC : SBC mul_r : STA objc+4 : LDA #0 : SBC mul_r+1 : STA objc+5
-    MOVW mul_x, m_sin : JSR fmul16
-    SUBW objc, mul_r
-    MOVW mul_y, dx : JSR fmul16
-    ADDW objc+4, mul_r
-    RTS
-}
-
 \ ---------------------------------------------------------------------------
 \ draw_objects (&05108): the draw list read from its top. Each object's
 \ matrix takes the player's pitch and heading added to its own, and the
@@ -387,18 +350,41 @@ OM_SIZE = 6 + 18
 \ space, its angles in ang_p, ang_h, ang_r.
 .draw_shape
 {
-    ZA_AUTO1 shape, nmove, nturn, row_i, u_lo, h0, l0
-    ZA_AUTO2 fr, t16
+    ZA_AUTO1 shape, nmove, nturn, row_i, u_lo, h0, l0, far
+    ZA_AUTO2 fr, t16, hp
+    BANK BANK_SHAPES                    ; (type_shape's, and the header's)
     LDX otype
     LDA type_shape,X : CMP #SHAPES : BCC known
     RTS
 .known
     STA shape
+    \ Far enough away (16 radii or more), the perspective is linear across
+    \ the object, to within half a pixel: its vertices go straight onto
+    \ the screen (decision 10). Its centre and its vertices' reach there
+    \ come first (far_place), from its position and its radius (in its
+    \ header, in the shapes' bank): a reach wholly outside the window holds
+    \ every vertex, so the object draws nothing, and goes no further, not
+    \ even to its matrix.
+    TAX
+    LDA shape_lo,X : STA hp : LDA shape_hi,X : STA hp+1
+    STZ far
+    LDY #sh_radius - sh
+    LDA (hp),Y : STA sh_radius : STA t16
+    INY : LDA (hp),Y : STA sh_radius+1
+    ASL t16 : ROL A : ASL t16 : ROL A : ASL t16 : ROL A : ASL t16 : ROL A
+    STA t16+1
+    CMPS16 tz, t16 : BMI reaches
+    JSR far_place : BCC far_in
+    RTS
+.far_in
+    DEC far                             ; (bit 7: far)
+.reaches
     \ An object with no pitch of its own has the camera's pitch and roll,
     \ and the camera in its space comes from the world's positions.
     LDA ang_p : CMP pl_pitch : BNE pitched
     LDA ang_p+1 : CMP pl_pitch+1 : BNE pitched
     JSR ground_matrix
+    BANK BANK_WORLD                     ; (ground_camera's: matrix.6502)
     JSR ground_camera
     JMP got_camera
 .pitched
@@ -568,13 +554,7 @@ NEXT
     INC stamp
 .stamped
     JSR faces
-    \ Far enough away (16 radii or more), the perspective is linear across
-    \ the object, to within half a pixel: its vertices go straight onto
-    \ the screen (decision 10).
-    LDA sh_radius : STA t16 : LDA sh_radius+1
-    ASL t16 : ROL A : ASL t16 : ROL A : ASL t16 : ROL A : ASL t16 : ROL A
-    STA t16+1
-    CMPS16 tz, t16 : BMI near
+    BIT far : BPL near
     JSR far_setup
     JMP edges_far
 .near
@@ -611,12 +591,13 @@ NEXT
 TAX_OP = &AA
 RTS_OP = &60
 
-\ far_setup: the object's centre on the screen (sc_x0, sc_y0, from the
-\ view's centre), the first-order matrix B onto the screen, and whether
-\ the object lies wholly inside the window. To first order in the
-\ object's offsets, its x on the screen is X0 + (128 / tz)(A_x - (tx /
-\ tz) A_z) k / 1024, and tx / tz is X0 / 128: so B_x = 128 (A_x - X0 A_z
-\ / 128) / tz, which is proj_x.r8's, and the same for y.
+\ A far object: far_place puts its centre on the screen (sc_x0, sc_y0, from
+\ the view's centre), and finds whether it lies wholly inside the window or
+\ wholly outside; far_setup makes the first-order matrix B onto the
+\ screen. To first order in the object's offsets, its x on the screen is
+\ X0 + (128 / tz)(A_x - (tx / tz) A_z) k / 1024, and tx / tz is X0 / 128:
+\ so B_x = 128 (A_x - X0 A_z / 128) / tz, which is proj_x.r8's, and the
+\ same for y.
 ZA_AUTO 4, sc_0                 ; x, y
 sc_x0 = sc_0
 sc_y0 = sc_0 + 2
@@ -626,83 +607,163 @@ sc_y0q = sc_0q + 2
 ZA_AUTO1 far_inside             ; bit 7: no edge needs the window clip
 ZA_AUTO 12, sc_bmag             ; B: |B| words, two rows of x, y, z ...
 ZA_AUTO 6, sc_bsign             ; ... and signs
-\ quarters: pq = 512 px / pz, in quarters of a pixel, as precisely as
-\ px allows (proj_z's depth): 128 (4 px) / pz, or 2 px when 4 px won't
-\ fit a word, or px. C = 1 if 4 px fitted.
-.quarters
-{
-    \ px << 2 fits a word if px's top three bits agree, << 1 if two do
-    LDA px+1 : ASL A : EOR px+1 : BMI unshifted
-    ASL A : BMI once
-    ASL px : ROL px+1 : ASL px : ROL px+1
-    JSR proj_x
-    SEC : RTS
-.once
-    ASL px : ROL px+1
-    JSR proj_x
-    ASL pq : ROL pq+1
-    CLC : RTS
-.unshifted
-    JSR proj_x
-    ASL pq : ROL pq+1 : ASL pq : ROL pq+1
-    CLC : RTS
-}
+\ (far_place's centre and quarters are in the shapes' bank, which it runs
+\ with: shapecode.6502.)
 
-\ centre: the centre on the screen on axis X (0 x, 2 y): sc_0q,X = 512 t /
-\ pz (quarters) and sc_0,X = 128 t / pz as proj_x has it, t = tpos,X. When
-\ 4 t fitted, sc_0 is sc_0q / 4 truncated, as proj_x truncates: but not
-\ below a depth of 256, where proj_x's overflow can come into sc_0q and
-\ not sc_0.
-.centre
-{
-    ZA_AUTO1 axis
-    STX axis
-    LDA tpos,X : ZA_INDEXEDBY {0, 2}
-    STA px
-    LDA tpos+1,X : ZA_INDEXEDBY {0, 2}
-    STA px+1
-    JSR quarters
-    LDX axis
-    LDA pq : STA sc_0q,X : ZA_INDEXEDBY {0, 2}
-    LDA pq+1 : STA sc_0q+1,X : ZA_INDEXEDBY {0, 2}
-    BCC by_proj
-    LDA pz+1 : BEQ by_proj
-    LDA pq+1 : BPL positive
-    LDA pq : CLC : ADC #3 : STA sc_0,X : ZA_INDEXEDBY {0, 2}
-    LDA pq+1 : ADC #0
-    CMP #&80 : ROR A : ROR sc_0,X : ZA_INDEXEDBY {0, 2}
-    CMP #&80 : ROR A : ROR sc_0,X : ZA_INDEXEDBY {0, 2}
-    STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
-    RTS
-.positive
-    LSR A : ROR pq : LSR A : ROR pq
-    STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
-    LDA pq : STA sc_0,X : ZA_INDEXEDBY {0, 2}
-    RTS
-.by_proj
-    LDA tpos,X : ZA_INDEXEDBY {0, 2}
-    STA px
-    LDA tpos+1,X : ZA_INDEXEDBY {0, 2}
-    STA px+1
-    JSR proj_x
-    LDX axis
-    LDA pq : STA sc_0,X : ZA_INDEXEDBY {0, 2}
-    LDA pq+1 : STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
-    RTS
-}
-
-\ (1 + c / 256 is at least the root of 1 + (c / 128)^2 up to 4/3 of 128)
+\ far_place: the centre (sc_0, sc_0q), and the vertices' reach on the
+\ screen (plus one) from it against each edge of the window: wholly
+\ inside it, far_inside's bit 7 says no edge needs the window's clip;
+\ wholly outside, C set says the object draws nothing. It comes before
+\ the object's faces and its matrix's scaling, which an object outside
+\ doesn't need, and leaves proj_x set for the object's depth, for
+\ far_setup's B.
+\
+\ A vertex within a radius r of the centre goes 128 (dx - X0 dz / 128) /
+\ tz across by B, so up to 128 r / tz (pq, the radius on the screen)
+\ times the root of 1 + (X0 / 128)^2 from it, and the same down for Y0.
+\ That is at most 1 + |X0| / 256 while |X0| is up to 4/3 of 128
+\ (FAR_C_MAX), as it is within the window: the reach is pq + pq |X0| /
+\ 256, rounded up. Past FAR_C_MAX, where the centre is beyond the window
+\ and the object can't be inside, the root is under 1 + |X0| / 128, and
+\ the reach pq + pq |X0| / 128, up to |X0| of 255; from 256 the object is
+\ neither inside nor outside, and its edges are clipped. The reach bounds
+\ every vertex, inside the window or out, so a reach wholly past one edge
+\ has every vertex past it, and every edge is one the clip rejects.
+\ (1 + c / 256 is at least the root of 1 + (c / 128)^2 up to 4/3 of 128;
+\ 1 + c / 128 is, everywhere)
 FAR_C_MAX = 128 * 4 DIV 3
+.far_place
+{
+    ZA_AUTO1 plo
+    ZA_AUTO2 r, xlo, xhi, ylo, yhi
+    MOVW pz, tz : JSR proj_z
+    LDX #0 : JSR centre
+    LDX #2 : JSR centre
+    STZ far_inside
+    \ the reach's box, lo to hi across and down
+    MOVW px, sh_radius : JSR proj_x
+    LDA pq+1 : BNE unbounded
+    LDA pq : MUL_SET
+    LDX #0 : JSR far_reach : BCS unbounded
+    STA r : STY r+1
+    LDA sc_x0 : SEC : SBC r : STA xlo : LDA sc_x0+1 : SBC r+1 : STA xlo+1
+    LDA sc_x0 : CLC : ADC r : STA xhi : LDA sc_x0+1 : ADC r+1 : STA xhi+1
+    LDX #2 : JSR far_reach : BCC bounded
+.unbounded
+    CLC : RTS
+.outside
+    SEC : RTS
+.bounded
+    STA r : STY r+1
+    LDA sc_y0 : SEC : SBC r : STA ylo : LDA sc_y0+1 : SBC r+1 : STA ylo+1
+    LDA sc_y0 : CLC : ADC r : STA yhi : LDA sc_y0+1 : ADC r+1 : STA yhi+1
+    \ against each edge (its low byte the window's, patched: CLIP_SITES):
+    \ outside if a far side is short of an edge, ...
+    SEC : LDA xlo
+.out_right
+    SBC #LO(VIEW_XMAX - VIEW_CX + 1)
+    LDA xlo+1 : SBC #HI(VIEW_XMAX - VIEW_CX + 1)
+    BVC xlo_right : EOR #&80
+.xlo_right
+    BPL outside                             ; its left past the right edge
+    SEC : LDA xhi
+.out_left
+    SBC #LO(VIEW_XMIN - VIEW_CX)
+    LDA xhi+1 : SBC #HI(VIEW_XMIN - VIEW_CX)
+    BVC xhi_left : EOR #&80
+.xhi_left
+    BMI outside                             ; its right short of the left edge
+    SEC : LDA ylo
+.out_bottom
+    SBC #LO(VIEW_YMAX - VIEW_CY + 1)
+    LDA ylo+1 : SBC #HI(VIEW_YMAX - VIEW_CY + 1)
+    BVC ylo_below : EOR #&80
+.ylo_below
+    BPL outside                             ; its top past the bottom edge
+    SEC : LDA yhi
+.out_top
+    SBC #LO(VIEW_YMIN - VIEW_CY)
+    LDA yhi+1 : SBC #HI(VIEW_YMIN - VIEW_CY)
+    BVC yhi_above : EOR #&80
+.yhi_above
+    BMI outside                             ; its bottom short of the top edge
+    \ ... and inside if every near side is within them
+    SEC : LDA xlo
+.in_left
+    SBC #LO(VIEW_XMIN - VIEW_CX)
+    LDA xlo+1 : SBC #HI(VIEW_XMIN - VIEW_CX)
+    BVC xlo_left : EOR #&80
+.xlo_left
+    BMI cut
+    SEC : LDA xhi
+.in_right
+    SBC #LO(VIEW_XMAX - VIEW_CX + 1)
+    LDA xhi+1 : SBC #HI(VIEW_XMAX - VIEW_CX + 1)
+    BVC xhi_right : EOR #&80
+.xhi_right
+    BPL cut
+    SEC : LDA ylo
+.in_top
+    SBC #LO(VIEW_YMIN - VIEW_CY)
+    LDA ylo+1 : SBC #HI(VIEW_YMIN - VIEW_CY)
+    BVC ylo_above : EOR #&80
+.ylo_above
+    BMI cut
+    SEC : LDA yhi
+.in_bottom
+    SBC #LO(VIEW_YMAX - VIEW_CY + 1)
+    LDA yhi+1 : SBC #HI(VIEW_YMAX - VIEW_CY + 1)
+    BVC yhi_below : EOR #&80
+.yhi_below
+    BPL cut
+    LDA #&80 : STA far_inside
+.cut
+    CLC : RTS
+\ far_reach: A (low) and Y (high) = pq + pq |c| / 256 rounded up, plus
+\ one, for the centre's c = sc_0,X (pq the multiplicand), or past
+\ FAR_C_MAX pq + pq |c| / 128 rounded up, plus one; C set if |c| is 256
+\ or more.
+.far_reach
+    LDA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    BEQ c_pos
+    CMP #&FF : BNE c_far
+    LDA #0 : SEC : SBC sc_0,X : ZA_INDEXEDBY {0, 2}
+    BEQ c_far                               ; (-256)
+    BRA c_mag
+.c_pos
+    LDA sc_0,X : ZA_INDEXEDBY {0, 2}
+.c_mag
+    CMP #FAR_C_MAX + 1 : BCS c_wide
+    TAY : MUL8 plo                          ; pq |c| / 256 rounded down ...
+    LDY #0
+    BRA c_add
+.c_wide
+    TAY : MUL8 plo                          ; (or doubled, + 1 for its rounding)
+    LDY #0
+    ASL A : BCC c_one
+    INY : CLC
+.c_one
+    ADC #1 : BCC c_add
+    INY
+.c_add
+    CLC : ADC pq : BCC c_pq                 ; ... + pq ...
+    INY : CLC
+.c_pq
+    ADC #2 : BCC c_near                     ; ... + 2
+    INY
+.c_near
+    CLC : RTS
+.c_far
+    SEC : RTS
+}
+
+\ far_setup: B, for an object far_place has placed and found not wholly
+\ outside the window.
 .far_setup
 {
     ZA_AUTO1 term, halved, xneg, pneg, plo
     ZA_AUTO2 xs, d
     ZA_AUTO 3, d24
-    rx = xs                                 ; the vertices' reach on the screen, x and
-    ry = d24                                ; y (in bytes free once B is made)
-    MOVW pz, tz : JSR proj_z
-    LDX #0 : JSR centre
-    LDX #2 : JSR centre
     \ B's 128 d / tz from R's high byte alone, rounded (proj_x.r8, decision
     \ 22): a far object is at most about 16 pixels across, so 8 bits of B
     \ are enough, and so are 8 of R. It's at least 16 radii away, so deep
@@ -851,87 +912,7 @@ FAR_C_MAX = 128 * 4 DIV 3
     INC term : LDA term : CMP #6 : BEQ terms_done
     JMP each_term
 .terms_done
-    JSR screen_setup
-    \ Inside the window? The centre, its vertices' reach on the screen
-    \ (plus one), from each edge. A vertex within a radius r of the centre
-    \ goes 128 (dx - X0 dz / 128) / tz across by B, so up to 128 r / tz
-    \ (pq, the radius on the screen) times the root of 1 + (X0 / 128)^2
-    \ from it, and the same down for Y0. That is at most 1 + |X0| / 256
-    \ while |X0| is up to 4/3 of 128 (FAR_C_MAX), as it is within the
-    \ window: the reach is pq + pq |X0| / 256, rounded up.
-    STZ far_inside
-    MOVW px, sh_radius : JSR proj_x
-    LDA pq+1 : BNE r_out
-    LDA pq : MUL_SET
-    LDX #0 : JSR far_reach : BCS r_out
-    STA rx : STY rx+1
-    LDX #2 : JSR far_reach : BCS r_out
-    STA ry : STY ry+1
-    BRA r_in
-.r_out
-    RTS
-.r_in
-    \ (each edge's low byte is the window's, patched: CLIP_SITES)
-    LDA sc_x0 : SEC : SBC rx : STA d : LDA sc_x0+1 : SBC rx+1 : STA d+1
-    SEC : LDA d
-.in_left
-    SBC #LO(VIEW_XMIN - VIEW_CX)
-    LDA d+1 : SBC #HI(VIEW_XMIN - VIEW_CX)
-    BVC left : EOR #&80
-.left
-    BMI outside
-    LDA sc_x0 : CLC : ADC rx : STA d : LDA sc_x0+1 : ADC rx+1 : STA d+1
-    SEC : LDA d
-.in_right
-    SBC #LO(VIEW_XMAX - VIEW_CX + 1)
-    LDA d+1 : SBC #HI(VIEW_XMAX - VIEW_CX + 1)
-    BVC right : EOR #&80
-.right
-    BPL outside
-    LDA sc_y0 : SEC : SBC ry : STA d : LDA sc_y0+1 : SBC ry+1 : STA d+1
-    SEC : LDA d
-.in_top
-    SBC #LO(VIEW_YMIN - VIEW_CY)
-    LDA d+1 : SBC #HI(VIEW_YMIN - VIEW_CY)
-    BVC top : EOR #&80
-.top
-    BMI outside
-    LDA sc_y0 : CLC : ADC ry : STA d : LDA sc_y0+1 : ADC ry+1 : STA d+1
-    SEC : LDA d
-.in_bottom
-    SBC #LO(VIEW_YMAX - VIEW_CY + 1)
-    LDA d+1 : SBC #HI(VIEW_YMAX - VIEW_CY + 1)
-    BVC bottom : EOR #&80
-.bottom
-    BPL outside
-    LDA #&80 : STA far_inside
-.outside
-    RTS
-\ far_reach: A (low) and Y (high) = pq + pq |c| / 256 rounded up, plus
-\ one, for the centre's c = sc_0,X (pq the multiplicand); C set if |c|
-\ is past FAR_C_MAX, as it is beyond the window.
-.far_reach
-    LDA sc_0+1,X : ZA_INDEXEDBY {0, 2}
-    BEQ c_pos
-    CMP #&FF : BNE c_far
-    LDA #0 : SEC : SBC sc_0,X : ZA_INDEXEDBY {0, 2}
-    BEQ c_far                               ; (-256)
-    BRA c_mag
-.c_pos
-    LDA sc_0,X : ZA_INDEXEDBY {0, 2}
-.c_mag
-    CMP #FAR_C_MAX + 1 : BCS c_far
-    TAY : MUL8 plo                          ; pq |c| / 256 rounded down ...
-    LDY #0
-    CLC : ADC pq : BCC c_pq                 ; ... + pq ...
-    INY : CLC
-.c_pq
-    ADC #2 : BCC c_near                     ; ... + 2
-    INY
-.c_near
-    CLC : RTS
-.c_far
-    SEC : RTS
+    JMP screen_setup
 \ A_z's term, 6 + j, by B's term
 .a_z
     EQUB 6, 7, 8, 6, 7, 8
@@ -1052,33 +1033,8 @@ MACRO BOX_VERTEX
     BOX_Y
     JMP box_x
 ENDMACRO
-
-\ box_out: the box's part of vertex Y, past the window by its outcode A:
-\ the edges it's past noted, and its line or column where that's within
-\ the window.
-.box_out
-{
-    TSB box_codes
-    AND #5 : BNE y_past                     ; above (1) or below (4)
-    LDA v_sylo,Y
-    BOX_Y
-.y_past
-    LDA v_code,Y : AND #10 : BEQ box_x      ; within it across: not left (2) or right (8)
-    RTS
-}
-\ box_x: the box taken to vertex Y's column, within the window (its x a
-\ word below 512 there).
-.box_x
-{
-    LDA v_sxhi,Y : LSR A : LDA v_sxlo,Y : ROR A : LSR A
-    CMP box_c0 : BCS low_in
-    STA box_c0
-.low_in
-    CMP box_c1 : BCC high_in
-    STA box_c1
-.high_in
-    RTS
-}
+\ (box_out, for a vertex past the window, and box_x are in the shapes'
+\ bank, which the vertices run with: shapecode.6502.)
 
 \ vertex_far: vertex Y of a far object onto the screen, and its outcode
 \ unless the object is inside the window; the caller makes it once an
@@ -1967,7 +1923,8 @@ MV_XMAX = &EF
 MV_YMIN = &10
 MV_YMAX = &70
 CLIP_SITES = FLATTEN({
-    far_setup.in_left + 1, far_setup.in_right + 1, far_setup.in_top + 1, far_setup.in_bottom + 1,
+    far_place.in_left + 1, far_place.in_right + 1, far_place.in_top + 1, far_place.in_bottom + 1,
+    far_place.out_left + 1, far_place.out_right + 1, far_place.out_top + 1, far_place.out_bottom + 1,
     vertex_far.code + {VC_XMIN, VC_LOW, VC_XHI, VC_XLO, VC_YMIN, VC_YMAX},
     vertex.code + {VC_XMIN, VC_LOW, VC_XHI, VC_XLO, VC_YMIN, VC_YMAX},
     clip_line.again + {OC_XMIN, OC_LOW, OC_XHI, OC_XLO, OC_YMIN, OC_YMAX},
@@ -1980,7 +1937,7 @@ CLIP_SITES = FLATTEN({
     box_end.e_top + 1, box_end.e_left + 1, box_end.e_bottom + 1, box_end.e_right + 1})
 FUNCTION clip_low(x1, to_done, to_right) = LO(to_right + (x1 >= 255) * (to_done - to_right))
 FUNCTION clip_values(x0, x1, y0, y1) = FLATTEN({
-    LO(x0 - VIEW_CX), LO(x1 - VIEW_CX + 1), LO(y0 - VIEW_CY), LO(y1 - VIEW_CY + 1),
+    REPEATED(2, {LO(x0 - VIEW_CX), LO(x1 - VIEW_CX + 1), LO(y0 - VIEW_CY), LO(y1 - VIEW_CY + 1)}),
     REPEATED(2, {x0, clip_low(x1, VC_TO_DONE, VC_TO_RIGHT), HI(x1 + 1), LO(x1 + 1), y0, y1 + 1}),
     REPEATED(2, {x0, clip_low(x1, OC_TO_DONE, OC_TO_RIGHT), HI(x1 + 1), LO(x1 + 1), y0, y1 + 1}),
     y0, LO(x0), y1, LO(x1), HI(x1),

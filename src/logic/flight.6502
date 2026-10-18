@@ -174,3 +174,13 @@
     MOVW sight_y, sight_cy : ADDW sight_y, sight_dy
     RTS
 }
+
+\ fmul15: mul_r = the 68000's `muls; asl.l #1; swap` of mul_x and mul_y:
+\ floor(x * y / 32768), wrapped to 16 bits (a velocity from a speed and a
+\ sine), for player_flight and the handlers, which are in this bank too.
+.fmul15
+    JSR smul16
+    ASL mul_p+1 : ROL mul_p+2 : ROL mul_p+3
+    LDA mul_p+2 : STA mul_r
+    LDA mul_p+3 : STA mul_r+1
+    RTS

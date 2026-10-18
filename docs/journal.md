@@ -1279,3 +1279,34 @@ that the split is never late; it writes WAVs to listen to. The disc's
 check makes its read in play itself now, beside a clip, and puts back
 what it overwrote: the game no longer reads in the background.
 
+### Room in main RAM, and far objects skipped
+
+Main RAM's resident code had 211 bytes free with the speech in. An audit
+found most of what was there had to be there: the interrupt and
+everything it touches, the code that switches banks between calls, the
+routines code in several banks shares, and the draw phase. The rest
+moved.
+
+- **The start.** What SG runs once (the disc reader made ready, the
+  loads, the set-ups, the game's opening state) is now SG's second part,
+  `start.6502`, after the resident code. It may run on over the lists and
+  objects, which nothing uses until `play` clears the objects and starts
+  the game, so it costs the resident code nothing.
+- **The banks.** Bank 7 took the screens' copy and the window's clear,
+  which set X. The world bank took what only its code uses: the handlers'
+  random numbers, `fmul15`, the animation lists, and `ground_camera`,
+  whose bank switch moved to its caller. The shapes bank took the
+  type-to-shape table and the draw phase's helpers that run only with it
+  paged.
+- **The result.** Free main RAM went from 211 to 1,462 bytes; the world
+  bank, bank 7 and the shapes bank gave 338, 137 and 233 bytes.
+- **The far objects.** A far object whose reach lies wholly outside the
+  window is now skipped once its radius is read, before its matrix. Past
+  FAR_C_MAX the reach is pq(1 + |c|/128), which can find an object outside
+  but never inside. Most of the objects that drew nothing were out there:
+  in flight, 400 of the 422 clipped ones.
+- **Measured.** `make spike`'s lines are unchanged. The objects' cost fell
+  19% in flight and in the missile capture, and 3% at the towers. The disc
+  went from 6.40 to 7.60 frames a second flying straight, and from 3.42 to
+  3.67 holding a turn (measured 2026-10-18).
+

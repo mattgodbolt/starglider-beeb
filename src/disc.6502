@@ -16,7 +16,9 @@
 \ names, sector 1 each file's length and start sector; ten sectors a
 \ track), which disc_init reads, so they can be anywhere on the disc.
 \ disc_load starts a file's read; disc_step, from the engine's waits,
-\ moves it on; disc_wait waits for it.
+\ moves it on; disc_wait waits for it. The NMI routine, disc_init and the
+\ files' names are the start's (start.6502), which copies the routine to
+\ its page once.
 \ ***************************************************************************
 
 W_CONTROL = &FE24
@@ -30,69 +32,6 @@ W_RATE    = 0                       ; 6ms steps (r1 r0)
 STA_ABS   = &8D
 BIT_ABS   = &2C
 DISC_SECTORS = 10                   ; a track's
-
-\ The catalogue's two sectors, read into the workspace's marks, which the
-\ draw phase doesn't need until the first frame.
-CATALOGUE = edge_mark
-ASSERT vert_mark = edge_mark + 256
-
-\ disc_init: the NMI routine into its page, the controller reset, and each
-\ of disc_names found in the catalogue (disc_wait's, so interrupts can be
-\ off, as at start: NMIs come anyway). A file that isn't there has its
-\ length 0, and loads as nothing.
-.disc_init
-{
-    ZA_AUTO1 file, entry, n, name, count
-    LDX #nmi_end - nmi_load - 1
-.copy
-    LDA nmi_load,X : STA NMI_PAGE,X
-    DEX : BPL copy                              ; (its first byte last, so it's whole first)
-    STZ fdc_state
-    LDA #W_LATCH AND NOT(4) : STA W_CONTROL     ; reset
-    LDX #20
-.reset
-    DEX : BNE reset
-    LDA #W_LATCH : STA W_CONTROL
-    LDA #&FF : STA fdc_cur                      ; the head's track not known
-    \ the catalogue
-    STZ fdc_track : STZ fdc_sect
-    LDA #LO(CATALOGUE) : STA fe_dst : LDA #HI(CATALOGUE) : STA fe_dst+1
-    STZ fe_len : LDA #2 : STA fe_len+1
-    STZ fe_bank
-    JSR disc_start
-    JSR disc_wait
-    \ each file by name: the entries' names are at 8 + 8e in sector 0,
-    \ their addresses at the same place in sector 1
-    LDA CATALOGUE + &105 : LSR A : LSR A : LSR A : STA n
-    LDX #DISC_FILES - 1
-.each_file
-    STX file
-    STZ df_len_lo,X : STZ df_len_hi,X
-    TXA : ASL A : ASL A : ASL A : SEC : SBC file : STA name    ; 7 file
-    LDA n : STA entry
-.each_entry
-    DEC entry : BMI next_file
-    LDA entry : ASL A : ASL A : ASL A : CLC : ADC #8 : TAY      ; 8 + 8e
-    LDX name
-    LDA #7 : STA count
-.char
-    LDA CATALOGUE,Y : AND #&7F
-    CMP disc_names,X : BNE each_entry
-    INY : INX
-    DEC count : BNE char
-    LDA CATALOGUE,Y : AND #&7F : CMP #'$' : BNE each_entry
-    \ found: from sector 1, its length and start sector
-    TYA : SEC : SBC #7 : TAY                    ; back to the entry's start
-    LDX file
-    LDA CATALOGUE + &104,Y : STA df_len_lo,X
-    LDA CATALOGUE + &105,Y : STA df_len_hi,X
-    LDA CATALOGUE + &107,Y : STA df_sect_lo,X
-    LDA CATALOGUE + &106,Y : AND #3 : STA df_sect_hi,X
-.next_file
-    LDX file
-    DEX : BPL each_file
-    RTS
-}
 
 \ disc_load: file X's read begun, from its start, to fe_dst in bank Y;
 \ disc_step moves it on.
@@ -234,56 +173,3 @@ ASSERT vert_mark = edge_mark + 256
     CLC
     RTS
 }
-
-\ The NMI routine, copied to NMI_PAGE. It stores nothing until a read arms
-\ it (making nmi_dst a STA); the last byte wanted makes it a BIT again and
-\ stops the read, and any NMI before the first read is read and dropped.
-\ The count is nmi_left's low byte (0 for 256) and nmi_pages, the pages it
-\ starts. A is kept in the LDA # (Tom Seddon's), so no zero page.
-.nmi_load
-SECTION Nmi, org = NMI_PAGE, guard = NMI_PAGE + &40, cmos = TRUE
-    STA nmi_restore + 1
-.nmi_bank
-    LDA #0 : STA romsel                         ; (the destination's bank)
-    LDA W_DATA
-.nmi_dst
-    BIT &8000                                   ; (a STA once armed)
-    LDA bank_now : STA romsel
-    INC nmi_dst + 1
-    BNE nmi_count
-    INC nmi_dst + 2
-.nmi_count
-    DEC nmi_left
-    BNE nmi_restore
-    DEC nmi_pages
-    BEQ nmi_last
-.nmi_restore
-    LDA #0
-    RTI
-.nmi_last
-    LDA #BIT_ABS : STA nmi_dst
-    LDA #&D0 : STA W_COMMAND                    ; Force Interrupt: the read stops
-    BRA nmi_restore
-ENDSECTION
-.nmi_end
-
-\ The game's files, by name (seven characters, padded), in DF_* order.
-.disc_names
-    EQUS "SHAPES "
-DF_SHAPES = 0
-    EQUS "WORLD  "
-DF_WORLD = 1
-    EQUS "TABLES "
-DF_TABLES = 2
-    EQUS "CODE2  "
-DF_CODE2 = 3
-    EQUS "COCKPIT"
-DF_COCKPIT = 4
-    EQUS "LOGIC  "
-DF_LOGIC = 5
-    EQUS "WINDOW "
-DF_WINDOW = 6
-    EQUS "SPEECH "
-DF_SPEECH = 7
-DISC_FILES = (P% - disc_names) DIV 7
-ASSERT DISC_FILES <= DISC_MAX

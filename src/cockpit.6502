@@ -1,34 +1,10 @@
 \ ***************************************************************************
-\ STARGLIDER for the BBC Master - the cockpit's screens
+\ STARGLIDER for the BBC Master - the cockpit's panel
 \
-\ The cockpit (tools/mkcockpit.py, decision 3) is on both screens, around
-\ the view's window, which is all that's ever cleared (screen.6502's
-\ window_clear). screen_copy sets ACCCON's X to reach the shadow screen,
-\ so it must lie below &3000, where X changes nothing. The panel drawn on
-\ it is panel.6502's, in the logic's bank: panel_draw and panel_reset call
-\ it.
+\ The cockpit is on both screens (screen.6502 copies and clears them). The
+\ panel drawn on it is panel.6502's, in the logic's bank: panel_draw,
+\ panel_texts and panel_reset call it.
 \ ***************************************************************************
-
-\ screen_copy: main RAM's screen into shadow RAM's, a page at a time
-\ through edge_mark (free outside the draw phase). panel_reset should
-\ follow it.
-.screen_copy
-{
-    ZA_AUTO2 p
-    STZ p : LDA #HI(SCREEN) : STA p+1
-.page
-    LDY #0
-.read
-    LDA (p),Y : STA edge_mark,Y
-    INY : BNE read
-    LDA #ACCCON_X : TSB acccon
-.write
-    LDA edge_mark,Y : STA (p),Y
-    INY : BNE write
-    LDA #ACCCON_X : TRB acccon
-    INC p+1 : BPL page                          ; up to &7FFF
-    RTS
-}
 
 \ panel_draw: the panel drawn into the screen being drawn (draw_buffer,
 \ draw_bank), after its 3D. panel_texts: the texts the ST prints on that
@@ -54,5 +30,3 @@ ZA_AUTO2 panel_vec
 .panel_jump
     JMP (panel_vec)
     ZA_CANJUMP panel_frame, panel_messages, panel_init
-
-ASSERT P% <= &3000

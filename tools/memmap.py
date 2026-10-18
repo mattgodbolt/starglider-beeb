@@ -7,7 +7,9 @@ uses.
 
 A section that saves bytes has its size; a virtual one (the workspace,
 the lists, the objects) is reckoned up to its last label, which leaves out
-that label's own length, so its use is a byte or so short.
+that label's own length, so its use is a byte or so short. SG, the disc's
+main file, is Main, the resident code (its free bytes are main RAM's),
+then Start, which runs once and may lie over the lists and objects.
 """
 import json
 import sys

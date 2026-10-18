@@ -1,0 +1,280 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the start
+\
+\ What SG runs once, from start: the disc reader made ready (its NMI
+\ routine into its page, the game's files found in the catalogue), the
+\ files loaded, the screens and the machine set up, and the game's state
+\ as the ST's start-up and title leave it; then play (main.6502), which
+\ begins the game and never comes back. SG holds it past main RAM's
+\ resident code, so it costs that code no room: it may run on over the
+\ lists and the object table (memory.6502), which nothing uses until play
+\ clears the objects. So it must never run with ACCCON's X set, which would
+\ move it to shadow RAM wherever it lies past &3000: what it calls that sets
+\ X (screen_copy, window_clear) clears it again before it returns.
+\ ***************************************************************************
+
+.start
+    ZA_ENTRY
+    SEI
+    \ HAZEL in, and the game's files loaded (disc.6502)
+    LDA acccon : AND #NOT(ACCCON_X OR ACCCON_D) AND &FF : ORA #ACCCON_Y : STA acccon
+    BANK BANK_SHAPES
+    JSR disc_init
+    LDX #DISC_LOADS - 1
+.load
+    PHX
+    LDA disc_load_lo,X : STA fe_dst
+    LDA disc_load_hi,X : STA fe_dst+1
+    LDY disc_load_bank,X
+    LDA disc_load_file,X : TAX
+    JSR disc_load
+    JSR disc_wait
+    PLX
+    DEX : BPL load
+.start_loaded                                   ; (tools/disccheck.mjs)
+    JSR mul_init
+    JSR line_draw
+    JSR screen_mode
+    \ the cockpit on both screens, their windows empty (screen.6502, in the
+    \ loading area's bank), their panels to draw
+    BANK BANK_PIC
+    JSR screen_copy
+    STZ draw_bank : JSR window_clear
+    LDA #ACCCON_X : STA draw_bank : JSR window_clear
+    JSR panel_reset
+IF DEFINED(SPLIT_SWEEP)
+    JSR split_test
+ENDIF
+    \ (on into game)
+
+\ ---------------------------------------------------------------------------
+\ game: the game's state as the ST's start-up and title leave it, then
+\ play's new game (main.6502).
+SIGHT_CX = 160                      ; the sight's centre (init_resolution's, in colour)
+SIGHT_CY = 68
+.game
+{
+    \ the logic's variables 0, in the workspace and in ANDY (with the
+    \ objects' fields there), as the ST's are as it loads (play clears the
+    \ objects' fields in main RAM)
+    LDX #0
+.work
+    STZ work_end,X
+    INX : CPX #LO(logic_work_end - work_end) : BNE work
+    ASSERT logic_work_end - work_end <= 256
+    BANK_ANDY BANK_LOGIC
+    JSR andy_clear
+    LDX #pl_roll + 1 - pl_x
+.player
+    STZ pl_x,X
+    DEX : BPL player
+    STZ n_slots : STZ docked : STZ silo_missile : STZ all_faces
+    \ what the ST's start-up sets (init_resolution's sight centre, the
+    \ sound on), the beam's colour as the program loads, and what the
+    \ title leaves: the four frame_ends before it waits for a key, and its
+    \ scene's player at y &64 (sub_03B38)
+    LDA #SIGHT_CX : STA sight_cx
+    LDA #SIGHT_CY : STA sight_cy
+    LDA #&FF : STA sound_on
+    LDA #15 : STA beam_colour
+    LDA #4 : STA frame_count
+    LDA #&64 : STA pl_y
+    LDX #15
+.colours
+    LDA st_colours,X : STA colour_map,X
+    DEX : BPL colours
+    \ main RAM's screen shown, and both cleared before they're drawn
+    JSR erase_init
+    STZ draw_buffer : STZ frame_drawn : STZ frame_ready
+    JSR input_init
+    BANK BANK_LOGIC
+    JSR sound_init
+    JSR install_irq
+    JMP play
+}
+
+\ andy_clear: ANDY, paged, all 0.
+.andy_clear
+{
+    ZA_AUTO2 p
+    STZ p : LDA #HI(ANDY) : STA p+1
+    LDY #0 : TYA
+.page
+    STA (p),Y
+    INY : BNE page
+    INC p+1 : LDX p+1 : CPX #HI(ANDY_TOP) : BNE page
+    RTS
+}
+
+\ The ST's colours, for now: reds colour 1 (red), blues and cyans colour 2
+\ (cyan), white colour 3 (decision 3 leaves the choice to make).
+.st_colours
+    EQUB &00, &0F, &0F, &0F, &0F, &0F, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &F0, &FF
+
+\ The files start loads (disc_load: the file, where, its bank), the last
+\ first.
+.disc_load_file
+    EQUB DF_SPEECH, DF_WINDOW, DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
+.disc_load_lo
+    EQUB LO(&8000), LO(WIN_PIC), LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
+.disc_load_hi
+    EQUB HI(&8000), HI(WIN_PIC), HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
+.disc_load_bank
+    EQUB BANK_PIC, BANK_PIC, BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
+DISC_LOADS = P% - disc_load_bank
+
+\ ---------------------------------------------------------------------------
+\ install_irq: engine.6502's irq_handler on IRQ1V, and only the vertical
+\ sync's and the split's interrupts on: nothing goes to the OS, whose IRQ
+\ entry (MOS 3.20, &E59E) reads nothing but IRQ1V, so HAZEL can stay
+\ paged over its code.
+.install_irq
+    SEI
+    LDA #&7F : STA sysvia_ier : STA usrvia_ier  ; anything not serviced would
+                                                ; hold IRQ asserted
+    LDA #LO(irq_handler) : STA irq1v
+    LDA #HI(irq_handler) : STA irq1v+1
+    LDA usrvia_acr : AND #&3F : STA usrvia_acr  ; T1 one-shot
+    LDA #2 : STA sysvia_ifr                     ; a vertical sync already flagged
+    LDA #&82 : STA sysvia_ier                   ; CA1: the vertical sync
+    LDA #&C0 : STA usrvia_ier                   ; T1: the split
+    CLI
+    RTS
+
+\ input_init: each axis read, and taken as where the stick is, for the
+\ accumulators to move from; the conversions the interrupt reads begun
+\ (input.6502). Before the interrupt is on: it waits for each conversion.
+.input_init
+{
+    LDX #1
+.axis
+    STX adc_control
+.converting
+    BIT adc_control : BMI converting
+    LDA adc_high : STA adc_raw,X : STA adc_kept,X
+    DEX : BPL axis
+    STZ adc_channel                             ; (the last begun, and done)
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ The disc reader (disc.6502) made ready.
+
+\ The catalogue's two sectors, read into the workspace's marks, which the
+\ draw phase doesn't need until the first frame.
+CATALOGUE = edge_mark
+ASSERT vert_mark = edge_mark + 256
+
+\ disc_init: the NMI routine into its page, the controller reset, and each
+\ of disc_names found in the catalogue (disc_wait's, so interrupts can be
+\ off, as at start: NMIs come anyway). A file that isn't there has its
+\ length 0, and loads as nothing.
+.disc_init
+{
+    ZA_AUTO1 file, entry, n, name, count
+    LDX #nmi_end - nmi_load - 1
+.copy
+    LDA nmi_load,X : STA NMI_PAGE,X
+    DEX : BPL copy                              ; (its first byte last, so it's whole first)
+    STZ fdc_state
+    LDA #W_LATCH AND NOT(4) : STA W_CONTROL     ; reset
+    LDX #20
+.reset
+    DEX : BNE reset
+    LDA #W_LATCH : STA W_CONTROL
+    LDA #&FF : STA fdc_cur                      ; the head's track not known
+    \ the catalogue
+    STZ fdc_track : STZ fdc_sect
+    LDA #LO(CATALOGUE) : STA fe_dst : LDA #HI(CATALOGUE) : STA fe_dst+1
+    STZ fe_len : LDA #2 : STA fe_len+1
+    STZ fe_bank
+    JSR disc_start
+    JSR disc_wait
+    \ each file by name: the entries' names are at 8 + 8e in sector 0,
+    \ their addresses at the same place in sector 1
+    LDA CATALOGUE + &105 : LSR A : LSR A : LSR A : STA n
+    LDX #DISC_FILES - 1
+.each_file
+    STX file
+    STZ df_len_lo,X : STZ df_len_hi,X
+    TXA : ASL A : ASL A : ASL A : SEC : SBC file : STA name    ; 7 file
+    LDA n : STA entry
+.each_entry
+    DEC entry : BMI next_file
+    LDA entry : ASL A : ASL A : ASL A : CLC : ADC #8 : TAY      ; 8 + 8e
+    LDX name
+    LDA #7 : STA count
+.char
+    LDA CATALOGUE,Y : AND #&7F
+    CMP disc_names,X : BNE each_entry
+    INY : INX
+    DEC count : BNE char
+    LDA CATALOGUE,Y : AND #&7F : CMP #'$' : BNE each_entry
+    \ found: from sector 1, its length and start sector
+    TYA : SEC : SBC #7 : TAY                    ; back to the entry's start
+    LDX file
+    LDA CATALOGUE + &104,Y : STA df_len_lo,X
+    LDA CATALOGUE + &105,Y : STA df_len_hi,X
+    LDA CATALOGUE + &107,Y : STA df_sect_lo,X
+    LDA CATALOGUE + &106,Y : AND #3 : STA df_sect_hi,X
+.next_file
+    LDX file
+    DEX : BPL each_file
+    RTS
+}
+
+\ The NMI routine, copied to NMI_PAGE. It stores nothing until a read arms
+\ it (disc.6502's w_start makes nmi_dst a STA); the last byte wanted makes
+\ it a BIT again and stops the read, and any NMI before the first read is
+\ read and dropped. The count is nmi_left's low byte (0 for 256) and
+\ nmi_pages, the pages it starts. A is kept in the LDA # (Tom Seddon's),
+\ so no zero page.
+.nmi_load
+SECTION Nmi, org = NMI_PAGE, guard = NMI_PAGE + &40, cmos = TRUE
+    STA nmi_restore + 1
+.nmi_bank
+    LDA #0 : STA romsel                         ; (the destination's bank)
+    LDA W_DATA
+.nmi_dst
+    BIT &8000                                   ; (a STA once armed)
+    LDA bank_now : STA romsel
+    INC nmi_dst + 1
+    BNE nmi_count
+    INC nmi_dst + 2
+.nmi_count
+    DEC nmi_left
+    BNE nmi_restore
+    DEC nmi_pages
+    BEQ nmi_last
+.nmi_restore
+    LDA #0
+    RTI
+.nmi_last
+    LDA #BIT_ABS : STA nmi_dst
+    LDA #&D0 : STA W_COMMAND                    ; Force Interrupt: the read stops
+    BRA nmi_restore
+ENDSECTION
+.nmi_end
+
+\ The game's files, by name (seven characters, padded), in DF_* order.
+.disc_names
+    EQUS "SHAPES "
+DF_SHAPES = 0
+    EQUS "WORLD  "
+DF_WORLD = 1
+    EQUS "TABLES "
+DF_TABLES = 2
+    EQUS "CODE2  "
+DF_CODE2 = 3
+    EQUS "COCKPIT"
+DF_COCKPIT = 4
+    EQUS "LOGIC  "
+DF_LOGIC = 5
+    EQUS "WINDOW "
+DF_WINDOW = 6
+    EQUS "SPEECH "
+DF_SPEECH = 7
+DISC_FILES = (P% - disc_names) DIV 7
+ASSERT DISC_FILES <= DISC_MAX
+
+INCLUDE "setup.6502"

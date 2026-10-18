@@ -133,10 +133,15 @@ the ST's mouse moves.
   another slot's exploding byte. And it copies random32's state into zero
   page for its own `h_random32`: anything the handlers call takes numbers
   from that, never from random32 or rng32 directly.
-- Code that sets ACCCON's X from main RAM must lie below &3000
-  (`src/cockpit.6502`, the interrupt handler): `ASSERT` it. Code in a
-  bank may set it too (the panel), but mustn't read &3000-&7FFF meanwhile:
-  the objects and lists are there.
+- Code that sets ACCCON's X from main RAM must lie below &3000 (the
+  interrupt handler): `ASSERT` it. Code in a bank may set it too (the
+  panel, the screens' copy and the window's clear in `src/screen.6502`,
+  the boxes' erase), but mustn't read &3000-&7FFF meanwhile: the objects
+  and lists are there.
+- SG is two parts: the resident code (`Main`, its budget `MAIN_TOP`) and
+  `start.6502`, run once after it, which may run on over the lists and
+  objects since nothing uses them until `play` clears the objects. Code
+  run once at start goes there, not in the resident part.
 `node tools/scenerun.mjs SCENES OUT --profile 37` samples where the cycles
 go. On the disc, `tools/listprof.mjs` splits world_lists into its parts and
 `tools/stepprof.mjs` times named routines a step, both holding keys. `tools/missilefps.mjs` times a missile view on the disc, its slide and

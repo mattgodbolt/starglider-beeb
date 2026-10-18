@@ -47,22 +47,7 @@ ENDIF
 SPLIT_T1 = (SYNC_TO_TOP + PANEL_LINE) * SCAN_US - 2 + SPLIT_ADJ
 FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
 
-\ install_irq: irq_handler on IRQ1V, and only the vertical sync's and the
-\ split's interrupts on: nothing goes to the OS, whose IRQ entry (MOS
-\ 3.20, &E59E) reads nothing but IRQ1V, so HAZEL can stay paged over its
-\ code.
-.install_irq
-    SEI
-    LDA #&7F : STA sysvia_ier : STA usrvia_ier  ; anything not serviced would
-                                                ; hold IRQ asserted
-    LDA #LO(irq_handler) : STA irq1v
-    LDA #HI(irq_handler) : STA irq1v+1
-    LDA usrvia_acr : AND #&3F : STA usrvia_acr  ; T1 one-shot
-    LDA #2 : STA sysvia_ifr                     ; a vertical sync already flagged
-    LDA #&82 : STA sysvia_ier                   ; CA1: the vertical sync
-    LDA #&C0 : STA usrvia_ier                   ; T1: the split
-    CLI
-    RTS
+\ (start.6502's install_irq puts irq_handler on IRQ1V, once.)
 
 \ irq_handler: the split, when T1 comes; at each vertical sync the view's
 \ colours back, T1 started, the field counted, a frame drawn shown from
