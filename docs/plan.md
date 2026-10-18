@@ -159,7 +159,7 @@ totals do, since only one bank is paged at a time:
 
 ---
 
-## 3. A memory map (proposed)
+## 3. The memory map
 
 The principle: everything that touches the objects in one place, the
 **world**; the drawing in another, working from a **draw list** of the
@@ -178,9 +178,16 @@ owns.
 | HAZEL | the multiply and reciprocal tables, the line drawer, the screen's clear, the vertex transforms |
 | ANDY | *as built:* the object fields only the logic reads, and the logic's variables (`src/vars.6502`): paged in with the logic's banks, over their first 4K |
 | Bank 4 | the shapes |
-| Bank 5 | the world: below &9000 the list phase (run with ANDY out), from &9000 the sine table and the logic that reads it (`world_render`'s, the flight, the handlers); and `kmul`, the drawing's ground matrix product, whose only caller has the bank paged |
-| Bank 6 | *as built:* the rest of the logic, from &9000 (the keys, collisions, the frame's end, the level change); below &9000, later, what play draws without ANDY (panel, text) |
-| Bank 7 | the loading area: flight's speech in flight; the docked screens and their clip when docked; the front end and the title outside play; the cockpit picture on its way to the screens |
+| Bank 5 | the world: below &9000 the list phase, run with ANDY out (its end, `world_list_end`, just short of the sine table's 1K alignment); from &9000 the sine table and the logic that reads it (`world_render`'s, the flight, the handlers); and at its end the drawing's products that build_matrix and the ground matrix take (`kmul`, `matrix_heading`), whose callers have the bank paged |
+| Bank 6 | *as built:* the rest of the logic from `world_list_end` (the keys, the laser, collisions, the frame's end, the level change), the logic's drawing records (`src/view.6502`: the bolt and the shots) and the panel (`src/panel.6502`), its data in the gap from &9000 to `world_list_end`. Below &9000 it holds no code (baron#29, our issue #1) and is free for data, readable only with ANDY out |
+| Bank 7 | *as built in flight:* the missile view's window picture and the draw phase's view code (`src/view_under.6502`, `src/mview.6502`), the code past `world_list_end`; below &9000 no code, free for data read with ANDY out. *Planned:* flight's speech, which needs a call (the four clips are 13.4K at the ST's rate, and the room with no code in it in banks 6 and 7 adds to about 11.5K); the docked screens and their clip when docked; the front end and the title outside play |
+
+The banks' first 4K hold no code until baron#29 is fixed: the rotations'
+annotated jumps fill bank 5 there, and a jump of another bank's at one of
+their addresses would take on its targets. Data is fine there, for
+whatever reads it with ANDY out, the speech player's interrupt above
+all. Every annotated jump outside the rotations' chain sits in main RAM
+(`handler_dispatch`, `set_up_dispatch`).
 
 Each region gets a budget, `ASSERT`ed in the build (section 6), so a part
 that grows says so at once.
