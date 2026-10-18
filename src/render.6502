@@ -547,18 +547,18 @@ ENDMACRO
 .row_x
     MOVW xs, sc_x0
 .new_row
-    \ |X0| and its sign, and its low byte set up if that's all of it
+    \ |X0| and its sign. Below 256 it's set up for the products, and below
+    \ 128 it's set up doubled, when their bytes 1-3 are |X0 A_z| / 128.
     LDA xs+1 : STA xneg : BPL x_pos
     LDA #0 : SEC : SBC xs : STA xs : LDA #0 : SBC xs+1 : STA xs+1
 .x_pos
     LDA xs+1 : BNE same_row
-    LDA xs : MUL_SET
+    LDA xs : BMI x_set
+    ASL A
+.x_set
+    MUL_SET
 .same_row
-    \ A_z is term 6 + j
-    LDA term : CMP #3 : BCC j_ok
-    SBC #3 : CLC
-.j_ok
-    ADC #6 : TAY
+    LDX term : LDY a_z,X
     LDA xf_asign,Y : ZA_INDEXEDBY 6..8
     EOR xneg : STA pneg
     TYA : ASL A : TAX
@@ -572,23 +572,34 @@ ENDMACRO
     INC mul_p+2
 .narrow
     STZ mul_p+3
-    BRA got_product
+    BIT xs : BMI undoubled
+    \ 2 |X0 A_z|, + 254 if the product is negative (its top byte stays 0:
+    \ 2 |X0| and |A_z| are under 256 and 2^15)
+    BIT pneg : BPL rounded
+    LDA mul_p : CLC : ADC #254 : STA mul_p
+    BCC rounded
+    INC mul_p+1 : BNE rounded
+    INC mul_p+2
+    BRA rounded
 .wide
     MOVW mul_x, xs
     LDA xf_amag,X : ZA_INDEXEDBY {12, 14, 16}
     STA mul_y : LDA xf_amag+1,X : ZA_INDEXEDBY {12, 14, 16}
     STA mul_y+1
     JSR umul16
-.got_product
-    \ |X0 A_z| / 128, rounded up if the product is negative
-    BIT pneg : BPL rounded
+.undoubled
+    \ |X0 A_z|, + 127 if the product is negative, then doubled
+    BIT pneg : BPL doubled
     LDA mul_p : CLC : ADC #127 : STA mul_p
-    BCC rounded
-    INC mul_p+1 : BNE rounded
-    INC mul_p+2 : BNE rounded
+    BCC doubled
+    INC mul_p+1 : BNE doubled
+    INC mul_p+2 : BNE doubled
     INC mul_p+3
+.doubled
+    ASL mul_p : ROL mul_p+1 : ROL mul_p+2 : ROL mul_p+3
 .rounded
-    ASL mul_p : ROL mul_p+1 : ROL mul_p+2 : ROL mul_p+3     ; bytes 1-3
+    \ bytes 1-3: |X0 A_z| / 128, rounded down if the product's positive
+    \ and up if it's negative, as the 68000's shifts would round it
     LDX term
     LDA xf_asign,X : ZA_INDEXEDBY 0..5
     STA d
@@ -654,6 +665,9 @@ ENDMACRO
     LDA #&80 : STA far_inside
 .outside
     RTS
+\ A_z's term, 6 + j, by B's term
+.a_z
+    EQUB 6, 7, 8, 6, 7, 8
 }
 
 \ edges_far: each marked edge of a far object, its vertices straight onto
