@@ -70,6 +70,8 @@ def variables(syms):
                 e["count"] = args[0]
             elif kind in ("wlo", "whi", "barr"):
                 e["count"], e["stride"] = args
+            elif kind == "slots":
+                e["count"] = args[0]
             elif kind not in SIZES:
                 raise SystemExit(f"{path}: {name}: no such kind {kind}")
             out.append(e)

@@ -29,6 +29,8 @@ from, and its result compared with the state the ST's left:
     collide  &01F28  after collisions
     message  &01F2C  after level_message
     end      &01F30  after frame_end (the post-frame tests' entry)
+    level    &01F06  level_start (the level flash and init_objects), when
+                     the post-frame tests go there
 
 The next frame's `top` is the post-frame tests' result. Every call of
 random8 (&046B2) and random32 (&04692) is logged with d0 (which random8
@@ -51,7 +53,7 @@ A6 = 0x5BF00
 POINTS = [  # (name, text offset)
     ("top", 0x01F10), ("lists", 0x05108), ("render", 0x01F14), ("keys", 0x01F18),
     ("flight", 0x01F1C), ("handlers", 0x01F20), ("animate", 0x01F24), ("collide", 0x01F28),
-    ("message", 0x01F2C), ("end", 0x01F30),
+    ("message", 0x01F2C), ("end", 0x01F30), ("level", 0x01F06),
 ]
 TAG_POINT = 0x5700                      # + the point's index
 TAG_RANDOM8, TAG_RANDOM32 = 0x5800, 0x5801
@@ -137,7 +139,8 @@ def parse(path):
                 if cur is not None:
                     frames.append(cur)
                 cur = {"segment": segment, "vbl": pending[1], "points": {}, "d0": {}, "rng": []}
-            cur["d0"][name] = pending[2] & 0xFFFF
+            if cur is not None:
+                cur["d0"][name] = pending[2] & 0xFFFF
             point, mem, pending = name, {}, []
         elif tag in (TAG_RANDOM8, TAG_RANDOM32) and len(pending) == 3:
             if cur is not None:

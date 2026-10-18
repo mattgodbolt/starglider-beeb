@@ -9,7 +9,7 @@
 \ its low byte), long, raw N (N bytes as they are), slot (the ST's pointer
 \ to an object record, kept as the slot: &FF for none), or for an array
 \ wlo N S / whi N S / barr N S (N words' low or high bytes, or N bytes, S
-\ bytes apart on the ST). tools/stmap.py reads them, and the harness
+\ bytes apart on the ST) or slots N (N record pointers, kept as slots). tools/stmap.py reads them, and the harness
 \ translates the ST's state into the port's and back by them
 \ (tools/logicrun.mjs). Variables declared elsewhere carry the same braces
 \ (the player, in zp.6502).

@@ -149,6 +149,16 @@ for (const v of map.variables) {
             get: () => [...ram.subarray(at, at + v.count)],
             want: (r) => Array.from({ length: v.count }, (_, i) => st(r)[idx(i)]),
         });
+    } else if (v.kind === "slots") {
+        const long = (r, i) => st(r).readUInt32BE(v.offset + 4 * i);
+        items.push({
+            name: v.name,
+            put: (r) => {
+                for (let i = 0; i < v.count; i++) ram[at + i] = slotOf(long(r, i));
+            },
+            get: () => Array.from({ length: v.count }, (_, i) => ptrOf(ram[at + i])),
+            want: (r) => Array.from({ length: v.count }, (_, i) => long(r, i)),
+        });
     } else if (v.kind === "slot") {
         const long = (r) => st(r).readUInt32BE(v.offset);
         items.push({
