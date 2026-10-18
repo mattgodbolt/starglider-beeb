@@ -3,6 +3,8 @@
 of the BBC's eight colours, the ST's shades between them ordered-dithered.
 
     mkcockpit.py TRA OUT.png [--option NAME] [--flight]    a preview, at 2x
+        [--lines RUN.json --frame N]                      with a frame's lines
+                                                          (tools/scenerun.mjs's)
     mkcockpit.py TRA --screen OUT [--option NAME]         MODE 1's screen bytes,
                                                           the window empty
     mkcockpit.py TRA --options                            list the options
@@ -98,6 +100,30 @@ def screen(out):
     return data
 
 
+# The ST's colours to the view's logical colours, as the disc maps them for
+# now (src/main.6502's model_colours): reds, yellows and pinks 1, blues and
+# cyans 2, white 3.
+LINE_COLOURS = [0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3]
+
+
+def plot_line(out, x0, y0, x1, y1, c):
+    dx, dy = abs(x1 - x0), -abs(y1 - y0)
+    sx, sy = (1 if x0 < x1 else -1), (1 if y0 < y1 else -1)
+    err = dx + dy
+    while True:
+        if 0 <= x0 < 320 and 0 <= y0 < 200:
+            out[y0][x0] |= c
+        if x0 == x1 and y0 == y1:
+            return
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x0 += sx
+        if e2 <= dx:
+            err += dx
+            y0 += sy
+
+
 def preview(out, option, path, scale=2):
     bands = OPTIONS[option]
     img = Image.new("RGB", (320, 200))
@@ -118,6 +144,8 @@ def main():
     ap.add_argument("--flight", action="store_true")
     ap.add_argument("--options", action="store_true")
     ap.add_argument("--screen", metavar="OUT")
+    ap.add_argument("--lines", metavar="RUN.json")
+    ap.add_argument("--frame", type=int, default=0)
     args = ap.parse_args()
     if args.options:
         for k, bands in OPTIONS.items():
@@ -127,7 +155,13 @@ def main():
     if args.screen:
         Path(args.screen).write_bytes(screen(convert(pal, pix, args.option, True)))
     else:
-        preview(convert(pal, pix, args.option, args.flight), args.option, args.out)
+        out = convert(pal, pix, args.option, args.flight or bool(args.lines))
+        if args.lines:
+            import json
+            frame = json.loads(Path(args.lines).read_text())["frames"][args.frame]
+            for _, _, x0, y0, x1, y1, colour in frame["lines"]:
+                plot_line(out, x0, y0, x1, y1, LINE_COLOURS[colour & 15])
+        preview(out, args.option, args.out)
 
 
 if __name__ == "__main__":
