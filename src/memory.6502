@@ -20,7 +20,7 @@
 LISTS = OBJECTS - 3 * OB_SLOTS
 SECTION Lists, org = LISTS, guard = OBJECTS, virtual = TRUE
 .coarse_slots SKIP OB_SLOTS
-.near_slots SKIP OB_SLOTS
+.near_slots SKIP OB_SLOTS   ; {ST $1214(a6) slotsdown 140}
 .draw_slots SKIP OB_SLOTS
 ENDSECTION
 

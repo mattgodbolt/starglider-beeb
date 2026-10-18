@@ -8,3 +8,27 @@
 \ state the game's logic reads (docs/research/st-logic.md).
 .sfx_start
     RTS
+
+\ The samples sample_start plays (sample_clip), each the ST's: the title
+\ song (star) and Clare Edgeley's four speeches (clare1 to clare4).
+SAMPLE_SONG    = 0
+SAMPLE_LAUNCH  = 1                  ; a missile launched (L)
+SAMPLE_DOCKED  = 2                  ; at the silo tunnel's end
+SAMPLE_SHIELDS = 3                  ; the shields low
+SAMPLE_ENERGY  = 4                  ; the energy low
+
+\ sample_start (the ST's &01A50): sample_clip, if the sound is on. The
+\ caller sets sample_clip and the ST's length and rate of it (sample_len,
+\ sample_tacr, sample_tadr) first, as the ST's sets &A0, &A4, &2CF and
+\ &2D0. The bytes left are what the logic reads back: while they're not 0
+\ the speech warnings wait, and the player (to come) counts them down.
+.sample_start
+{
+    LDA sound_on : BEQ off
+    LDX #3
+.len
+    LDA sample_len,X : STA sample_left,X
+    DEX : BPL len
+.off
+    RTS
+}

@@ -13,6 +13,13 @@ game is running. `run` takes --disk, --hatari and --tos as st_hatari.py
 does. Fly with the keys, not the mouse: random8 adds the mouse
 accumulator, which the keys change only inside read_keys.
 
+A script line `poke COMMAND` (a Hatari debugger command, such as `w w
+$5c02e $1ec0` to move the player) runs COMMAND at the next frame's
+world_render entry (&04FE8), just after the `top` point, rather than
+wherever the emulation is when the line is sent; consecutive pokes run
+together. Such a frame is marked "poked": "top", for the harness to leave
+out the one routine whose span the pokes fall in.
+
 At each routine boundary of the frame loop (&01F10) the state the logic
 keeps is dumped (REGIONS: the variable block with the objects, the low RAM
 and the program's own data that docs/research/st-logic.md lists), so a
@@ -31,6 +38,8 @@ from, and its result compared with the state the ST's left:
     end      &01F30  after frame_end (the post-frame tests' entry)
     level    &01F06  level_start (the level flash and init_objects), when
                      the post-frame tests go there
+    mine     &07B28  in object_handlers, a mine's proximity block, with a0
+    mined    &07BBC  the end of it (before its registers come back)
 
 The next frame's `top` is the post-frame tests' result. Every call of
 random8 (&046B2) and random32 (&04692) is logged with d0 (which random8
@@ -39,7 +48,9 @@ caller, so a transcription can see what it must reproduce.
 
 steps.json: {"regions": [[name, address, length]...], "points": [...],
 "frames": [{"vbl", "segment", "points": {point: {region: hex}}, "d0":
-{point: d0.w}, "rng": [[routine, d0, caller]...]}]}.
+{point: d0.w}, "a0": {point: a0} (the points that log it), "rng":
+[[routine, d0, caller]...], and "poked" if poked}]}. A point reached
+twice in a frame (a second mine) keeps the second.
 """
 import json
 import os
@@ -54,10 +65,14 @@ POINTS = [  # (name, text offset)
     ("top", 0x01F10), ("lists", 0x05108), ("render", 0x01F14), ("keys", 0x01F18),
     ("flight", 0x01F1C), ("handlers", 0x01F20), ("animate", 0x01F24), ("collide", 0x01F28),
     ("message", 0x01F2C), ("end", 0x01F30), ("level", 0x01F06),
+    ("mine", 0x07B28), ("mined", 0x07BBC),
 ]
+A0_POINTS = {"mine", "mined"}           # a0 logged too: the mine's record
 TAG_POINT = 0x5700                      # + the point's index
 TAG_RANDOM8, TAG_RANDOM32 = 0x5800, 0x5801
+TAG_POKE = 0x5802
 RANDOM8, RANDOM32 = 0x046B2, 0x04692
+POKE_AT, POKED = 0x04FE8, "top"         # world_render's entry: just after `top`
 # (name, address, length): what each point dumps
 REGIONS = [
     ("vars", A6, 0x359A),                       # the variable block and the 140 objects
@@ -88,7 +103,8 @@ def setup(d):
     dumps = [f"m ${a:x}-${a + n:x}" for _, a, n in REGIONS]
     arm = []
     for i, (name, off) in enumerate(POINTS):
-        (d / f"{name}.ini").write_text("\n".join([f"e ${TAG_POINT + i:x}", "e VBL", "e d0&$ffff"] + dumps) + "\n")
+        a0 = ["e a0"] if name in A0_POINTS else []
+        (d / f"{name}.ini").write_text("\n".join([f"e ${TAG_POINT + i:x}", "e VBL", "e d0&$ffff"] + a0 + dumps) + "\n")
         arm.append(f"b pc = ${BASE + off:x} :trace :quiet :file {d / (name + '.ini')}")
     for tag, off, name in ((TAG_RANDOM8, RANDOM8, "random8"), (TAG_RANDOM32, RANDOM32, "random32")):
         (d / f"{name}.ini").write_text(f"e ${tag:x}\ne d0&$ffff\ne (a7).l\n")
@@ -132,7 +148,8 @@ def parse(path):
             continue
         pending.append(int(m.group(1)))
         tag = pending[0]
-        if TAG_POINT <= tag < TAG_POINT + len(POINTS) and len(pending) == 3:
+        if TAG_POINT <= tag < TAG_POINT + len(POINTS) and \
+                len(pending) == (4 if POINTS[tag - TAG_POINT][0] in A0_POINTS else 3):
             close_point()
             name = POINTS[tag - TAG_POINT][0]
             if name == "top":
@@ -141,11 +158,17 @@ def parse(path):
                 cur = {"segment": segment, "vbl": pending[1], "points": {}, "d0": {}, "rng": []}
             if cur is not None:
                 cur["d0"][name] = pending[2] & 0xFFFF
+                if name in A0_POINTS:
+                    cur.setdefault("a0", {})[name] = pending[3] & 0xFFFFFFFF
             point, mem, pending = name, {}, []
         elif tag in (TAG_RANDOM8, TAG_RANDOM32) and len(pending) == 3:
             if cur is not None:
                 cur["rng"].append(["random8" if tag == TAG_RANDOM8 else "random32",
                                    pending[1] & 0xFFFF, (pending[2] & 0xFFFFFFFF) - BASE])
+            pending = []
+        elif tag == TAG_POKE:
+            if cur is not None:
+                cur["poked"] = POKED
             pending = []
         elif not (TAG_POINT <= tag < TAG_POINT + len(POINTS)) and tag not in (TAG_RANDOM8, TAG_RANDOM32):
             pending = []                            # some other output
@@ -160,10 +183,35 @@ def write(frames, out):
     print(f"{out}: {len(frames)} frames")
 
 
+def pokes(text, outdir):
+    """The script with each run of `poke` lines made a breakpoint, once at
+    POKE_AT, that runs them from a file of their own, tagged."""
+    out, run_ = [], []
+
+    def flush():
+        if run_:
+            f = outdir / f"poke{len(list(outdir.glob('poke*.ini')))}.ini"
+            f.write_text("\n".join([f"e ${TAG_POKE:x}"] + run_) + "\n")
+            out.append(f"debug b pc = ${BASE + POKE_AT:x} :once :trace :quiet :file {f}")
+            run_.clear()
+    for line in text.splitlines():
+        words = line.split("#", 1)[0].split(None, 1)
+        if words and words[0] == "poke":
+            run_.append(words[1])
+            continue
+        if words:
+            flush()
+        out.append(line)
+    flush()
+    return "\n".join(out) + "\n"
+
+
 def run(script, outdir, rest):
     outdir = Path(outdir).resolve()
     arm = setup(outdir)
-    text = Path(script).read_text().replace("{arm}", str(arm))
+    for f in outdir.glob("poke*.ini"):
+        f.unlink()
+    text = pokes(Path(script).read_text().replace("{arm}", str(arm)), outdir)
     (outdir / "script.txt").write_text(text)
     here = Path(__file__).resolve().parent
     subprocess.run([sys.executable, "-I", str(here / "st_hatari.py"), str(outdir / "script.txt"),

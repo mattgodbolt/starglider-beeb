@@ -1,0 +1,61 @@
+# Collisions in the missile view, on the keys: the missile put into a
+# silo (a hit, at no cost), into an energy beam (which clears the flags)
+# and then Starglider One with a hit point to spare (a hit point lost),
+# and into a walker (destroyed and scored); then, out of the missile
+# view, a stomper rammed with less than its 8000 left, and the next
+# frame's test ends the game. Each missile is put where it's
+# wanted once its view has opened, while it's still held at its launch
+# point. The pokes (at a frame's start: tools/st_steps.py) write the
+# player ($12E: x, y, z; $13A: the angles), the missiles carried ($278),
+# the missile ($26A: x, y, z), an object's fields (its record is at
+# &5D19A + 64 x its index) and the shields ($260). The capture runs the
+# game slowly, so the waits stand for frames.
+wait 38
+key 57
+wait 3
+debug parse {arm}
+wait 2
+debug echo \nSEG silo\n
+# silo 83 (x &1C30, z &DC60)
+poke w w $5c02e $4000 $ffd0 $4000
+poke w w $5c03a 0 0 0
+wait 2
+key l
+wait 16
+poke w w $5c16a $1c30 $ffd0 $dc60
+wait 20
+debug echo \nSEG beam\n
+# beam 96 (x &9210, z &E6C0), then Starglider One (record 106) held at
+# x &4000, y -750, z &4000, with a hit point to spare
+poke w w $5c178 1
+wait 2
+key l
+wait 16
+poke w w $5c16a $9210 $ffd0 $e6c0
+wait 3
+poke w w $5ec2a 0
+poke w w $5ec4a 1
+poke w w $5ec1e $4000 $fd12 $4000
+poke w w $5c16a $4000 $fd12 $4000
+wait 20
+debug echo \nSEG walker\n
+# the walker (record 49) held at x &5000, z &5000
+poke w w $5c178 1
+wait 2
+key l
+wait 16
+poke w w $5ddea 0
+poke w w $5ddde $5000 0 $5000
+poke w w $5c16a $5000 $ffd0 $5000
+wait 20
+debug echo \nSEG clamp\n
+# the stomper (record 10, a walker) held at x &6000, z &6000, rammed
+# with 5000 left: the shields stop at 0, and the next frame's test ends
+# the game
+poke w w $5c160 $1388
+poke w w $5d42a 0
+poke w w $5d41e $6000 0 $6000
+poke w w $5c02e $6000 $ffd0 $5fc0
+wait 8
+debug echo \nSEG end\n
+quit

@@ -118,7 +118,12 @@ says how):
   `st_steps.py run tests/st/steps_X.txt build/steps/X ...` captures the
   logic's state at every routine boundary of the frame loop, and every
   random number call, for the port's logic to be checked routine by
-  routine (fly on the keys: random8 adds the mouse accumulator).
+  routine (fly on the keys: random8 adds the mouse accumulator). Set the
+  ST's state in such a capture with `poke` lines, which land at a frame's
+  start, not `debug w`, which lands wherever the emulation is and shows as
+  a difference in whichever routine it falls in. Captures crawl, and more
+  slowly with several running at once, so a script's waits count frames
+  more than seconds: run them one at a time.
 - **The Spectrum 128K**: `tools/zx.py`, nm's harness on SkoolKit.
 - **The CPC**: `tools/cpc_emu.py` on the Caprice32 in `../caprice32`.
 - **The C64**: `tools/c64_unfreeze.py` and `tools/c64_run.py` on py65.

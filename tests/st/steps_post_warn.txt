@@ -1,0 +1,54 @@
+# The post-frame tests, on the keys: the shields and energy warnings when
+# the frame count ($1E2) passes a multiple of 128, with the sound on (a
+# speech started stops the second, and gates the next while it plays)
+# and off (Q); the cheat's refill; the energy at exactly 0 while stopped,
+# the scrape skipped at speed 0; then the energy's drain ends the game.
+# The pokes (at a frame's start: tools/st_steps.py) write the player
+# ($12E: x, y, z), the energy ($25E), the shields ($260), the frame count
+# and the cheat ($2CD). The capture runs the game slowly, so the waits
+# stand for frames; a speech lasts some of them.
+wait 38
+key 57
+wait 3
+debug parse {arm}
+wait 2
+debug echo \nSEG both\n
+# both low: the shields' speech, which keeps the energy's from starting
+poke w w $5c02e $4000 $ffd0 $4000
+poke w w $5c15e $2000 $2000
+poke w w $5c0e2 $7c
+wait 6
+debug echo \nSEG playing\n
+# the next multiple while it plays: neither starts
+poke w w $5c0e2 $fc
+wait 6
+debug echo \nSEG energy\n
+# the energy's alone, once the speech has ended
+poke w w $5c160 $ffff
+wait 8
+poke w w $5c0e2 $17c
+wait 6
+debug echo \nSEG quiet\n
+# with the sound off, both warnings write the speech's parameters
+key q
+wait 1
+poke w w $5c160 $2000
+poke w w $5c0e2 $1fc
+wait 6
+key s
+debug echo \nSEG cheat\n
+poke w b $5c1cd $ff
+wait 3
+poke w b $5c1cd 0
+debug echo \nSEG stopped\n
+# stopped at the ground with no energy: no drain, no scrape
+key 0x35 3
+poke w w $5c030 $ffec
+poke w w $5c15e 0
+wait 4
+debug echo \nSEG drained\n
+# moving again: the drain borrows and the game ends
+key 57 2
+wait 8
+debug echo \nSEG end\n
+quit

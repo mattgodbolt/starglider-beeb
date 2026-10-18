@@ -1,8 +1,256 @@
 \ ***************************************************************************
-\ STARGLIDER for the BBC Master - collisions, docking, refuelling (the ST's &08416)
+\ STARGLIDER for the BBC Master - collisions, docking, refuelling (the ST's
+\ &08416) and the mines' proximity (&07B28)
 \
-\ To be transcribed exactly (docs/research/st-logic.md, "The bearing, collisions, docking, refuelling and the laser").
+\ Exactly the ST's (docs/research/st-logic.md, "The bearing, collisions,
+\ docking, refuelling and the laser"; the mines, "The object handlers,
+\ first half"). The near list is walked in the ST's order, ascending slot
+\ (the port's near_slots from its last entry), and only the first object
+\ whose box holds the player counts: a ram (only flagged here: post_frame's
+\ ram_damage takes its cost), a missile hit in the missile view, the
+\ beam's refuelling or a silo's docking. The boxes are strict, in camera
+\ space as the list phase left it (before this frame's moves), each axis
+\ two N-flag tests, (v - s) and (-v - s) both negative: so -32768 is never
+\ inside, and a size of 0 never holds anything.
 \ ***************************************************************************
 
+INCLUDE "../../build/gen/collide.6502"
+
 .collisions
+{
+    ZA_AUTO1 n
+    LDA docked : BEQ walk
     RTS
+.walk
+    LDX near_n : BEQ none
+.each
+    DEX : STX n
+    LDY near_slots,X
+    LDA ob_exploding,Y : BNE next
+    LDX ob_type,Y
+    \ (cz - s) negative first, the test most objects fail
+    LDA ob_cz_lo,Y : SEC : SBC size_z_lo,X : LDA ob_cz_hi,Y : SBC size_z_hi,X : BPL next
+    JSR box : BCS hit
+.next
+    LDX n : BNE each
+.none
+    \ no box holds the player: not docked, no ram, the refuelling's latch
+    \ off (&0845C)
+    STZ docked
+    JMP unflagged
+.hit
+    \ X the type, Y the slot
+    LDA mv_render : BEQ flying
+    \ the missile view: the beam clears everything; anything else is the
+    \ missile's hit, its view closing from now, and a ram
+    CPX #11 : BEQ none
+    LDA #&10 : STA m_life : STZ m_life+1
+    STZ mv_iris : STZ mv_iris+1
+    BRA kinds
+.flying
+    CPX #11 : BNE not_beam
+    JMP refuel
+.not_beam
+    CPX #6 : BNE kinds
+    JMP dock
+.kinds
+    CPX #27 : BEQ starglider
+    CPX #1 : BEQ walker
+    CPX #15 : BEQ walker
+}
+\ ram_explode (&084DA): destroyed unless indestructible (flags bit 7);
+\ ram_flag (&084EA): the ram, for post_frame.
+.ram_explode
+    LDA ob_flags,Y : BMI ram_flag
+    LDA #&FF : STA ob_exploding,Y
+    LDA #0 : STA ob_explosion,Y
+.ram_flag
+    LDA #&FF : STA ram_hit
+    STY ram_obj
+    RTS
+
+\ Starglider One (&084F4) loses a hit point to the missile only, and is
+\ destroyed below 0; the walkers (&08502) take 8000 from the shields,
+\ clamped at 0, and only the missile destroys them.
+.starglider
+{
+    LDA missile_view : BEQ ram_flag
+    LDA ob_hits_lo,Y : SEC : SBC #1 : STA ob_hits_lo,Y
+    LDA ob_hits_hi,Y : SBC #0 : STA ob_hits_hi,Y : BPL ram_flag
+    BRA ram_explode
+}
+.walker
+{
+    LDA missile_view : BNE ram_explode
+    LDA shields : SEC : SBC #LO(&1F40) : TAX
+    LDA shields+1 : SBC #HI(&1F40) : BCS kept
+    LDA #0 : TAX
+.kept
+    STA shields+1 : STX shields
+    BRA ram_flag
+}
+
+\ refuel (&0851C): the beam. The test is made once a contact, on its
+\ first frame (the latch): camera z in [&79E, &7D0), the beam's heading as
+\ drawn (its own plus the player's, 12 bits) in [&60C, &9F4), camera x in
+\ [-&2BC, &2BC), each an N-flag test. While it holds, every frame of the
+\ contact flashes &500 and adds &190 to the energy, which stops at &FFFF.
+\ Never a ram.
+.refuel
+{
+    ZA_AUTO2 h
+    LDA refuel_latch : BNE contact
+    LDA missile_view : BNE contact      ; (never: the view's beam is a miss)
+    LDA #&FF : STA refuel_latch
+    STZ refuelling
+    LDA ob_cz_lo,Y : SEC : SBC #LO(&7D0) : LDA ob_cz_hi,Y : SBC #HI(&7D0) : BPL contact
+    LDA ob_cz_lo,Y : SEC : SBC #LO(&79E) : LDA ob_cz_hi,Y : SBC #HI(&79E) : BMI contact
+    LDA ob_heading_lo,Y : CLC : ADC pl_heading : STA h
+    LDA ob_heading_hi,Y : ADC pl_heading+1 : AND #&0F : STA h+1
+    LDA h : SEC : SBC #LO(&9F4) : LDA h+1 : SBC #HI(&9F4) : BPL contact
+    LDA h : SEC : SBC #LO(&60C) : LDA h+1 : SBC #HI(&60C) : BMI contact
+    LDA ob_cx_lo,Y : SEC : SBC #LO(&2BC) : LDA ob_cx_hi,Y : SBC #HI(&2BC) : BPL contact
+    LDA ob_cx_lo,Y : SEC : SBC #LO(-&2BC) : LDA ob_cx_hi,Y : SBC #HI(-&2BC) : BMI contact
+    LDA #&FF : STA refuelling
+    LDA #8 : LDX #1
+    JSR sfx_start
+.contact
+    LDA refuelling : BEQ done
+    LDA #LO(&500) : STA flash : LDA #HI(&500) : STA flash+1
+    LDA energy : CLC : ADC #LO(&190) : TAX
+    LDA energy+1 : ADC #HI(&190) : BCC filled
+    LDA #&FF : TAX
+.filled
+    STA energy+1 : STX energy
+.done
+    RTS
+}
+
+\ dock (&085AC): a silo. Its heading as drawn within -&154 to &153 of 0
+\ (12 bits) docks; otherwise it's a ram that costs nothing (post_frame
+\ skips a silo). Docked: the shields full, the tunnel and the silo's
+\ missile placed at the silo, the player at the tunnel's mouth with its
+\ angles 0 and the speed input 16.
+.dock
+{
+    ZA_AUTO1 silo
+    ZA_AUTO2 h
+    LDA docked : BEQ open               ; (never docked: collisions returned)
+    JMP unflagged
+.open
+    LDA ob_heading_lo,Y : CLC : ADC pl_heading : STA h
+    LDA ob_heading_hi,Y : ADC pl_heading+1 : AND #&0F : STA h+1
+    LDA h : SEC : SBC #LO(&EAC) : LDA h+1 : SBC #HI(&EAC) : BPL docking
+    LDA h : SEC : SBC #LO(&154) : LDA h+1 : SBC #HI(&154) : BMI docking
+    JMP ram_flag
+.docking
+    STY silo
+    LDA #&10 : LDX #&0A
+    JSR sfx_start
+    LDY silo
+    INC dockings : BNE counted
+    INC dockings+1 : BNE counted
+    INC dockings+2 : BNE counted
+    INC dockings+3
+.counted
+    LDA #&FF : STA shields : STA shields+1
+    STA docked
+    \ the tunnel: at the silo, &B4 up; heading 0
+    LDA ob_x_lo,Y : STA ob_x_lo+SLOT_TUNNEL : LDA ob_x_hi,Y : STA ob_x_hi+SLOT_TUNNEL
+    LDA ob_y_lo,Y : SEC : SBC #&B4 : STA ob_y_lo+SLOT_TUNNEL
+    LDA ob_y_hi,Y : SBC #0 : STA ob_y_hi+SLOT_TUNNEL
+    LDA ob_z_lo,Y : STA ob_z_lo+SLOT_TUNNEL : LDA ob_z_hi,Y : STA ob_z_hi+SLOT_TUNNEL
+    STZ ob_heading_lo+SLOT_TUNNEL : STZ ob_heading_hi+SLOT_TUNNEL
+    \ the silo's missile: at the silo, &15E nearer; pitch and heading &400
+    LDA ob_x_lo,Y : STA ob_x_lo+SLOT_MISSILE : LDA ob_x_hi,Y : STA ob_x_hi+SLOT_MISSILE
+    LDA ob_y_lo,Y : STA ob_y_lo+SLOT_MISSILE : LDA ob_y_hi,Y : STA ob_y_hi+SLOT_MISSILE
+    LDA ob_z_lo,Y : SEC : SBC #LO(&15E) : STA ob_z_lo+SLOT_MISSILE
+    LDA ob_z_hi,Y : SBC #HI(&15E) : STA ob_z_hi+SLOT_MISSILE
+    STZ ob_pitch_lo+SLOT_MISSILE : STZ ob_heading_lo+SLOT_MISSILE
+    LDA #HI(&400) : STA ob_pitch_hi+SLOT_MISSILE : STA ob_heading_hi+SLOT_MISSILE
+    \ the player: at the silo, &B4 up and &320 nearer, level
+    LDA ob_x_lo,Y : STA pl_x : LDA ob_x_hi,Y : STA pl_x+1
+    LDA ob_y_lo,Y : SEC : SBC #&B4 : STA pl_y
+    LDA ob_y_hi,Y : SBC #0 : STA pl_y+1
+    LDA ob_z_lo,Y : SEC : SBC #LO(&320) : STA pl_z
+    LDA ob_z_hi,Y : SBC #HI(&320) : STA pl_z+1
+    STZ pl_pitch : STZ pl_pitch+1
+    STZ pl_heading : STZ pl_heading+1
+    STZ pl_roll : STZ pl_roll+1
+    LDA #LO(&FFF0) : STA speed_acc : LDA #HI(&FFF0) : STA speed_acc+1
+    STY docked_silo
+}
+\ unflagged (&08460): no ram, and the refuelling's latch off.
+.unflagged
+    STZ ram_hit : STZ refuel_latch : STZ refuelling
+    LDA #&FF : STA ram_obj
+    RTS
+
+\ mine_proximity (&07B28-&07BC0): for the mine handler (&07AC6), with X
+\ the mine's slot, when it's in the draw list within &800 ahead; rng_d0
+\ the ST's d0 there, left over from the handler before. Nothing while
+\ 'LEVEL n' shows or docked. Nearer than &600 the mine explodes: in the
+\ missile view it's the missile's hit (its view closing from now);
+\ otherwise the roll's jolt from random8 with that d0, 15000 from the
+\ shields (stopping at 0), the sound and a &333 flash. From &600 to &800
+\ it's the warning, but not in the missile view. The ST keeps its
+\ registers round it, so rng_d0 and X come back as they were (Y doesn't).
+.mine_proximity
+{
+    ZA_AUTO1 slot
+    ZA_AUTO2 kept, t
+    MOVW kept, rng_d0
+    STX slot
+    LDA level_msg : ORA level_msg+1 : ORA docked : BEQ open
+    JMP done
+.open
+    LDA ob_cz_lo,X : SEC : SBC #LO(&600) : LDA ob_cz_hi,X : SBC #HI(&600) : BPL warning
+    LDA #&FF : STA ob_exploding,X
+    STZ ob_explosion,X
+    LDA missile_view : BEQ hurt
+    LDA #&10 : STA m_life : STZ m_life+1
+    STZ mv_iris : STZ mv_iris+1
+    BRA done
+.hurt
+    JSR random8
+    LDA rng_d0 : AND #&3E : SEC : SBC #&20 : STA t
+    LDA #0 : SBC #0 : STA t+1
+    ADDW jolt, t
+    LDA shields : SEC : SBC #LO(15000) : TAX
+    LDA shields+1 : SBC #HI(15000) : BCS kept_some
+    LDA #0 : TAX
+.kept_some
+    STA shields+1 : STX shields
+    LDA #1 : LDX #1
+    JSR sfx_start
+    LDA #LO(&333) : STA flash : LDA #HI(&333) : STA flash+1
+    LDA #MINE_EXPLODED : STA mine_text
+    BRA done
+.warning
+    LDA missile_view : BNE done
+    LDA #MINE_DETECTED : STA mine_text
+.done
+    MOVW rng_d0, kept
+    LDX slot
+    RTS
+}
+MINE_DETECTED = 1                   ; mine_text: 'WARNING:  MINE DETECTED'
+MINE_EXPLODED = 2                   ; 'MINE HAS JUST EXPLODED!'
+
+\ box: C set if the rest of slot Y's box, by its type X, holds the player:
+\ (-cz - s) negative, then x within size_z, then y within size_y.
+.box
+{
+    ZA_AUTO2 v
+    LDA #0 : SEC : SBC ob_cz_lo,Y : STA v : LDA #0 : SBC ob_cz_hi,Y : STA v+1
+    LDA v : SEC : SBC size_z_lo,X : LDA v+1 : SBC size_z_hi,X : BPL out
+    LDA ob_cx_lo,Y : SEC : SBC size_z_lo,X : LDA ob_cx_hi,Y : SBC size_z_hi,X : BPL out
+    LDA #0 : SEC : SBC ob_cx_lo,Y : STA v : LDA #0 : SBC ob_cx_hi,Y : STA v+1
+    LDA v : SEC : SBC size_z_lo,X : LDA v+1 : SBC size_z_hi,X : BPL out
+    LDA ob_cy_lo,Y : SEC : SBC size_y_lo,X : LDA ob_cy_hi,Y : SBC size_y_hi,X : BPL out
+    LDA #0 : SEC : SBC ob_cy_lo,Y : STA v : LDA #0 : SBC ob_cy_hi,Y : STA v+1
+    LDA v : SEC : SBC size_y_lo,X : LDA v+1 : SBC size_y_hi,X : BPL out
+    SEC : RTS
+.out
+    CLC : RTS
+}

@@ -63,14 +63,19 @@ def variables(syms):
             name, spec = m.group(1), m.group(2).split()
             if name not in syms:
                 raise SystemExit(f"{path}: {name} isn't in the build's symbols")
+            given = spec[-1] == "in"
+            if given:
+                spec = spec[:-1]
             addr, kind, args = spec[0], spec[1], [int(x) for x in spec[2:]]
             region, offset = st_place(addr)
             e = {"name": name, "at": syms[name], "kind": kind, "region": region, "offset": offset}
+            if given:
+                e["input"] = True
             if kind == "raw":
                 e["count"] = args[0]
             elif kind in ("wlo", "whi", "barr"):
                 e["count"], e["stride"] = args
-            elif kind == "slots":
+            elif kind in ("slots", "slotsdown"):
                 e["count"] = args[0]
             elif kind not in SIZES:
                 raise SystemExit(f"{path}: {name}: no such kind {kind}")

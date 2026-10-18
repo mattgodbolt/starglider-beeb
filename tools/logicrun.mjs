@@ -22,6 +22,11 @@ import { loadSymbols } from "./beeb.mjs";
 // (where a later random8 adds it).
 // An exit point "next:P" is P in the next frame; "unless" skips the frames
 // with that point (the post-frame tests, when they go to the level change).
+// With x, the routine is called with X the slot of the record the ST's a0
+// points to at the entry point (a handler's object).
+// A frame the capture poked (tools/st_steps.py) is skipped for the routine
+// that starts at the point the pokes follow. A variable marked `in` is
+// given to the routine but never compared.
 const ROUTINES = {
     world: { from: "top", to: "lists", call: "world_lists", bank: "BANK_WORLD" },
     world_after: { from: "lists", to: "render", call: "world_after", bank: "BANK_WORLD" },
@@ -33,6 +38,7 @@ const ROUTINES = {
     message: { from: "collide", to: "message", call: "level_message", bank: "BANK_LOGIC" },
     frame_end: { from: "message", to: "end", call: "frame_end_logic", bank: "BANK_LOGIC" },
     post: { from: "end", to: "next:top", call: "post_frame", bank: "BANK_LOGIC", unless: "level" },
+    mine: { from: "mine", to: "mined", call: "mine_proximity", bank: "BANK_LOGIC", x: true },
     level: { from: "level", to: "next:top", call: "level_start", bank: "BANK_LOGIC" },
 };
 
@@ -82,9 +88,9 @@ load("WORLD", bank(need("BANK_WORLD")));
 load("LOGIC", bank(need("BANK_LOGIC")));
 
 const STUB = 0x0140;
-const STUB_DONE = STUB + 4;
-async function run(entry) {
-    ram.set([0x78, 0x20, entry & 0xff, entry >> 8, 0x4c, STUB_DONE & 0xff, STUB_DONE >> 8], STUB);
+const STUB_DONE = STUB + 6;
+async function run(entry, x = 0) {
+    ram.set([0x78, 0xa2, x, 0x20, entry & 0xff, entry >> 8, 0x4c, STUB_DONE & 0xff, STUB_DONE >> 8], STUB);
     cpu.pc = STUB;
     cpu.s = 0xff;
     await tm.runUntilAddress(STUB_DONE, 5);
@@ -171,6 +177,18 @@ for (const v of map.variables) {
             get: () => Array.from({ length: v.count }, (_, i) => ptrOf(ram[at + i])),
             want: (r) => Array.from({ length: v.count }, (_, i) => long(r, i)),
         });
+    } else if (v.kind === "slotsdown") {
+        // a list pushed downward from the address: the first entry is the
+        // long just below it
+        const long = (r, i) => st(r).readUInt32BE(v.offset - 4 * (i + 1));
+        items.push({
+            name: v.name,
+            put: (r) => {
+                for (let i = 0; i < v.count; i++) ram[at + i] = slotOf(long(r, i));
+            },
+            get: () => Array.from({ length: v.count }, (_, i) => ptrOf(ram[at + i])),
+            want: (r) => Array.from({ length: v.count }, (_, i) => long(r, i)),
+        });
     } else if (v.kind === "slot") {
         const long = (r) => st(r).readUInt32BE(v.offset);
         items.push({
@@ -180,6 +198,7 @@ for (const v of map.variables) {
             want: (r) => [long(r)],
         });
     } else throw new Error(`${v.name}: kind ${v.kind}`);
+    if (v.input) items[items.length - 1].input = true;
 }
 // The object table, a field at a time across the slots.
 const rec = (r, s) =>
@@ -231,6 +250,7 @@ for (let n = 0; n < steps.frames.length; n++) {
     const exitFrame = next ? steps.frames[n + 1] : fr;
     const exitPoint = next ? routine.to.slice(5) : routine.to;
     if (!exitFrame || (routine.unless && fr.points[routine.unless])) continue;
+    if (fr.poked === routine.from) continue;    // the capture's pokes changed the state in its span
     const entry = regionsAt(fr, routine.from);
     const exit = regionsAt(exitFrame, exitPoint);
     if (!entry || !exit) continue;
@@ -240,8 +260,9 @@ for (let n = 0; n < steps.frames.length; n++) {
     const d0 = fr.d0 ?? {};                     // (older captures have no d0)
     ram[rngD0] = (d0[routine.from] ?? 0) & 0xff;
     ram[rngD0 + 1] = (d0[routine.from] ?? 0) >> 8;
-    await run(need("spike_logic"));
+    await run(need("spike_logic"), routine.x ? slotOf(fr.a0[routine.from]) : 0);
     for (const it of items) {
+        if (it.input) continue;
         const got = it.get();
         const want = it.want(exit);
         if (got.some((x, i) => x !== want[i])) {
