@@ -886,3 +886,13 @@ below `world_list_end`, the build ran out of zero page for routines that
 never meet it. The picture now goes first, so the code starts past the
 rotations' chain.
 
+### Eight more calls
+
+Building the flight layer left eight more choices the ST doesn't settle
+for a four-colour screen, a different keyboard and a slower machine. They
+went to Matt as a second page, and Matt took every recommendation
+(2026-10-18): decisions 23 to 30. Matt has no joystick, so the keyboard
+is the controls that must feel right. Three change code: the flash
+written at the flip (24), the panel's animations per step (25) and every
+shot since the last frame (30).
+
