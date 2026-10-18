@@ -40,6 +40,10 @@ MACRO HASR4 v
     ASRW v : ASRW v : ASRW v : ASRW v
 ENDMACRO
 
+\ The ST's tables (tools/mkhandlers.py), with the macros angle_to_player's
+\ lookup takes
+INCLUDE "../../build/gen/handlers.6502"
+
 \ The handler by type is handler_gate's (tools/mkhandlers.py): none for
 \ the types whose handler does nothing (type 0's among them), and where
 \ the handler's first test is the draw list's flag or the near list's,
@@ -670,78 +674,166 @@ ENDMACRO
 \ ---------------------------------------------------------------------------
 \ angle_to_player (&08390): h_bear = the ST's bearing from the player to
 \ the object, T - base: base &C00 for dx >= 0, &400 for dx < 0, and T from
-\ table A by dz / dx when |dz| >= |dx| (the signed compare of the neg.w
-\ values, so -32768 stays least), else table B by (dz << 8) / dx; each
-\ quotient clamped by the N flags of q - &FF and q - &FF01, then the
-\ table's entry (q + &FF) & &1FF (one below its centre, as the ST's).
-\ divs by 0 (EmuTOS's vector 5 is an rte) or overflowing leaves the
-\ dividend, whose low word is then q. rng_d0 is dx, as the ST's d0.
+\ table A by q = dz / dx when |dz| >= |dx| (the signed compare of the
+\ neg.w values, so -32768 stays least), else table B by q = (dz << 8) /
+\ dx; q clamped by the N flags of q - &FF and q - &FF01, else the table's
+\ entry (q + &FF) & &1FF (one below its centre, as the ST's). divs by 0
+\ (EmuTOS's vector 5 is an rte) or overflowing leaves the dividend, whose
+\ low word is then q. rng_d0 is dx, as the ST's d0.
+\
+\ With neither dx nor dz -32768 and dx not 0, |q| is |dz| / |dx| (table A,
+\ at least 1) or (|dz| << 8) / |dx| (table B, below 256): from 256 up it
+\ isn't made, as the clamp is decided by then (q - &FF's N flag is clear
+\ again only from -32514 down). The rest go the ST's way (slow).
 .angle_to_player
 {
-    ZA_AUTO2 dx, dz, adx, adz, q, m, p, tab
-    ZA_AUTO1 base, top, bottom, neg
+    ZA_AUTO2 dx, dz, r, q
+    ZA_AUTO1 base, neg, n
+    ZA_AUTO1 top                        ; the clamp's high byte: &4 table A, &2 table B
     LDA ob_x_lo,X : SEC : SBC pl_x : STA dx : STA rng_d0
     LDA ob_x_hi,X : SBC pl_x+1 : STA dx+1 : STA rng_d0+1
     LDA ob_z_lo,X : SEC : SBC pl_z : STA dz
     LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
-    LDA #HI(&C00) : LDY dx+1 : BPL based
+    EOR dx+1 : STA neg                  ; (bit 7: q's sign, if it isn't 0)
+    LDA #HI(&C00) : BIT dx+1 : BPL based
     LDA #HI(&400)
 .based
     STA base
-    MOVW adx, dx : LDA adx+1 : BPL dx_pos
-    NEGW adx
+    LDA dx : BNE dx_fits
+    LDA dx+1 : BNE dx_some
+    JMP dx_zero
+.dx_some
+    CMP #&80 : BNE dx_fits
+    JMP dx_least
+.dx_fits
+    LDA dz : BNE dz_fits
+    LDA dz+1 : CMP #&80 : BNE dz_fits
+    JMP dz_least
+.dz_fits
+    LDA dx+1 : BPL dx_pos
+    NEGW dx
 .dx_pos
-    MOVW adz, dz : LDA adz+1 : BPL dz_pos
-    NEGW adz
+    LDA dz+1 : BPL dz_pos
+    NEGW dz
 .dz_pos
-    \ the dividend: ext.l dz, or for table B, that << 8
-    LDA dz+1 : AND #&80 : BEQ ext
-    LDA #&FF
-.ext
-    STA mul_p+3 : STA mul_p+2
-    CMPS16 adz, adx : BMI path_b
-    MOVW mul_p, dz
-    LDA #LO(atan_a) : STA tab : LDA #HI(atan_a) : STA tab+1
-    LDA #HI(&400) : STA top : LDA #HI(&FC00) : STA bottom
+    LDA dz : CMP dx : LDA dz+1 : SBC dx+1 : BCC path_b
+    LDA #HI(&400) : STA top
+    \ |q| from 256 (|dz| >> 8 >= |dx|) is clamped: to the top if q is
+    \ positive or -32514 and below (|dx| 1), else to the bottom
+    LDA dz+1 : CMP dx : LDA #0 : SBC dx+1 : BCC a_divide
+    BIT neg : BPL clamp_top
+    LDA dx+1 : BNE clamp_bottom
+    LDA dx : CMP #1 : BNE clamp_bottom
+    LDA dz : CMP #LO(32514) : LDA dz+1 : SBC #HI(32514) : BCS clamp_top
+    BRA clamp_bottom
+.a_divide
+    LDA dz : STA n
+    LDA dz+1 : STA r
+    LDA #0
     BRA divide
 .path_b
-    LDA dz+1 : STA mul_p+2
-    LDA dz : STA mul_p+1 : STZ mul_p
-    LDA #LO(atan_b) : STA tab : LDA #HI(atan_b) : STA tab+1
-    LDA #HI(&200) : STA top : LDA #HI(&FE00) : STA bottom
+    LDA #HI(&200) : STA top
+    STZ n
+    LDA dz : STA r
+    LDA dz+1
 .divide
-    MOVW q, mul_p
-    LDA dx : ORA dx+1 : BEQ clamp
-    MOVW div_d, dx
-    JSR sdiv32 : BCS clamp
-    MOVW q, div_q
-.clamp
-    \ the clamps' constants have low bytes 0; T's low byte is then 0
-    LDA q : CMP #&FF : LDA q+1 : SBC #0 : BPL clamp_top
-    LDA q : CMP #&01 : LDA q+1 : SBC #&FF : BPL lookup
-    LDA bottom : BRA clamped
+    \ n's 8 bits of quotient, from the remainder (r, A) below |dx|: each
+    \ step rotates the last bit (C) into n and n's top into the remainder
+    LDY #8
+.step
+    ROL n : ROL r : ROL A
+    CMP dx+1 : BCC zero : BNE one
+    LDX r : CPX dx : BCC zero
+.one
+    TAX : LDA r : SBC dx : STA r : TXA : SBC dx+1
+.zero
+    DEY : BNE step
+    ROL n
+    LDA n
+    BIT neg : BMI minus
+    CMP #&FF : BEQ clamp_top
+    CMP #0 : BNE plus
+    BRA minus
+.clamp_bottom
+    LDA #0 : SEC : SBC top
+    BRA clamped
 .clamp_top
     LDA top
 .clamped
-    STA h_bear+1 : STZ h_bear
-    BRA based_off
-.lookup
-    \ the entry q + &FF is 256 + (q - 1): kept as its upper half H, the
-    \ lower negated (tools/mkhandlers.py)
-    LDA q : SEC : SBC #1 : STA m
-    LDA q+1 : SBC #0 : STA m+1 : STA neg
-    BPL m_pos
-    NEGW m
-.m_pos
-    LDA m : ASL A : STA p : LDA m+1 : ROL A : STA p+1
-    ADDW p, tab
-    LDY #0 : LDA (p),Y : STA h_bear
-    INY : LDA (p),Y : STA h_bear+1
-    LDA neg : BPL based_off
-    NEGW h_bear
+    \ the clamps' constants have low bytes 0
+    STZ h_bear
 .based_off
-    LDA h_bear+1 : SEC : SBC base : STA h_bear+1
+    SEC : SBC base : STA h_bear+1
     RTS
-}
 
-INCLUDE "../../build/gen/handlers.6502"
+\ The entry, by top's table
+.plus
+    \ q = A, from 1: entry 256 + q - 1, which H keeps as itself
+    TAY
+    LDX top : CPX #HI(&200) : BEQ plus_b
+    LDA atan_a_lo - 1,Y : STA h_bear
+    ATAN_A_HI_PLUS
+    BRA based_off
+.plus_b
+    LDA atan_b_lo - 1,Y : STA h_bear
+    ATAN_B_HI_PLUS
+    BRA based_off
+.minus
+    \ q = -A, or 0: entry 256 - (A + 1), which H keeps negated
+    TAY
+    LDX top : CPX #HI(&200) : BEQ minus_b
+    ATAN_A_HI_MINUS : TAX
+    LDA #0 : SEC : SBC atan_a_lo + 1,Y
+    BRA minus_hi
+.minus_b
+    ATAN_B_HI_MINUS : TAX
+    LDA #0 : SEC : SBC atan_b_lo + 1,Y
+.minus_hi
+    STA h_bear
+    TXA : EOR #&FF : ADC #0             ; (C: no borrow, the low byte 0)
+    BRA based_off
+
+\ The ST's way: dx 0 divides by 0, leaving q dz in table A (dz -32768
+\ takes table B, by the low word of dz << 8, 0); dx -32768 takes table A,
+\ by 1 for dz -32768, else 0; dz -32768 otherwise takes table B, by divs.
+.dx_zero
+    LDA dz : BNE by_dz
+    LDA dz+1 : CMP #&80 : BNE by_dz
+.b_zero
+    LDA #HI(&200) : STA top
+    LDA #0 : BRA to_minus
+.by_dz
+    LDA #HI(&400) : STA top
+    MOVW q, dz
+    BRA clamp
+.dx_least
+    LDA #HI(&400) : STA top
+    LDA dz : BNE a_zero
+    LDA dz+1 : CMP #&80 : BNE a_zero
+    LDA #1 : BRA to_plus
+.a_zero
+    LDA #0 : BRA to_minus
+.dz_least
+    LDA #HI(&200) : STA top
+    STZ mul_p : STZ mul_p+1
+    LDA #&80 : STA mul_p+2 : LDA #&FF : STA mul_p+3
+    MOVW div_d, dx
+    JSR sdiv32 : BCS b_zero
+    MOVW q, div_q
+.clamp
+    LDA q : CMP #&FF : LDA q+1 : SBC #0 : BMI not_top
+    JMP clamp_top
+.not_top
+    LDA q : CMP #&01 : LDA q+1 : SBC #&FF : BPL in_range
+    JMP clamp_bottom
+.in_range
+    \ q from -255 to 254
+    LDA q+1 : BMI q_minus
+    LDA q : BEQ to_minus
+.to_plus
+    JMP plus
+.q_minus
+    LDA #0 : SEC : SBC q
+.to_minus
+    JMP minus
+}

@@ -23,7 +23,11 @@ object handlers"):
   centred on its entry 256 and odd about it over every entry the lookup
   reaches (0-509): kept as their upper halves, H[m] = T[256 + m] for
   m = 0-253 and -T[256 - m] for m = 1-256, which the port negates below
-  the centre (asserted here entry by entry);
+  the centre (asserted here entry by entry). H's low bytes are a table
+  (atan_a_lo, atan_b_lo); its high bytes, which never fall as m rises,
+  are counted from the m where they step, as code: ATAN_A_HI_PLUS and
+  the rest leave in A the high byte of H[Y - 1] (PLUS) or H[Y + 1]
+  (MINUS), the entries angle_to_player reads for q = Y and q = -Y;
 - by type, the gun's height (&0AF12, signed words), whether a missile's
   heading is its launcher's turned half round (&08354, kept as the &800
   to subtract, its high byte) and the laser's damage off level 1
@@ -66,13 +70,6 @@ def bytes_of(label, values):
     return out
 
 
-def words_of(label, values):
-    out = [f".{label}"]
-    for i in range(0, len(values), 16):
-        out.append("    EQUW " + ", ".join(str(v & 0xFFFF) for v in values[i:i + 16]))
-    return out
-
-
 def atan_half(prg, base):
     t = [prg.s16(base + 2 * i) for i in range(ATAN_ENTRIES)]
     half = [t[256 + m] for m in range(254)] + [-t[256 - m] for m in range(254, 257)]
@@ -81,6 +78,19 @@ def atan_half(prg, base):
     for m in range(254):
         assert half[m] == t[256 + m]
     return half
+
+
+def atan_bytes(label, half):
+    """H's low bytes, and the macros that count its high bytes' steps."""
+    hi = [v >> 8 for v in half]
+    assert min(half) >= 0 and hi[0] == 0 and all(a <= b for a, b in zip(hi, hi[1:])), f"{label}'s high bytes aren't steps"
+    steps = [m for m in range(1, len(half)) for _ in range(hi[m] - hi[m - 1])]
+    assert max(steps) + 1 <= 255
+    out = bytes_of(f"{label}_lo", [v & 0xFF for v in half])
+    for path, shift in (("PLUS", 1), ("MINUS", -1)):
+        out += [f"MACRO {label.upper()}_HI_{path}", "    LDA #0"]
+        out += [f"    CPY #{m + shift} : ADC #0" for m in steps] + ["ENDMACRO"]
+    return out
 
 
 def main():
@@ -97,7 +107,7 @@ def main():
         "    ZA_CANJUMP " + ", ".join(called)]) + "\n")
     gate = [0 if n in SKIPPED else 2 * (called.index(n) + 1) + GATE_BITS.get(GATES.get(n), 0) for n in names]
     out += bytes_of("handler_gate", gate) + [".handler_tab", "    EQUW " + ", ".join(called), ""]
-    out += words_of("atan_a", atan_half(prg, ATAN_A)) + words_of("atan_b", atan_half(prg, ATAN_B)) + [""]
+    out += atan_bytes("atan_a", atan_half(prg, ATAN_A)) + atan_bytes("atan_b", atan_half(prg, ATAN_B)) + [""]
     gun = [prg.s16(GUN_Y + 2 * t) for t in range(TYPES)]
     out += [f"MISSILE_TYPES = {TYPES}"]
     out += bytes_of("gun_y_lo", [g & 0xFF for g in gun]) + bytes_of("gun_y_hi", [(g >> 8) & 0xFF for g in gun])
