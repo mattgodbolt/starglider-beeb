@@ -82,10 +82,12 @@ VIEW_SHOT = &FD
 ASSERT VIEW_SHOT >= SLOTS + 2
 
 \ ---------------------------------------------------------------------------
-\ shots_draw (&07E6E): each enemy laser shot this step's handlers recorded
-\ (enemy_laser), from the attacker's gun in camera space, projected as the
-\ ST projects it (box_div: << 7, divs, its overflow kept), to its end on
-\ the window's bottom edge, cut to the window, in the ST's colour 1.
+\ shots_draw (&07E6E): each enemy laser shot the handlers recorded since
+\ the last frame drawn (enemy_laser; decision 30: the ST draws every step,
+\ so every shot is seen), from the attacker's gun in camera space at its
+\ own step, projected as the ST projects it (box_div: << 7, divs, its
+\ overflow kept), to its end on the window's bottom edge, cut to the
+\ window, in the ST's colour 1; then none are left for the next frame.
 .shots_draw
 {
     ZA_AUTO1 i
@@ -112,6 +114,7 @@ ASSERT VIEW_SHOT >= SLOTS + 2
     STX edge_i
     JSR clip_line
     LDX i : BNE each
+    STZ shot_n
 .done
     RTS
 }

@@ -990,3 +990,9 @@ explosions; angle_to_player on every dz for twelve pairs of dx and the
 reverse; set_velocity on every heading for every speed from -600 to 600.
 No case differed.
 
+Decision 30 is built. The handlers' shot records now last until a frame
+draws them, so a frame shows every shot its steps fired, each from the
+attacker's place at its own step, and a new game starts with none. There
+is room for four a step over a frame's most steps (`SHOTS`, `ASSERT`ed
+against `MAX_STEPS`).
+

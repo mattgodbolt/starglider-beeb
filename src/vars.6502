@@ -201,8 +201,8 @@ free_top = free_n           ; {ST $09C(a6) index &94C 4} (the ST's pointer past 
 .dots_ran     SKIP 1        ; non-zero when ground_dots ran (world_lists)
 .dot_seen     SKIP 40       ; by dot: non-zero if ground_dots found it in view, so plotted it
 .bolt_shown   SKIP 1        ; non-zero when player_laser drew the bolt (world_after)
-SHOTS = 4                   ; the enemies' laser shots a step kept: no more are drawn
-.shot_n       SKIP 1        ; the shots (enemy_laser) ...
+SHOTS = 16                  ; the enemies' laser shots kept for a frame, four a step for a frame's most steps (MAX_STEPS): no more are drawn
+.shot_n       SKIP 1        ; the shots since the last frame drawn (enemy_laser's, decision 30) ...
 .shot_x_lo    SKIP SHOTS    ; ... each from the attacker's gun, in camera space ...
 .shot_x_hi    SKIP SHOTS
 .shot_y_lo    SKIP SHOTS

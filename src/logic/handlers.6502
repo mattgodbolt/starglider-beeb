@@ -56,7 +56,6 @@ INCLUDE "../../build/gen/handlers.6502"
 {
     ZA_AUTO1 limit                      ; the slot the walk stops at
     ZA_AUTO1 kept                       ; that slot's own exploding
-    STZ shot_n                  ; (for the drawing: this step's shots, enemy_laser's)
     LDX #0
     LDA n_slots : BEQ done
     LDY homing : BEQ all

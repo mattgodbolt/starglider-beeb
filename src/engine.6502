@@ -22,6 +22,7 @@
 
 STEP_FIELDS = 4                     ; decision 4: 12.5 steps a second
 MAX_STEPS   = 4                     ; a frame's most: more, and the game slows
+ASSERT SHOTS >= 4 * MAX_STEPS           ; every shot a frame's steps fire kept for it (vars.6502)
 
 \ The palette split at the view's bottom edge (decision 3): only logical
 \ colour 3 changes, the view's (VIEW_COLOUR_3) to the panel's

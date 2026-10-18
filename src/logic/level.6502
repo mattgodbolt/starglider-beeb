@@ -372,6 +372,7 @@ ENDMACRO
     STZ missile_view : STZ mv_render : STZ docked
     LDA #&FF : STA enemies_active
     STZ cheat_mode
+    STZ shot_n                          ; (the drawing's: no shots carried into a game)
     JMP panel_new_game
 }
 
