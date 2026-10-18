@@ -674,11 +674,15 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     RTS
 }
 
+\ (1 + c / 256 is at least the root of 1 + (c / 128)^2 up to 4/3 of 128)
+FAR_C_MAX = 128 * 4 DIV 3
 .far_setup
 {
     ZA_AUTO1 term, halved, xneg, pneg, plo
     ZA_AUTO2 xs, d
     ZA_AUTO 3, d24
+    rx = xs                                 ; the vertices' reach on the screen, x and
+    ry = d24                                ; y (in bytes free once B is made)
     MOVW pz, tz : JSR proj_z
     LDX #0 : JSR centre
     LDX #2 : JSR centre
@@ -831,15 +835,27 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     JMP each_term
 .terms_done
     JSR screen_setup
-    \ Inside the window? The centre, a radius (on the screen, plus one)
-    \ from each edge.
+    \ Inside the window? The centre, its vertices' reach on the screen
+    \ (plus one), from each edge. A vertex within a radius r of the centre
+    \ goes 128 (dx - X0 dz / 128) / tz across by B, so up to 128 r / tz
+    \ (pq, the radius on the screen) times the root of 1 + (X0 / 128)^2
+    \ from it, and the same down for Y0. That is at most 1 + |X0| / 256
+    \ while |X0| is up to 4/3 of 128 (FAR_C_MAX), as it is within the
+    \ window: the reach is pq + pq |X0| / 256, rounded up.
     STZ far_inside
     MOVW px, sh_radius : JSR proj_x
-    INC pq : BNE r_ok
-    INC pq+1
-.r_ok
+    LDA pq+1 : BNE r_out
+    LDA pq : MUL_SET
+    LDX #0 : JSR far_reach : BCS r_out
+    STA rx : STY rx+1
+    LDX #2 : JSR far_reach : BCS r_out
+    STA ry : STY ry+1
+    BRA r_in
+.r_out
+    RTS
+.r_in
     \ (each edge's low byte is the window's, patched: CLIP_SITES)
-    LDA sc_x0 : SEC : SBC pq : STA d : LDA sc_x0+1 : SBC pq+1 : STA d+1
+    LDA sc_x0 : SEC : SBC rx : STA d : LDA sc_x0+1 : SBC rx+1 : STA d+1
     SEC : LDA d
 .in_left
     SBC #LO(VIEW_XMIN - VIEW_CX)
@@ -847,7 +863,7 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     BVC left : EOR #&80
 .left
     BMI outside
-    LDA sc_x0 : CLC : ADC pq : STA d : LDA sc_x0+1 : ADC pq+1 : STA d+1
+    LDA sc_x0 : CLC : ADC rx : STA d : LDA sc_x0+1 : ADC rx+1 : STA d+1
     SEC : LDA d
 .in_right
     SBC #LO(VIEW_XMAX - VIEW_CX + 1)
@@ -855,7 +871,7 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     BVC right : EOR #&80
 .right
     BPL outside
-    LDA sc_y0 : SEC : SBC pq : STA d : LDA sc_y0+1 : SBC pq+1 : STA d+1
+    LDA sc_y0 : SEC : SBC ry : STA d : LDA sc_y0+1 : SBC ry+1 : STA d+1
     SEC : LDA d
 .in_top
     SBC #LO(VIEW_YMIN - VIEW_CY)
@@ -863,7 +879,7 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     BVC top : EOR #&80
 .top
     BMI outside
-    LDA sc_y0 : CLC : ADC pq : STA d : LDA sc_y0+1 : ADC pq+1 : STA d+1
+    LDA sc_y0 : CLC : ADC ry : STA d : LDA sc_y0+1 : ADC ry+1 : STA d+1
     SEC : LDA d
 .in_bottom
     SBC #LO(VIEW_YMAX - VIEW_CY + 1)
@@ -874,6 +890,31 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA #&80 : STA far_inside
 .outside
     RTS
+\ far_reach: A (low) and Y (high) = pq + pq |c| / 256 rounded up, plus
+\ one, for the centre's c = sc_0,X (pq the multiplicand); C set if |c|
+\ is past FAR_C_MAX, as it is beyond the window.
+.far_reach
+    LDA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    BEQ c_pos
+    CMP #&FF : BNE c_far
+    LDA #0 : SEC : SBC sc_0,X : ZA_INDEXEDBY {0, 2}
+    BEQ c_far                               ; (-256)
+    BRA c_mag
+.c_pos
+    LDA sc_0,X : ZA_INDEXEDBY {0, 2}
+.c_mag
+    CMP #FAR_C_MAX + 1 : BCS c_far
+    TAY : MUL8 plo                          ; pq |c| / 256 rounded down ...
+    LDY #0
+    CLC : ADC pq : BCC c_pq                 ; ... + pq ...
+    INY : CLC
+.c_pq
+    ADC #2 : BCC c_near                     ; ... + 2
+    INY
+.c_near
+    CLC : RTS
+.c_far
+    SEC : RTS
 \ A_z's term, 6 + j, by B's term
 .a_z
     EQUB 6, 7, 8, 6, 7, 8
@@ -1884,4 +1925,8 @@ FOR w = {{VIEW_XMIN, VIEW_XMAX, VIEW_YMIN, VIEW_YMAX}, {MV_XMIN, MV_XMAX, MV_YMI
     \ (only the low bytes are patched where they're relative to the centre)
     ASSERT HI(w[0] - VIEW_CX) = HI(VIEW_XMIN - VIEW_CX) AND HI(w[1] - VIEW_CX + 1) = HI(VIEW_XMAX - VIEW_CX + 1)
     ASSERT HI(w[2] - VIEW_CY) = HI(VIEW_YMIN - VIEW_CY) AND HI(w[3] - VIEW_CY + 1) = HI(VIEW_YMAX - VIEW_CY + 1)
+    \ (a far object centred within the window is within FAR_C_MAX of the
+    \ projection's centre, where far_reach's bound holds)
+    ASSERT VIEW_CX - w[0] <= FAR_C_MAX AND w[1] - VIEW_CX <= FAR_C_MAX
+    ASSERT VIEW_CY - w[2] <= FAR_C_MAX AND w[3] - VIEW_CY <= FAR_C_MAX
 NEXT
