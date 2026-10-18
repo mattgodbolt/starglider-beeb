@@ -94,6 +94,29 @@ ENDMACRO
     ASL A : ROL mul_r : ROL mul_r+1
     RTS
 
+\ DIV_BYTE n: a byte of sdiv32's quotient, from the dividend's byte n and
+\ the remainder (div_n+2, A) below div_u, into n: each step rotates n's
+\ next bit into the remainder and the last step's quotient bit (C) into
+\ n, and a last rotate takes the eighth. (The first bit rotated in comes
+\ out again with that last rotate.)
+MACRO DIV_BYTE n
+    LDX #8
+.step
+    ROL n : ROL div_n+2 : ROL A
+    BCS sub                             ; the remainder passed 16 bits
+    CMP div_u+1 : BCC next              ; C = 0: the bit's 0
+    BNE sub
+    LDY div_n+2 : CPY div_u : BCC next
+.sub
+    TAY                                 ; (C = 1 on every way here)
+    LDA div_n+2 : SBC div_u : STA div_n+2
+    TYA : SBC div_u+1
+    SEC                                 ; the bit's 1
+.next
+    DEX : BNE step
+    ROL n
+ENDMACRO
+
 \ sdiv32: the 68000's divs. mul_p (32-bit signed) / div_d (16-bit signed):
 \ C = 0 and the quotient, truncated towards zero, in div_q; or C = 1 if it
 \ doesn't fit 16 bits, when divs leaves its operand alone. div_d is not 0.
@@ -116,35 +139,24 @@ ENDMACRO
     \ An unsigned quotient of 17 bits or more never fits: the high half
     \ must be below the divisor.
     LDA div_n+2 : CMP div_u : LDA div_n+3 : SBC div_u+1
-    BCS overflow
-    \ 16 steps of shift and subtract: the remainder in div_n+2 and A, the
-    \ quotient shifting into div_n..1. When the remainder a byte on is
-    \ still below the divisor, the quotient's top byte is 0, and the
-    \ first 8 steps are a byte's move.
-    LDX #16
-    LDA div_n+3 : BNE steps
+    BCC divide
+    RTS                                 ; (C = 1)
+.divide
+    \ The quotient a byte at a time, high then low, each by 8 steps of
+    \ shift and subtract with the remainder in div_n+2 and A. When the
+    \ remainder a byte on is still below the divisor, the high byte is 0,
+    \ and the remainder starts there.
+    LDA div_n+3 : BNE both
     LDA div_n+1 : CMP div_u : LDA div_n+2 : SBC div_u+1
-    BCS steps
-    LDA div_n+2 : STA div_n+3
-    LDA div_n+1 : STA div_n+2
-    LDA div_n : STA div_n+1
-    STZ div_n
-    LDX #8
-.steps
+    BCS both
+    LDY div_n+1 : LDA div_n+2 : STY div_n+2
+    STZ div_n+1
+    BRA low
+.both
     LDA div_n+3
-.step
-    ASL div_n : ROL div_n+1 : ROL div_n+2 : ROL A
-    BCS sub                             ; the remainder passed 16 bits
-    CMP div_u+1 : BCC next
-    BNE sub
-    LDY div_n+2 : CPY div_u : BCC next
-.sub
-    TAY                                 ; (C = 1 on every way here)
-    LDA div_n+2 : SBC div_u : STA div_n+2
-    TYA : SBC div_u+1
-    INC div_n                           ; the quotient's bit
-.next
-    DEX : BNE step
+    DIV_BYTE div_n+1
+.low
+    DIV_BYTE div_n
     \ It fits a signed word: up to 32767, or 32768 if negative.
     BIT mul_sign : BMI negative
     LDA div_n+1 : BMI overflow
