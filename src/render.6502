@@ -150,6 +150,7 @@ ZA_AUTO 5, ksign            ; ... and signs
     MOVW ground_h, ang_h
     LDA #&FF : STA ground_valid
     STZ mat_valid               ; mat isn't build_matrix's now
+    STZ mat_scaled              ; nor xf_amag's
     \ Kept since the camera last pitched or rolled? The matrix is the
     \ heading's and kconst's, and kconst is the camera's pitch and roll.
     LDX gm_n : BEQ build
@@ -247,11 +248,13 @@ OM_SIZE = 6 + 18
     DEX : BPL angles
     LDA #&FF : STA mat_valid
     STZ ground_valid
+    STZ mat_scaled
     RTS
 .not_this
     LDX at : BNE find
 .build
     JSR build_matrix
+    STZ mat_scaled                      ; (xf_amag isn't mat's)
     \ kept, over the oldest
     LDA om_next : CLC : ADC #5 : TAX
     LDY #5
@@ -383,6 +386,7 @@ ZA_AUTO 10, kp
 .draw_objects
 {
     ZA_AUTO1 list_i
+    STZ mat_scaled                      ; (zero page isn't kept from frame to frame)
     \ the ground matrices kept hold while the camera neither pitches nor rolls
     LDA pl_pitch : CMP gm_pitch : BNE flush
     LDA pl_pitch+1 : CMP gm_pitch+1 : BNE flush
@@ -555,8 +559,14 @@ NEXT
     \ The matrix scaled to the shape, for the vertices: A = m g / 256, so
     \ A k / 1024 is in world units (g = 32 x scale): (|m| scale + 4) / 8,
     \ which is (2 |m| x 16 scale + 128) / 256, the bytes falling where
-    \ they're wanted. (16 scale is a byte: mkshapes.py.)
-    LDA sh_scale : ASL A : ASL A : ASL A : ASL A : MUL_SET
+    \ they're wanted. (16 scale is a byte: mkshapes.py.) Kept from the
+    \ last object if mat and the scale are the same.
+    LDA mat_scaled : BEQ scale
+    LDA sh_scale : CMP scaled_for : BNE scale
+    JMP kept
+.scale
+    LDA sh_scale : STA scaled_for
+    ASL A : ASL A : ASL A : ASL A : MUL_SET
     LDX #0
     ZA_DISCARD xf_amag
 .scale_term
@@ -584,10 +594,13 @@ NEXT
     STZ xf_amag+1,X : ZA_INDEXEDBY 0..16
     BRA scale_next
 .scaled
-    \ and the signs, &00 or &80 (the transforms' setups widen them in place)
+    \ and the signs, &00 or &80 (the transforms' setups widen them in
+    \ place, which leaves them as good for the next object)
 FOR e = 0..8
     LDA mat + 2 * e + 1 : AND #&80 : STA xf_asign + e
 NEXT
+    LDA #&FF : STA mat_scaled
+.kept
     \ A new stamp marks this object's edges and vertices.
     INC stamp : BNE stamped
     JSR marks_wipe

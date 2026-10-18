@@ -136,6 +136,8 @@ ASSERT LO(edge_mark) = 0 AND LO(v_xlo) = 0
 .mat_angles SKIP 6
 .ground_valid SKIP 1        ; non-zero: mat is ground_matrix's for ground_h
 .ground_h   SKIP 2
+.mat_scaled SKIP 1          ; non-zero: xf_amag and xf_asign are mat's, for scaled_for
+.scaled_for SKIP 1          ; the shape's scale they're for
     \ the frame (engine.6502): the screen being drawn, 0 main RAM's or 1
     \ shadow's, whether it's ready to show, and each screen's erase list
 .draw_buffer SKIP 1
