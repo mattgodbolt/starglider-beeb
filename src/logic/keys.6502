@@ -10,7 +10,7 @@
 \ and key_latch from the BBC's keys (decision 6).
 \
 \ What a command enters that runs frames of its own or leaves the game is a
-\ later layer, stubbed here: the Interrogate screen, the cheat prompt's
+\ later layer, stubbed here: the Interrogate screen, the cheat_mode prompt's
 \ waits for keys (the prompt itself is transcribed), and Esc to the title.
 \ ***************************************************************************
 
@@ -44,7 +44,7 @@
 \ &0275E: N, then the flight keys
 .keys_n
     CMP #'N' : BNE flight_keys
-    \ N, in cheat mode: 5000 points, BCD, for the next world_render
+    \ N, in cheat_mode mode: 5000 points, BCD, for the next world_render
     LDA cheat_mode : BEQ done_n
     STZ pending_score : LDA #&50 : STA pending_score+1
 .done_n
@@ -55,7 +55,7 @@
     LDA sight_fixed : EOR #&FF : STA sight_fixed
     JMP beep
 
-\ M (&02932), in cheat mode: the enemies frozen, or freed
+\ M (&02932), in cheat_mode mode: the enemies frozen, or freed
 .freeze
     LDA cheat_mode : BEQ done_m
     LDA enemies_active : EOR #&FF : STA enemies_active
@@ -72,7 +72,7 @@
     RTS
 
 \ P (&0295A): a missile, while there are fewer than two (the ST's test is
-\ for equality); in cheat mode anywhere, or else the docked silo's, if it
+\ for equality); in cheat_mode mode anywhere, or else the docked silo's, if it
 \ has one ready (its +&14 alone: unlike flying through the silo's missile,
 \ P neither restarts the silo's reload count nor flashes colour 0)
 .pick_up
@@ -195,12 +195,12 @@
     DEX : BPL save_dots
     RTS
 
-\ &02894: Backspace or Delete, the cheat prompt, which waits for a key; if
+\ &02894: Backspace or Delete, the cheat_mode prompt, which waits for a key; if
 \ it's J, S, space, A, R and G must follow, each within 1501 VBLs, and a
 \ wrong one is followed by as many more keys as were still to come before
 \ the end effect. Every second entry, if the sight is fixed and the craft
 \ stopped (speed_acc 0 exactly), fills the energy, shields and laser and
-\ turns cheat mode on or off. The step's flight keys go.
+\ turns cheat_mode mode on or off. The step's flight keys go.
 .cheat_prompt
     LDA #8 : LDX #1 : JSR sfx_start
     JSR wait_key
@@ -257,7 +257,7 @@
 \ The keyboard layer's, to come (they block, as the ST's do, until a key is
 \ made): wait_key (&00C0C), the next key, as get_key has it; and
 \ wait_key_timeout (&00BCA), the same or &0D after 1501 VBLs. Until then
-\ each returns 0, a key the cheat prompt never takes, so the prompt ends at
+\ each returns 0, a key the cheat_mode prompt never takes, so the prompt ends at
 \ its first.
 .wait_key
 .wait_key_timeout

@@ -58,8 +58,12 @@ SECTION LogicBank, org = &8000, filename = "LOGIC", guard = &C000, cmos = TRUE
     \ rotations' annotated jumps would take on that jump's targets.
     SKIP MAX({ANDY_TOP, world_list_end}) - P%
 INCLUDE "logic/keys.6502"
+INCLUDE "logic/laser.6502"
 INCLUDE "logic/collide.6502"
 INCLUDE "logic/frame.6502"
 INCLUDE "logic/level.6502"
+    \ (baron#29 again) and short of the world bank's other annotated jump,
+    \ the handlers' dispatch
+    ASSERT P% <= object_handlers.dispatch
 ENDSECTION
 ENDIF

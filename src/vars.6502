@@ -11,7 +11,13 @@
 \ wlo N S / whi N S / barr N S (N words' low or high bytes, or N bytes, S
 \ bytes apart on the ST) or slots N (N record pointers, kept as slots), or
 \ index A S (the ST's pointer into its array at A of S-byte entries, kept
-\ as the entry's number). tools/stmap.py reads them, and the harness
+\ as the entry's number). 
+\ or, for a list, list COUNT N (the address is the ST's pointer to the
+\ list's first entry, record pointers pushed downward; COUNT its count's
+\ ST address, N the port's count; the port keeps the slots in the order
+\ pushed). A last word "in" marks an input the ST's interrupts write when
+\ they will (a key's state): the harness puts it but doesn't compare it.
+\ tools/stmap.py reads them, and the harness
 \ translates the ST's state into the port's and back by them
 \ (tools/logicrun.mjs). Variables declared elsewhere carry the same braces
 \ (the player, in zp.6502).
@@ -34,8 +40,8 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
     \ ... and the keys, as the ST's keyboard interrupt leaves them, which
     \ the keyboard layer fills (decision 6): each key's state by the ST's
     \ scancode, 1 held, and the last key made, which read_keys consumes
-.key_state    SKIP 128      ; {ST P&017C2 raw 128}
-.key_latch    SKIP 1        ; {ST P&01852 byte} 0 for none
+.key_state    SKIP 128      ; {ST P&017C2 raw 128 in}
+.key_latch    SKIP 1        ; {ST P&01852 byte in} 0 for none
     \ what the keys and commands (logic/keys.6502) keep that the panel,
     \ the drawing or the sound read
 .m_iris       SKIP 2        ; {ST $27C(a6) word} the missile view's opening and closing
@@ -45,6 +51,7 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .shields      SKIP 2        ; {ST $260(a6) word}
 .laser_energy SKIP 2        ; {ST $28A(a6) word}
 .world_vec    SKIP 2        ; world_call's routine (logic/arith.6502)
+.logic_vec    SKIP 2        ; logic_bank_call's
     \ the game's state the handlers (logic/handlers.6502) read and write,
     \ which the panel and the drawing show
 .level        SKIP 2        ; {ST $296(a6) word} from 1
@@ -52,8 +59,22 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .missiles     SKIP 2        ; {ST $278(a6) word} the player's
 .flash0       SKIP 2        ; {ST $242(a6) word} this step's flash of colour 0 (0 none)
 .hits_taken   SKIP 4        ; {ST $0C4(a6) long} the enemies' laser hits, for the rating
+    \ world_render's logic (logic/worldlogic.6502): what the panel and the
+    \ drawing show
+.score        SKIP 4        ; {ST P&0150C long} BCD, eight digits
+.last_kill    SKIP 2        ; {ST $286(a6) word} BCD, the last kill's score
+.frame_count  SKIP 2        ; {ST $1E2(a6) word} frame_end's (logic/frame.6502): every frame_end call, wrapping
+.bolt_timer   SKIP 1        ; {ST $284(a6) word8} the laser bolt's steps to go, 4-0
+.bolt_target_x SKIP 2       ; {ST $24C(a6) word} the sight as it was when the bolt was fired
+.bolt_target_y SKIP 2       ; {ST $24E(a6) word}
 .logic_work_end
 ENDSECTION
+
+\ The lists (world.6502's, in memory.6502), as the ST's pointers and counts
+\ hold them.
+st_coarse_list = coarse_slots       ; {ST $090(a6) list $23C(a6) coarse_n}
+st_near_list   = near_slots         ; {ST $098(a6) list $240(a6) near_n}
+st_draw_list   = draw_slots         ; {ST $094(a6) list $23E(a6) draw_n}
 
 \ Animation frames (zp.6502's anim_frame, by shape), as the ST's frame
 \ lists number them: list &0D6CE drives shapes 1 and 10.
@@ -106,6 +127,22 @@ SECTION LogicAndy, org = ANDY_OBJECTS_END, guard = ANDY_TOP, virtual = TRUE
 .dots_z_hi    SKIP 40       ; {ST $8AE(a6) whi 40 4}
 
     \ world_render's logic (logic/worldlogic.6502)
+.score_addend SKIP 4        ; {ST P&01A4C long} the score add's operand, kill_score as it was
+.last_score_byte SKIP 1     ; {ST $2D5(a6) byte} the score's second byte at the last level change
+.level_changed SKIP 1       ; {ST $2D7(a6) byte} &FF when the score has just changed its ten-thousands
+.docked_silo  SKIP 1        ; {ST $0A8(a6) slot} the silo docked in
+.shots_fired  SKIP 4        ; {ST $0B0(a6) long}
+.hits_scored  SKIP 4        ; {ST $0B8(a6) long} laser hits that took a hit point
+.laser_px     SKIP 2        ; {ST $254(a6) word} the laser's last box tested, projected: written, never read
+.laser_py     SKIP 2        ; {ST $256(a6) word}
+.laser_half_w SKIP 2        ; {ST $258(a6) word}
+.laser_half_h SKIP 2        ; {ST $25A(a6) word}
+    \ the drawing's matrix cache (&04114): the angles of the last object
+    \ matrix built, which decide whether the draw loop leaves the camera's
+    \ sines in trig_sin and trig_cos or an object's
+.obm_pitch    SKIP 2        ; {ST $180(a6) word}
+.obm_heading  SKIP 2        ; {ST $182(a6) word}
+.obm_roll     SKIP 2        ; {ST $184(a6) word}
 
     \ the keys and commands (logic/keys.6502)
 .def_left     SKIP 1        ; {ST $2D8(a6) byte} the K screen's keys, as scancodes: 0 for none
@@ -117,7 +154,6 @@ SECTION LogicAndy, org = ANDY_OBJECTS_END, guard = ANDY_TOP, virtual = TRUE
 .cheat_count  SKIP 1        ; {ST $294(a6) word8} the cheat's entries, modulo 2
 .enemies_active SKIP 1      ; {ST $2C7(a6) byte} 0: M has frozen the enemies' handlers
 .pending_score SKIP 2       ; {ST $0D4(a6) word} BCD, for the next world_render to add
-.docked_silo  SKIP 1        ; {ST $0A8(a6) slot} the silo docked with
 
     \ the object handlers (logic/handlers.6502)
 .free_stack   SKIP SLOTS    ; {ST &94C slots 140} the free slots, the last freed on top

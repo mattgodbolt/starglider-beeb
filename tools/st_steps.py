@@ -37,9 +37,16 @@ random8 (&046B2) and random32 (&04692) is logged with d0 (which random8
 adds to its state: some callers leave it over from earlier work) and the
 caller, so a transcription can see what it must reproduce.
 
+A script's debugger writes (`debug w`, to keep the player alive or set a
+scene up) land wherever the ST is when they're sent, between two points:
+`run` follows each with an echoed POKE, and the point after it is listed
+in its frame's "poked", for the harness to skip a routine whose result
+the write is in.
+
 steps.json: {"regions": [[name, address, length]...], "points": [...],
 "frames": [{"vbl", "segment", "points": {point: {region: hex}}, "d0":
-{point: d0.w}, "rng": [[routine, d0, caller]...]}]}.
+{point: d0.w}, "rng": [[routine, d0, caller]...], "poked": [point...]}]}
+("poked" only where a write landed).
 """
 import json
 import os
@@ -105,7 +112,7 @@ def parse(path):
     dump = re.compile(r"^([0-9A-F]{8}): ((?:[0-9a-f]{2} )+)")
     seg = re.compile(r"^SEG (\S+)")
     frames, cur, pending, segment = [], None, [], "start"
-    point, mem = None, {}
+    point, mem, poked = None, {}, False
 
     def close_point():
         if cur is None or point is None:
@@ -121,6 +128,9 @@ def parse(path):
     for line in Path(path).read_text(errors="replace").splitlines():
         if m := seg.match(line):
             segment = m.group(1)
+            continue
+        if line == "POKE":
+            poked = True
             continue
         if m := dump.match(line):
             addr = int(m.group(1), 16)
@@ -141,7 +151,9 @@ def parse(path):
                 cur = {"segment": segment, "vbl": pending[1], "points": {}, "d0": {}, "rng": []}
             if cur is not None:
                 cur["d0"][name] = pending[2] & 0xFFFF
-            point, mem, pending = name, {}, []
+                if poked:
+                    cur.setdefault("poked", []).append(name)
+            point, mem, pending, poked = name, {}, [], False
         elif tag in (TAG_RANDOM8, TAG_RANDOM32) and len(pending) == 3:
             if cur is not None:
                 cur["rng"].append(["random8" if tag == TAG_RANDOM8 else "random32",
@@ -164,6 +176,7 @@ def run(script, outdir, rest):
     outdir = Path(outdir).resolve()
     arm = setup(outdir)
     text = Path(script).read_text().replace("{arm}", str(arm))
+    text = re.sub(r"^(debug w .*)$", r"\1\ndebug echo \\nPOKE\\n", text, flags=re.M)
     (outdir / "script.txt").write_text(text)
     here = Path(__file__).resolve().parent
     subprocess.run([sys.executable, "-I", str(here / "st_hatari.py"), str(outdir / "script.txt"),

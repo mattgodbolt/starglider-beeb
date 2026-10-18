@@ -44,7 +44,7 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
     RTS
 .logic_jump
     JMP (logic_call)
-    ZA_CANJUMP animate_shapes, player_flight, random8, random32, world_lists, world_after, read_keys, object_handlers, collisions, level_message, frame_end_logic, post_frame, level_start
+    ZA_CANJUMP animate_shapes, player_flight, random8, random32, world_lists, world_after, world_whole, read_keys, object_handlers, collisions, level_message, frame_end_logic, post_frame, level_start
 
 \ spike_erase: the last frame's lines erased (from its erase list), as the
 \ disc erases a screen before drawing it again.

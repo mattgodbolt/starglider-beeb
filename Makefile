@@ -122,7 +122,7 @@ spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	done
 
 # The logic's routines, each on every capture (tools/logicrun.mjs's ROUTINES).
-LOGIC    = animate flight keys handlers
+LOGIC    = animate flight keys handlers world world_after world_whole
 STEPS    = $(patsubst tests/st/steps_%.txt,%,$(wildcard tests/st/steps_*.txt))
 
 logic: build/spike/SPIKE
@@ -131,12 +131,14 @@ logic: build/spike/SPIKE
 	    node tools/logicrun.mjs build/steps/$$s/steps.json $$r || exit 1; \
 	done; done
 
+# The scripts time their keys in seconds, not the ST's frames, so a capture
+# slowed by others running beside it plays a different game: a few at once.
+STEPS_JOBS ?= 4
 steps:
 	mkdir -p build/steps
-	@for s in $(STEPS); do \
-	    $(PYTHON) -I tools/st_steps.py run tests/st/steps_$$s.txt build/steps/$$s \
-	        --disk "$(ST_STX)" --hatari $(HATARI) --tos $(HATARI_TOS) > build/steps/$$s.log 2>&1 & \
-	done; wait; tail -n1 build/steps/*.log
+	@printf '%s\n' $(STEPS) | xargs -P $(STEPS_JOBS) -I{} sh -c '$(PYTHON) -I tools/st_steps.py run \
+	    tests/st/steps_{}.txt build/steps/{} --disk "$(ST_STX)" --hatari $(HATARI) --tos $(HATARI_TOS) \
+	    > build/steps/{}.log 2>&1'; tail -n1 build/steps/*.log
 
 memory: $(TARGET)
 	python3 -I tools/memmap.py build/starglider.json

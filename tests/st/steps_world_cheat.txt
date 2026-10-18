@@ -1,0 +1,18 @@
+# Docked with the cheat on and two missiles carried: past the silo's
+# missile (not taken: no room), the tunnel's end fills the laser at once,
+# every frame.
+wait 38
+key 57
+wait 4
+debug w w $5c02e $1c30 $ffd0 $dc60
+debug w w $5c03c $0c10
+wait 1
+debug w w $5c032 $db20
+debug w w $5c18a $1000
+debug w w $5c178 2
+debug w b $5c1cd $ff
+debug parse {arm}
+debug echo \nSEG cheat\n
+wait 24
+debug echo \nSEG end\n
+quit

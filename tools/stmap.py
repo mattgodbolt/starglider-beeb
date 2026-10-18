@@ -55,6 +55,20 @@ def st_place(addr):
     raise ValueError(f"{addr} isn't in any of the capture's regions (tools/st_steps.py)")
 
 
+def st_bytes(e):
+    """The ST's bytes a variable holds, as (region, offset)s."""
+    r, o, k = e["region"], e["offset"], e["kind"]
+    if k in ("wlo", "whi", "barr"):
+        lo = 1 if k == "wlo" else 0
+        return [(r, o + i * e["stride"] + lo) for i in range(e["count"])]
+    n = {"byte": 1, "word8": 2, "word": 2, "long": 4, "slot": 4, "index": 4, "list": 4}.get(k)
+    if k == "raw":
+        n = e["count"]
+    elif k == "slots":
+        n = 4 * e["count"]
+    return [(r, o + i) for i in range(n)]
+
+
 def variables(syms):
     out = []
     for path in sorted(SRC.rglob("*.6502")):
@@ -63,18 +77,35 @@ def variables(syms):
             if not m:
                 continue
             name, spec = m.group(1), m.group(2).split()
-            also = spec[-1] == "also"           # a second copy of the ST's, on purpose
-            if also:
-                spec = spec[:-1]
             if name not in syms:
                 raise SystemExit(f"{path}: {name} isn't in the build's symbols")
+            # flags last: "also", a second copy of the ST's variable on
+            # purpose; "in", an input the outside world writes at any moment
+            # (the ST's interrupts), put but never compared
+            also = given = False
+            while spec[-1] in ("also", "in"):
+                also, given = also or spec[-1] == "also", given or spec[-1] == "in"
+                spec = spec[:-1]
             addr, kind = spec[0], spec[1]
             region, offset = st_place(addr)
             e = {"name": name, "at": syms[name], "kind": kind, "region": region, "offset": offset, "also": also,
                  "where": str(path.relative_to(SRC.parent))}
+            if given:
+                e["input"] = True
             if kind == "index":
                 # (the array's own ST address, then its entries' size)
                 e["base"], e["stride"] = int(spec[2].lstrip("&"), 16), int(spec[3])
+                out.append(e)
+                continue
+            if kind == "list":
+                # list COUNT N: the ST's pointer to a list's first entry
+                # (record pointers, pushed downward), its count's ST
+                # address, and the port's count of it (slots, in the
+                # order pushed)
+                e["count_region"], e["count_offset"] = st_place(spec[2])
+                if spec[3] not in syms:
+                    raise SystemExit(f"{path}: {name}: {spec[3]} isn't in the build's symbols")
+                e["count_at"] = syms[spec[3]]
                 out.append(e)
                 continue
             args = [int(x) for x in spec[2:]]
@@ -87,20 +118,21 @@ def variables(syms):
             elif kind not in SIZES:
                 raise SystemExit(f"{path}: {name}: no such kind {kind}")
             out.append(e)
-    # One port variable for each of the ST's: two would each be put from the
-    # ST's state, and pass, while the code that writes one never feeds the
-    # code that reads the other. A word's low and high arrays share an
-    # address, and a copy marked `also` is one on purpose.
-    seen = {}
+    # One port variable for each of the ST's bytes: two would each be put
+    # from the ST's state, and pass, while the code that writes one never
+    # feeds the code that reads the other. A copy marked `also` is one on
+    # purpose.
+    owner, clashes = {}, []
     for e in out:
-        key = (e["region"], e["offset"], e["kind"] if e["kind"] in ("wlo", "whi") else "")
         if e["also"]:
             continue
-        if key in seen:
-            o = seen[key]
-            raise SystemExit(f"{e['where']}: {e['name']} is the ST's variable {o['where']} declares as {o['name']}: "
-                             "keep one (or mark a deliberate copy `also`)")
-        seen[key] = e
+        for byte in st_bytes(e):
+            o = owner.setdefault(byte, e)
+            if o is not e and (o["name"], e["name"]) not in clashes:
+                clashes.append((o["name"], e["name"]))
+    if clashes:
+        raise SystemExit("one ST variable, two port variables (keep one, or mark a deliberate copy `also`): " +
+                         ", ".join(f"{x} and {y}" for x, y in clashes))
     return out
 
 

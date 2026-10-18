@@ -7,18 +7,829 @@
 \ count inside the coarse pass, the lists, and after the draw loop the
 \ player's laser (docs/research/st-logic.md, "The frame's end, the score,
 \ the interrupts and world_render's logic"). world_lists is its logic up to
-\ the lists (the capture's top to lists), world_after the rest (lists to
-\ render). For now world_lists is the list phase alone.
+\ the lists (the capture's top to lists); world_after, the rest (lists to
+\ render), is in the logic bank (laser.6502); the frame draws between
+\ (decision 14). The drawing (the
+\ view's clear, the messages and the score printed, the gunsight's blit,
+\ the dots plotted, the bolts) is the renderer's; what it leaves in the
+\ variables the logic reads, and in the d0 the dots' random8 adds, is
+\ here.
+\
+\ The list phase (world.6502, rotate.6502) lies below ANDY_TOP, so ANDY
+\ comes out round each call of it.
 \ ***************************************************************************
 
+\ The projection's shift ($212, colour), which the laser's boxes use and
+\ which a projected dot leaves in d0.
+PROJ_SHIFT = 7
+
+\ The gunsight's blit (&0983C, D_0732A): the d0 its last word leaves, by
+\ the sight's x less the hotspot's (14), mod 16. At 0 the blit only copies,
+\ and d0 is what it was.
+.sight_d0_lo
+    EQUB &00, &00, &80, &C0, &E0, &F0, &F8, &7C, &3E, &1F, &0F, &07, &83, &C1, &E0, &F0
+.sight_d0_hi
+    EQUB &00, &1F, &0F, &07, &83, &C1, &E0, &F0, &F8, &7C, &3E, &1F, &0F, &07, &03, &01
+
+\ ---------------------------------------------------------------------------
+\ world_lists (&04FE8 to &05108): up to the lists, in the normal view or
+\ the missile view's (L_05248).
 .world_lists
-    \ the list phase is below ANDY_TOP, so ANDY comes out round it
+{
+    LDA mv_render : BEQ normal
+    JMP missile_lists
+.normal
+    \ docked, colour 0 flashes &036 (with the DOCKING message)
+    LDA docked : BEQ level_test
+    LDA #&36 : STA flash0 : STZ flash0+1
+.level_test
+    \ the level up (&0502C): any change in the score's second byte (its
+    \ ten-thousands), tested before this frame's add, so a frame late
+    STZ level_changed
+    LDA score+2 : CMP last_score_byte : BEQ add
+    INC level
+    LDA #&32 : STA level_msg
+    LDA score+2 : STA last_score_byte
+    LDA #&FF : STA level_changed
+    LDA level : CMP #&23 : BNE add
+    LDA #&22 : STA level
+.add
+    \ the kill's score (&05086): shown as the last kill when non-zero,
+    \ then added, with the X flag clear and the last carry lost; d0 holds
+    \ it, which the gunsight's blit may change
+    LDA pending_score : STA rng_d0 : STA score_addend
+    LDA pending_score+1 : STA rng_d0+1 : STA score_addend+1
+    STZ score_addend+2 : STZ score_addend+3
+    ORA pending_score : BEQ adding
+    MOVW last_kill, pending_score
+.adding
+    SED
+    CLC
+    LDA score : ADC pending_score : STA score
+    LDA score+1 : ADC pending_score+1 : STA score+1
+    LDA score+2 : ADC #0 : STA score+2
+    LDA score+3 : ADC #0 : STA score+3
+    CLD
+    STZ pending_score : STZ pending_score+1
+    \ the camera's sines (&050A2): the heading's are the logic's trig_sin
+    \ and trig_cos
+    LDA pl_heading : STA m_idx : LDA pl_heading+1 : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+    JSR sight_blit
     LDA #BANK_WORLD : STA bank_now : STA romsel
     JSR camera
+    LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
+    LDA docked : BNE no_dots
+    JSR ground_dots
+.no_dots
+    JMP lists
+}
+
+\ sight_blit (&05598): the d0 the gunsight's blit leaves, when the sight
+\ is inside the window (each edge by the N flag of a word difference).
+.sight_blit
+{
+    LDA sight_x : SEC : SBC #LO(VIEW_XMIN) : LDA sight_x+1 : SBC #HI(VIEW_XMIN) : BMI outside
+    LDA sight_x : SEC : SBC #LO(VIEW_XMAX) : LDA sight_x+1 : SBC #HI(VIEW_XMAX) : BPL outside
+    LDA sight_y : SEC : SBC #LO(VIEW_YMIN) : LDA sight_y+1 : SBC #HI(VIEW_YMIN) : BMI outside
+    LDA sight_y : SEC : SBC #LO(VIEW_YMAX) : LDA sight_y+1 : SBC #HI(VIEW_YMAX) : BPL outside
+    LDA sight_x : SEC : SBC #14 : AND #15 : BEQ outside
+    TAX
+    LDA sight_d0_lo,X : STA rng_d0
+    LDA sight_d0_hi,X : STA rng_d0+1
+.outside
+    RTS
+}
+
+\ missile_lists (L_05248): the window opens 8 lines a step after the
+\ launch and closes over the view's last 15 steps; while it moves the
+\ lists stay as they were. Otherwise they are made from the missile: its
+\ place and angles stand in for the player's while they are made.
+.missile_lists
+{
+    ZA_AUTO 12, keep                    ; the player's place and angles
+    \ closing while the life is under 15 (the N flag of life - 15)
+    LDA m_life : SEC : SBC #&0F : LDA m_life+1 : SBC #0 : BPL steady
+    LDA m_iris : CLC : ADC #8 : STA m_iris
+    RTS
+.steady
+    LDA m_iris : BEQ open
+    SEC : SBC #8 : STA m_iris
+    BEQ open
+    RTS
+.open
+    LDA m_heading : STA m_idx : LDA m_heading+1 : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+    LDX #11
+    ZA_DISCARD keep
+.copy
+    LDA pl_x,X : STA keep,X : ZA_INDEXEDBY 0..11
+    LDA m_x,X : STA pl_x,X
+    DEX : BPL copy
+    LDA #BANK_WORLD : STA bank_now : STA romsel
+    JSR camera
+    LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
+    \ d0 is the window's step, 0 here (&053BC)
+    STZ rng_d0 : STZ rng_d0+1
+    JSR ground_dots
+    JSR lists
+    LDX #11
+.back
+    LDA keep,X : ZA_INDEXEDBY 0..11
+    STA pl_x,X
+    DEX : BPL back
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ ground_dots (&047AA): each of the 40 dots rotated into camera space by
+\ the camera's matrix; one outside the view's cone (z <= 2, or x or y
+\ beyond +-2z) is put back at random ahead of the camera. The cone decides
+\ the random numbers, so it is the ST's decision exactly, made as decision
+\ 11 makes the objects' rotation: approximately first, and exactly only for
+\ a dot within the approximation's bound of the cone's edges. The
+\ approximation is the dots' own (dot_approx). A dot found surely in view
+\ keeps that decision, unrotated, until the camera has moved enough since
+\ to bring it to an edge (dot_setup's drift, dot_keep's margin).
+.ground_dots
+{
+    ZA_AUTO1 dot, sines
+    JSR dot_setup
+    STZ sines
+    LDX #0
+.each
+    STX dot
+    JSR dot_cached : BCC in_view
+    LDA dot_x_lo,X : SEC : SBC pl_x : STA rot_d
+    LDA dot_x_hi,X : SBC pl_x+1 : STA rot_d+1
+    LDA dot_z_lo,X : SEC : SBC pl_z : STA rot_d+4
+    LDA dot_z_hi,X : SBC pl_z+1 : STA rot_d+5
+    JSR dot_approx : BCS exactly
+    JSR dot_classify : BEQ keep
+    CMP #1 : BEQ outside
+.exactly
+    LDA #BANK_WORLD : STA bank_now : STA romsel
+    JSR rotate_exact
+    LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
+    JSR cone_exact : BCS outside
+    BRA in_view
+.keep
+    LDX dot
+    JSR dot_keep
+.in_view
+    \ projected: d0 takes the projection's shift (&0480A)
+    LDA #PROJ_SHIFT : STA rng_d0 : STZ rng_d0+1
+    BRA next
+.outside
+    LDA sines : BNE placed
+    INC sines
+    JSR respawn_sines
+.placed
+    LDX dot
+    JSR respawn
+.next
+    LDX dot : INX : CPX #40 : BNE each
+    RTS
+}
+
+\ dot_cached: C clear if dot X is still surely in view: kept, where it was
+\ kept, and its margin not yet spent by the drift since. Otherwise it's no
+\ longer kept.
+.dot_cached
+{
+    LDA dot_rem_hi,X : BMI no
+    LDY dot_cls,X
+    LDA dot_rem_lo,X : SEC : SBC dot_drift_lo,Y : STA dot_rem_lo,X
+    LDA dot_rem_hi,X : SBC dot_drift_hi,Y : STA dot_rem_hi,X : BMI no
+    LDA dot_x_lo,X : CMP dot_at_xlo,X : BNE no
+    LDA dot_x_hi,X : CMP dot_at_xhi,X : BNE no
+    LDA dot_z_lo,X : CMP dot_at_zlo,X : BNE no
+    LDA dot_z_hi,X : CMP dot_at_zhi,X : BNE no
+    CLC : RTS
+.no
+    LDA #&FF : STA dot_rem_hi,X
+    SEC : RTS
+}
+
+\ dot_keep: dot X, surely in view with margin dot_mu (the least that z' -
+\ 3, 2z' - |x'|, 2z' - |y'| and 16383 - z' can be), is kept if |dx| + |dy|
+\ + |dz| is at most 16384: in the least class k with the sum at most 512
+\ << k. While its margin lasts the sum stays within twice that (a frame's
+\ move takes at least a third of the drift, and the margin is under twice
+\ the sum), which is what its class's drift is for. The sum is bounded by
+\ dot_approx's e: |d| is within 128 |e| + 64.
+.dot_keep
+{
+    ZA_AUTO2 v
+    \ v = 128 (|ex| + |ez|) + 127 + |dy|, at least the sum less 1
+    LDA dot_esum : LSR A : STA v+1
+    LDA #0 : ROR A : ORA #127
+    CLC : ADC dot_dy : STA v
+    LDA v+1 : ADC dot_dy+1
+    \ v / 256 under 64, or not kept; the class from it
+    CMP #&40 : BCS far
+    LDY #0
+    LSR A
+.class
+    BEQ got
+    INY : LSR A
+    BRA class
+.got
+    TYA : STA dot_cls,X
+    LDA dot_mu : STA dot_rem_lo,X : LDA dot_mu+1 : STA dot_rem_hi,X
+    LDA dot_x_lo,X : STA dot_at_xlo,X : LDA dot_x_hi,X : STA dot_at_xhi,X
+    LDA dot_z_lo,X : STA dot_at_zlo,X : LDA dot_z_hi,X : STA dot_at_zhi,X
+.far
+    RTS
+}
+
+\ dot_setup: what the dots take from the frame. The ground's offset from
+\ the camera, dy, is the same for every dot (and goes in rot_d for the
+\ exact rotation); the approximation takes its column's terms exactly, and
+\ the x and z columns' entries as q, m / 128 rounded. And the drift since
+\ the last frame's dots, by class.
+ZA_AUTO2 dot_ez                         ; the approximation's bound on z' ...
+ZA_AUTO 4, dot_k                        ; ... on 2z' - |x'| and 2z' - |y'|
+ZA_AUTO2 dot_mu                         ; a dot's margin, from dot_classify
+ZA_AUTO1 dot_esum                       ; its |ex| + |ez|, from dot_approx
+ZA_AUTO2 dot_dy                         ; |dy|, the frame's
+ZA_AUTO 6, dot_c                        ; the ground's column, by row: floor(m dy / 16384)
+ZA_AUTO 6, dot_qy                       ; the x then the z column's q, + 128, by row
+ZA_AUTO1 dot_fz                         ; (|q_z0| + |q_z2| + 1) / 2, z's part of the bound ...
+ZA_AUTO 4, dot_fk                       ; ... and x's and y's: f_r + 2 f_z
+ZA_AUTO1 dot_scale                      ; the bound's scale on |e|: 1, 2 or 3 (by 1, 2 or 4), or 0: none
+ZA_AUTO2 dot_p1lo, dot_p1hi, dot_p2lo, dot_p2hi     ; the products' table pointers
+.dot_setup
+{
+    ZA_AUTO1 amax
+    ZA_AUTO 3, f
+    LDA #0 : SEC : SBC pl_y : STA rot_d+2 : STA dot_dy
+    LDA #0 : SBC pl_y+1 : STA rot_d+3 : STA dot_dy+1
+    BPL dy_pos
+    LDA #0 : SEC : SBC dot_dy : STA dot_dy : LDA #0 : SBC dot_dy+1 : STA dot_dy+1
+.dy_pos
+    FMUL cam+2, rot_d+2 : MOVW dot_c, mul_r
+    FMUL cam+8, rot_d+2 : MOVW dot_c+2, mul_r
+    FMUL cam+14, rot_d+2 : MOVW dot_c+4, mul_r
+    \ the x column's entries, then the z column's, as q (the most any
+    \ leaves in its rounding, |m - 128 q|, into amax)
+    STZ amax
+    LDA cam : LDY cam+1 : JSR qbyte : STA dot_qy
+    LDA cam+6 : LDY cam+7 : JSR qbyte : STA dot_qy+1
+    LDA cam+12 : LDY cam+13 : JSR qbyte : STA dot_qy+2
+    LDA cam+4 : LDY cam+5 : JSR qbyte : STA dot_qy+3
+    LDA cam+10 : LDY cam+11 : JSR qbyte : STA dot_qy+4
+    LDA cam+16 : LDY cam+17 : JSR qbyte : STA dot_qy+5
+    LDX #2
+.rows
+    LDA dot_qy,X : ZA_INDEXEDBY 0..2
+    JSR qmag : STA f,X : ZA_INDEXEDBY 0..2
+    LDA dot_qy+3,X : ZA_INDEXEDBY 0..2
+    JSR qmag : CLC : ADC f,X : ZA_INDEXEDBY 0..2
+    ROR A : ADC #0                      ; (sum + 1) / 2, of up to 254
+    STA f,X : ZA_INDEXEDBY 0..2
+    DEX : BPL rows
+    \ dot_fz = f_z; dot_fk = f_x + 2 f_z, f_y + 2 f_z (2 f_z is at most 254)
+    LDA f+2 : STA dot_fz
+    ASL A : TAX
+    CLC : ADC f : STA dot_fk : LDA #0 : ROL A : STA dot_fk+1
+    TXA : CLC : ADC f+1 : STA dot_fk+2 : LDA #0 : ROL A : STA dot_fk+3
+    \ |m - 128 q| / 128 by |e| is a term's share of the bound from the
+    \ matrix's rounding: |e| / 2 while |m - 128 q| is 64 or less (the
+    \ rounding alone), |e| while 128 or less (an entry held at 127 for
+    \ 16384), 2|e| to 256; beyond, every dot is rotated exactly
+    LDY #1
+    LDA amax : CMP #65 : BCC scaled
+    LDY #2
+    CMP #129 : BCC scaled
+    LDY #3
+    CMP #&FF : BNE scaled
+    LDY #0
+.scaled
+    STY dot_scale
+    LDA #HI(neg_lo) : STA dot_p1lo+1 : STA dot_p2lo+1
+    LDA #HI(neg_hi) : STA dot_p1hi+1 : STA dot_p2hi+1
+    JMP dot_drift
+\ qbyte: A = 128 + q for the entry A (low), Y (high): q = m / 128
+\ rounded, held within -127 to 127; |m - 128 q| into amax if larger.
+.qbyte
+    ZA_AUTO2 t
+    ZA_AUTO1 q
+    STA t : STY t+1
+    CLC : ADC #64 : STA q : TYA : ADC #0
+    ASL q : ROL A : STA q               ; (m + 64) / 128, its sign in C
+    BCS negative
+    BPL rounded
+    LDA #127 : STA q
+    BRA rounded
+.negative
+    CMP #&81 : BCS rounded
+    LDA #&81 : STA q
+.rounded
+    \ the rest, m - 128 q, its magnitude into amax
+    LDA q : LSR A : TAY                 ; 128 q's high byte (but its sign) ...
+    LDA q : ROR A : AND #&80            ; ... and its low byte (q's bit 0)
+    EOR #&FF : SEC : ADC t : STA t      ; m - 128 q
+    LDA q : BPL q_pos
+    TYA : ORA #&80 : TAY
+.q_pos
+    TYA : EOR #&FF : ADC t+1
+    BPL a_pos
+    STA t+1 : LDA #0 : SEC : SBC t : STA t : LDA #0 : SBC t+1
+.a_pos
+    BNE a_big
+    LDA t : CMP amax : BCC a_kept
+    STA amax
+.a_kept
+    LDA q : EOR #&80
+    RTS
+.a_big
+    LDA #&FF : STA amax                 ; (&FF stands for 255 up)
+    LDA q : EOR #&80
+    RTS
+\ qmag: A = |q| for A = 128 + q.
+.qmag
+    EOR #&80 : BPL q_mag
+    EOR #&FF : INC A
+.q_mag
+    RTS
+}
+
+\ dot_drift: by class, the most a frame since the last frame's dots can
+\ have moved 2z' - x', 2z' + x', 2z' - y', 2z' + y', z' or -z' of a dot
+\ whose |dx| + |dy| + |dz| stays within L = 1024 << k: each row of the
+\ matrix moved by at most dm an entry, the camera by dp (|dx| + |dy| + |dz|),
+\ each term's floor by under 1, so 3 dp + 3 dm L / 16384 + 9 (and dp more
+\ when an entry is beyond 16384). Without a last frame in the same view,
+\ or with too much moved, nothing is kept. The frame's camera is kept for
+\ the next.
+.dot_drift
+{
+    ZA_AUTO2 dm, dp, t, base
+    ZA_AUTO1 wide
+    LDA dot_valid : BNE known
+.forget
+    LDX #39
+    LDA #&FF
+.forgot
+    STA dot_rem_hi,X
+    DEX : BPL forgot
+    JMP keep_camera
+.known
+    LDA mv_render : CMP dot_mv_was : BNE forget
+    \ dm, and whether any entry is beyond 16384
+    STZ dm : STZ dm+1 : STZ wide
+    LDX #16
+.entries
+    LDA cam,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    SEC : SBC dot_cam_was,X : STA t
+    LDA cam+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    SBC dot_cam_was+1,X
+    BPL moved_pos
+    STA t+1 : LDA #0 : SEC : SBC t : STA t : LDA #0 : SBC t+1
+.moved_pos
+    CMP #&20 : BCS forget               ; 8192 up
+    STA t+1
+    LDA dm : CMP t : LDA dm+1 : SBC t+1 : BCS not_most
+    MOVW dm, t
+.not_most
+    \ beyond 16384: below &C000, or above &4000
+    LDA cam+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    BPL m_pos
+    CMP #&C0 : BCS m_in
+    BCC m_wide
+.m_pos
+    CMP #&40 : BCC m_in
+    BNE m_wide
+    LDA cam,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    BEQ m_in
+.m_wide
+    LDA #&FF : STA wide
+.m_in
+    DEX : DEX : BPL entries
+    \ dp, each of its terms under 4096
+    STZ dp : STZ dp+1
+    LDX #4
+.axes
+    LDA pl_x,X : SEC : SBC dot_p_was,X : STA t
+    LDA pl_x+1,X : SBC dot_p_was+1,X
+    BPL step_pos
+    STA t+1 : LDA #0 : SEC : SBC t : STA t : LDA #0 : SBC t+1
+.step_pos
+    CMP #&10 : BCC step_in
+    JMP forget
+.step_in
+    STA t+1
+    ADDW dp, t
+    DEX : DEX : BPL axes
+    \ base = 3 dp + 9 (+ dp if wide)
+    LDA dp : ASL A : STA base : LDA dp+1 : ROL A : STA base+1
+    ADDW base, dp
+    LDA wide : BEQ narrow
+    ADDW base, dp
+.narrow
+    LDA base : CLC : ADC #9 : STA base
+    BCC based
+    INC base+1
+.based
+    \ t = 3 dm, under 24576; class 4 takes it whole, 5 twice, 3-0 halved
+    \ and rounded up again and again
+    LDA dm : ASL A : STA t : LDA dm+1 : ROL A : STA t+1
+    ADDW t, dm
+    LDX #4 : JSR class_drift
+    ASL t : ROL t+1
+    LDX #5 : JSR class_drift
+    LSR t+1 : ROR t
+    LDX #3
+.halves
+    LSR t+1 : ROR t
+    BCC exact_half
+    INC t : BNE exact_half
+    INC t+1
+.exact_half
+    JSR class_drift
+    DEX : BPL halves
+.keep_camera
+    LDX #17
+.cam_copy
+    LDA cam,X : ZA_INDEXEDBY 0..17
+    STA dot_cam_was,X
+    DEX : BPL cam_copy
+    LDX #5
+.place
+    LDA pl_x,X : STA dot_p_was,X
+    DEX : BPL place
+    LDA mv_render : STA dot_mv_was
+    LDA #1 : STA dot_valid
+    RTS
+\ class_drift: class X's drift, base + t, held at &7FFF.
+.class_drift
+    LDA base : CLC : ADC t : STA dot_drift_lo,X
+    LDA base+1 : ADC t+1 : BCS held
+    BPL kept
+.held
+    LDA #&FF : STA dot_drift_lo,X
+    LDA #&7F
+.kept
+    STA dot_drift_hi,X
+    RTS
+}
+
+\ dot_approx: rot_acc = the dot's camera-space position by the dots'
+\ approximation, from rot_d, and the bounds on its error (dot_ez, dot_k);
+\ C set if it can't (an offset of 16128 or more, or a matrix it can't
+\ bound). Each term of the x and z columns is q e, e = d / 128 rounded,
+\ out by under (|q| + |e|) / 2 + 2 (|e| / 2 scaled by dot_scale); the
+\ ground's column is exact.
+.dot_approx
+{
+    ZA_AUTO1 ex, ez, th, t, g
+    LDA dot_scale : BEQ far
+    LDA rot_d+1 : CLC : ADC #&3F : CMP #&7E : BCS far
+    LDA rot_d+5 : CLC : ADC #&3F : CMP #&7E : BCC near
+.far
+    SEC : RTS
+.near
+    LDA rot_d : CLC : ADC #64 : STA t
+    LDA rot_d+1 : ADC #0 : STA th
+    ASL t : ROL th
+    LDA rot_d+4 : CLC : ADC #64 : STA t
+    LDA rot_d+5 : ADC #0 : STA ez
+    ASL t : ROL ez
+    LDA th : STA ex
+    \ the x column's terms, onto the ground's: q e, a signed product, is
+    \ f(q + e) - f(q - e) with f(n) = n n / 4, read from neg (f(i - 255))
+    \ at 128 + q from 127 + e and from 127 - e
+    CLC : ADC #127 : STA dot_p1lo : STA dot_p1hi
+    LDA #127 : SEC : SBC ex : STA dot_p2lo : STA dot_p2hi
+FOR r = 0..2
+    LDY dot_qy + r
+    SEC
+    LDA (dot_p1lo),Y : SBC (dot_p2lo),Y : STA t
+    LDA (dot_p1hi),Y : SBC (dot_p2hi),Y : TAX
+    LDA t : CLC : ADC dot_c + 2 * r : STA rot_acc + 2 * r
+    TXA : ADC dot_c + 2 * r + 1 : STA rot_acc + 2 * r + 1
+NEXT
+    \ the z column's
+    LDA ez : CLC : ADC #127 : STA dot_p1lo : STA dot_p1hi
+    LDA #127 : SEC : SBC ez : STA dot_p2lo : STA dot_p2hi
+FOR r = 0..2
+    LDY dot_qy + 3 + r
+    SEC
+    LDA (dot_p1lo),Y : SBC (dot_p2lo),Y : STA t
+    LDA (dot_p1hi),Y : SBC (dot_p2hi),Y : TAX
+    LDA t : CLC : ADC rot_acc + 2 * r : STA rot_acc + 2 * r
+    TXA : ADC rot_acc + 2 * r + 1 : STA rot_acc + 2 * r + 1
+NEXT
+    \ the bounds: a row is out by under f_r + (|ex| + |ez|) / 2 (scaled)
+    \ + 4, f_r the frame's part; g = the larger of |ex| and |ez| (scaled)
+    \ + 6 is more than the dot's part
+    LDA ex : BPL ex_pos
+    EOR #&FF : INC A
+.ex_pos
+    STA t
+    LDA ez : BPL ez_pos
+    EOR #&FF : INC A
+.ez_pos
+    TAX : CLC : ADC t : STA dot_esum : TXA
+    CMP t : BCS larger
+    LDA t
+.larger
+    LDX dot_scale
+    STZ th
+.scale
+    DEX : BEQ scaled
+    ASL A : ROL th
+    BRA scale
+.scaled
+    CLC : ADC #6 : STA g
+    BCC g_done
+    INC th
+.g_done
+    \ dot_ez = f_z + g; dot_k = f_r + 2 f_z + 3 g
+    LDA g : CLC : ADC dot_fz : STA dot_ez
+    LDA th : ADC #0 : STA dot_ez+1
+    LDA g : ASL A : STA t : LDA th : ROL A : TAX                ; 2 g ...
+    LDA t : CLC : ADC g : STA t : TXA : ADC th : TAX            ; ... 3 g
+    LDA t : CLC : ADC dot_fk : STA dot_k
+    TXA : ADC dot_fk+1 : STA dot_k+1
+    LDA t : CLC : ADC dot_fk+2 : STA dot_k+2
+    TXA : ADC dot_fk+3 : STA dot_k+3
+    CLC : RTS
+}
+
+\ dot_classify: from dot_approx's rot_acc and bounds, A = 0 (and Z) if
+\ the dot is surely in view, with dot_mu its margin; 1 if surely outside;
+\ 2 if too near an edge to say. hi = z~ + ez bounds z' above, and with z'
+\ under 16384 neither 2z' nor x' and y' (within the bounds of the offsets
+\ dot_approx takes) can wrap.
+.dot_classify
+{
+    ZA_AUTO2 hi, t2, lo
+    ZA_AUTO 4, u                        ; ux, uy
+    ux = u
+    uy = u + 2
+    LDA rot_acc+4 : CLC : ADC dot_ez : STA hi
+    LDA rot_acc+5 : ADC dot_ez+1 : STA hi+1
+    BMI outside                         ; z' below 0
+    BNE z_pos
+    LDA hi : CMP #3 : BCS z_pos         ; (z' 2 or less: outside)
+.outside
+    LDA #1 : RTS
+.unsure
+    LDA #2 : RTS
+.z_pos
+    LDA hi+1 : CMP #&40 : BCS unsure
+    LDA rot_acc+4 : ASL A : STA t2 : LDA rot_acc+5 : ROL A : STA t2+1
+    \ ux = 2z~ - kx - |x~|, uy the same for y: both 0 or more, in view
+    \ if z' is surely above 2
+    ZA_DISCARD u
+    LDX #0 : JSR margin
+    LDX #2 : JSR margin
+    LDA ux+1 : ORA uy+1 : BMI not_in
+    LDA rot_acc+4 : SEC : SBC dot_ez : TAX
+    LDA rot_acc+5 : SBC dot_ez+1 : TAY
+    TXA : SEC : SBC #3 : STA lo
+    TYA : SBC #0 : STA lo+1
+    BMI unsure
+    \ the margin: the least of lo, ux, uy and 16383 - hi
+    LDA #LO(16383) : SEC : SBC hi : STA dot_mu
+    LDA #HI(16383) : SBC hi+1 : STA dot_mu+1
+    LDA lo : CMP dot_mu : LDA lo+1 : SBC dot_mu+1 : BCS mu1
+    MOVW dot_mu, lo
+.mu1
+    LDA ux : CMP dot_mu : LDA ux+1 : SBC dot_mu+1 : BCS mu2
+    MOVW dot_mu, ux
+.mu2
+    LDA uy : CMP dot_mu : LDA uy+1 : SBC dot_mu+1 : BCS mu3
+    MOVW dot_mu, uy
+.mu3
+    LDA #0 : RTS
+.not_in
+    \ outside if |v~| > 2z~ + k, that is u + 2k < 0, for x or y
+    LDX #0 : LDA ux : LDY ux+1 : JSR beyond : BCS out
+    LDX #2 : LDA uy : LDY uy+1 : JSR beyond : BCS out
+    LDA #2 : RTS
+.out
+    LDA #1 : RTS
+\ margin: u = t2 - k - |v~| for x~ (X = 0) or y~ (X = 2).
+.margin
+    LDA rot_acc+1,X : ZA_INDEXEDBY {0, 2}
+    BMI v_neg
+    LDA t2 : SEC : SBC rot_acc,X : ZA_INDEXEDBY {0, 2}
+    STA u,X : ZA_INDEXEDBY {0, 2}
+    LDA t2+1 : SBC rot_acc+1,X : ZA_INDEXEDBY {0, 2}
+    BRA less_k
+.v_neg
+    LDA t2 : CLC : ADC rot_acc,X : ZA_INDEXEDBY {0, 2}
+    STA u,X : ZA_INDEXEDBY {0, 2}
+    LDA t2+1 : ADC rot_acc+1,X : ZA_INDEXEDBY {0, 2}
+.less_k
+    TAY
+    LDA u,X : ZA_INDEXEDBY {0, 2}
+    SEC : SBC dot_k,X : ZA_INDEXEDBY {0, 2}
+    STA u,X : ZA_INDEXEDBY {0, 2}
+    TYA : SBC dot_k+1,X : ZA_INDEXEDBY {0, 2}
+    STA u+1,X : ZA_INDEXEDBY {0, 2}
+    RTS
+\ beyond: C set if u (A low, Y high) + 2 k (X = 0 for x, 2 for y) < 0,
+\ only asked when u < 0.
+.beyond
+    STA lo : STY lo+1
+    CPY #&80 : BCC not_beyond
+    LDA dot_k,X : ZA_INDEXEDBY {0, 2}
+    ASL A : STA t2 : LDA dot_k+1,X : ZA_INDEXEDBY {0, 2}
+    ROL A : STA t2+1
+    LDA lo : CLC : ADC t2 : LDA lo+1 : ADC t2+1
+    ASL A                               ; its sign into C
+    RTS
+.not_beyond
+    CLC : RTS
+}
+
+\ cone_exact (&047DC): the ST's test on the exact rot_acc, its words
+\ wrapping: C set if the dot is outside.
+.cone_exact
+{
+    ZA_AUTO2 t2, n2
+    CMPS16 rot_acc+4, #3 : BMI outside            ; z <= 2
+    LDA rot_acc+4 : ASL A : STA t2 : LDA rot_acc+5 : ROL A : STA t2+1
+    LDA #0 : SEC : SBC t2 : STA n2 : LDA #0 : SBC t2+1 : STA n2+1
+    CMPS16 rot_acc, n2 : BMI outside
+    CMPS16 t2, rot_acc : BMI outside
+    CMPS16 rot_acc+2, n2 : BMI outside
+    CMPS16 t2, rot_acc+2 : BMI outside
+    CLC : RTS
+.outside
+    SEC : RTS
+}
+
+\ respawn_sines: the sines a respawn turns by, the heading's (the
+\ missile's while it flies, as &048C4 has it), into trig_sin and trig_cos.
+\ The view's camera took the same unless the missile flies without its
+\ view, which the ST never does.
+.respawn_sines
+{
+    LDA missile_view : CMP mv_render : BEQ same
+    LDA missile_view : BEQ player
+    LDA m_heading : STA m_idx : LDA m_heading+1
+    BRA got
+.player
+    LDA pl_heading : STA m_idx : LDA pl_heading+1
+.got
+    AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+.same
+    RTS
+}
+
+\ respawn (&0484E): dot X at random ahead: along = random8 & &1FFF,
+\ across = (random8 & &1FFF) - &1000, each random8 adding d0 as it stands
+\ (and leaving its result there), turned by the heading's sines onto the
+\ player's place (the missile's while it flies).
+.respawn
+{
+    ZA_AUTO2 along, across, nx, nz
+    ZA_AUTO1 dot
+    STX dot
+    JSR random8
+    LDA rng_d0+1 : AND #&1F : STA rng_d0+1
+    MOVW along, rng_d0
+    JSR random8
+    LDA rng_d0+1 : AND #&1F : SEC : SBC #&10 : STA rng_d0+1
+    MOVW across, rng_d0
+    MOVW mul_x, across : MOVW mul_y, trig_cos : JSR fmul16 : MOVW nx, mul_r
+    MOVW mul_x, along : MOVW mul_y, trig_sin : JSR fmul16 : ADDW nx, mul_r
+    MOVW mul_x, along : MOVW mul_y, trig_cos : JSR fmul16 : MOVW nz, mul_r
+    MOVW mul_x, across : MOVW mul_y, trig_sin : JSR fmul16 : SUBW nz, mul_r
+    LDA missile_view : BEQ player
+    ADDW nx, m_x
+    ADDW nz, m_z
+    BRA store
+.player
+    ADDW nx, pl_x
+    ADDW nz, pl_z
+.store
+    LDX dot
+    LDA nx : STA dot_x_lo,X : LDA nx+1 : STA dot_x_hi,X
+    LDA nz : STA dot_z_lo,X : LDA nz+1 : STA dot_z_hi,X
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ lists (&0561C, &057B8): the launch's count or the docked tunnel's
+\ stop, refill and pick-up, then the coarse list and the draw lists.
+.lists
+{
+    \ launching: launch_state neither 0 nor &1E
+    LDA launch_state+1 : BNE launching
+    LDA launch_state : BEQ not_launching
+    CMP #&1E : BEQ not_launching
+.launching
+    \ LAUNCHING FROM SILO (&0562E): a step of the count, colour 0 a
+    \ random word, five off the speed accumulator and effect 3; then the
+    \ normal coarse list, even docked
+    LDA launch_state : BNE count_lo
+    DEC launch_state+1
+.count_lo
+    DEC launch_state
+    JSR random32
+    MOVW flash0, rng_d0
+    LDA speed_acc : CLC : ADC #5 : STA speed_acc
+    BCC sped
+    INC speed_acc+1
+.sped
+    LDA #3 : LDX #1
+    JSR sfx_start
+    LDA docked : PHA
+    STZ docked
+    JSR make_lists
+    PLA : STA docked
+    RTS
+.not_launching
+    LDA docked : BEQ open
+    JSR tunnel
+    LDX docked_silo : LDA ob_timer_a_hi,X : STA silo_missile
+.open
+    \ (fall into make_lists)
+}
+.make_lists
+    LDA #BANK_WORLD : STA bank_now : STA romsel
     JSR coarse_list
     JSR rotate_lists
     LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
     RTS
 
-.world_after
+\ tunnel (&05672): docked, the tunnel's end (the silo's z less the
+\ player's, by the N flag of that less &C8) stops the speed and refills the
+\ laser by &190 a step, until it would carry (at once with the cheat_mode): then
+\ it's full, the launch may start and the docking speech is said on a
+\ step whose frame count's low byte is 0. Then the silo's missile is taken
+\ when within -&28 to &28 of the player, if the silo has one and the
+\ player has room.
+.tunnel
+{
+    ZA_AUTO2 dz
+    LDX docked_silo
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA dz
+    LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
+    LDA dz : SEC : SBC #&C8 : LDA dz+1 : SBC #0 : BPL pick_up
+    STZ speed_acc : STZ speed_acc+1
+    LDA cheat_mode : BNE full
+    LDA laser_energy : CLC : ADC #&90 : TAY
+    LDA laser_energy+1 : ADC #&01 : BCC energy
+.full
+    LDA #&1E : STA launch_state : STZ launch_state+1
+    LDA frame_count : BNE quiet
+    \ clare2, if no clip is playing (the ST tests D_01E56 first)
+    LDA #2 : SEC
+    JSR sample_start
+.quiet
+    LDA #&FF : TAY
+.energy
+    STY laser_energy : STA laser_energy+1
+.pick_up
+    LDA missiles : CMP #2 : BEQ done
+    LDA ob_z_lo + SLOT_MISSILE : SEC : SBC pl_z : STA dz
+    LDA ob_z_hi + SLOT_MISSILE : SBC pl_z+1 : STA dz+1
+    LDA dz : SEC : SBC #&28 : LDA dz+1 : SBC #0 : BPL done
+    LDA dz : CLC : ADC #&28 : LDA dz+1 : ADC #0 : BMI done
+    LDX docked_silo
+    LDA ob_timer_a_hi,X : BEQ done
+    INC missiles
+    STZ ob_timer_a_hi,X
+    LDA #&D0 : STA ob_timer_b_lo,X : LDA #&07 : STA ob_timer_b_hi,X
+    LDA #&40 : STA flash0 : STZ flash0+1
+.done
     RTS
+}
+
+\ world_whole: the two halves together, as the harness checks the missile
+\ view (it has no lists point).
+IF DEFINED(SPIKE)
+.world_whole
+    JSR world_lists
+    LDA #LO(world_after) : STA logic_vec : LDA #HI(world_after) : STA logic_vec+1
+    JMP logic_bank_call
+ENDIF
+
+\ ---------------------------------------------------------------------------
+\ The dots' cache (ground_dots), in the world bank's own RAM: the last
+\ dots' frame's camera, place and view; by dot its margin (negative: not
+\ kept), class and place when kept; and this frame's drift by class.
+.dot_valid    EQUB 0                    ; non-zero once dot_cam_was holds a frame's
+.dot_mv_was   EQUB 0
+.dot_cam_was  SKIP 18
+.dot_p_was    SKIP 6
+.dot_drift_lo SKIP 6
+.dot_drift_hi SKIP 6
+.dot_rem_lo   SKIP 40
+.dot_rem_hi   SKIP 40
+.dot_cls      SKIP 40
+.dot_at_xlo   SKIP 40
+.dot_at_xhi   SKIP 40
+.dot_at_zlo   SKIP 40
+.dot_at_zhi   SKIP 40

@@ -1,0 +1,19 @@
+# Docked (teleported into a silo's box, as tests/st/docked.txt), then moved
+# on down the tunnel to just short of the silo's missile, with the laser
+# energy low: the missile taken, the tunnel's end, the laser refilled over
+# ten frames; then launched (space): the launch's count.
+wait 38
+key 57
+wait 4
+debug w w $5c02e $1c30 $ffd0 $dc60
+debug w w $5c03c $0c10
+wait 1
+debug w w $5c032 $dac0
+debug w w $5c18a $f000
+debug parse {arm}
+debug echo \nSEG docked\n
+wait 42
+key 57 1.5
+wait 26
+debug echo \nSEG end\n
+quit

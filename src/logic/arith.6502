@@ -23,3 +23,16 @@
     RTS
 .world_jump
     JMP (world_vec)
+    ZA_CANJUMP sincos                           ; (every routine called this way)
+
+\ logic_bank_call: the logic bank's routine at logic_vec, from the world bank,
+\ and back (ANDY stays paged).
+.logic_bank_call
+    LDA bank_now : PHA
+    LDA #BANK_LOGIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    JSR logic_bank_jump
+    PLA : STA bank_now : STA romsel
+    RTS
+.logic_bank_jump
+    JMP (logic_vec)
+    ZA_CANJUMP world_after                      ; (every routine called this way)

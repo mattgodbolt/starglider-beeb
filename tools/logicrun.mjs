@@ -1,7 +1,7 @@
 // Check the port's game logic against the ST's, routine by routine, on
 // jsbeeb's Master (decision 1: the logic exact).
 //
-//   node tools/logicrun.mjs STEPS.json ROUTINE [--build build/spike] [--show N]
+//   node tools/logicrun.mjs STEPS.json ROUTINE [--build build/spike] [--show N] [--cycles]
 //
 // STEPS.json is tools/st_steps.py's capture. For every frame with both
 // the routine's entry and exit points, the ST's state at the entry is put
@@ -10,7 +10,8 @@
 // spike_logic, with its bank and ANDY paged), and everything the map holds
 // is compared with the ST's state at the exit. It prints, for each
 // variable or field that ever differs, the frames it differs in and the
-// first few, and exits non-zero if any did.
+// first few, and exits non-zero if any did. --cycles adds what the routine
+// took on the frames (jsbeeb's count, the call's own few included).
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -23,9 +24,14 @@ import { loadSymbols } from "./beeb.mjs";
 // the routine's earlier work left, as the mines' does).
 // An exit point "next:P" is P in the next frame; "unless" skips the frames
 // with that point (the post-frame tests, when they go to the level change).
+// "inputs" names a point to take the inputs ("in" variables) from, where
+// the frame has it: where the routine reads them, nearer than its entry.
 const ROUTINES = {
     world: { from: "top", to: "lists", call: "world_lists", bank: "BANK_WORLD" },
-    world_after: { from: "lists", to: "render", call: "world_after", bank: "BANK_WORLD" },
+    world_after: { from: "lists", to: "render", call: "world_after", bank: "BANK_LOGIC" },
+    // (both halves: the missile view has no lists point; the laser reads
+    // the keys after the lists)
+    world_whole: { from: "top", to: "render", call: "world_whole", bank: "BANK_WORLD", inputs: "lists" },
     keys: { from: "render", to: "keys", call: "read_keys", bank: "BANK_LOGIC" },
     flight: { from: "keys", to: "flight", call: "player_flight", bank: "BANK_WORLD", d0: true },
     handlers: { from: "flight", to: "handlers", call: "object_handlers", bank: "BANK_WORLD", d0: true },
@@ -47,6 +53,7 @@ const opt = (name, dflt) => {
 };
 const build = opt("--build", "build/spike");
 const show = Number(opt("--show", 3));
+const cycles = args.includes("--cycles") ? (args.splice(args.indexOf("--cycles"), 1), []) : null;
 const [stepsPath, routineName] = args;
 const routine = ROUTINES[routineName];
 if (!stepsPath || !routine) {
@@ -101,6 +108,13 @@ const regionsAt = (frame, point) => {
     for (const [name, hex] of Object.entries(p)) out[name] = Buffer.from(hex, "hex");
     return out;
 };
+
+// The ST's long at an address, from whichever region holds it.
+function stLong(r, addr) {
+    for (const [name, start, n] of steps.regions)
+        if (addr >= start && addr + 4 <= start + n) return r[name].readUInt32BE(addr - start);
+    throw new Error(`&${addr.toString(16)} isn't in the capture's regions`);
+}
 
 // Each variable and field: put (ST into the port) and get (the port as
 // the ST's bytes, to compare with the ST's own).
@@ -184,6 +198,28 @@ for (const v of map.variables) {
             get: () => [v.base + v.stride * ram[at]],
             want: (r) => [long(r)],
         });
+    } else if (v.kind === "list") {
+        // the entries from the ST's pointer up, the first walked first,
+        // which the port keeps in the order pushed (walked from its end),
+        // with its count before them
+        const count = (r) => r[v.count_region].readUInt16BE(v.count_offset);
+        const entries = (r) => {
+            const p = st(r).readUInt32BE(v.offset);
+            return Array.from({ length: count(r) }, (_, k) => stLong(r, p + 4 * k));
+        };
+        items.push({
+            name: v.name,
+            put: (r) => {
+                const e = entries(r);
+                ram[v.count_at] = e.length;
+                e.forEach((ptr, k) => (ram[at + e.length - 1 - k] = slotOf(ptr)));
+            },
+            get: () => {
+                const n = ram[v.count_at];
+                return [n, ...Array.from({ length: n }, (_, k) => ptrOf(ram[at + n - 1 - k]))];
+            },
+            want: (r) => [count(r), ...entries(r)],
+        });
     } else if (v.kind === "slot") {
         const long = (r) => st(r).readUInt32BE(v.offset);
         items.push({
@@ -194,6 +230,9 @@ for (const v of map.variables) {
         });
     } else throw new Error(`${v.name}: kind ${v.kind}`);
 }
+// (an input, which the ST's interrupts write when they will, is put, not
+// compared)
+for (const v of map.variables) if (v.input) items.find((it) => it.name === v.name).input = true;
 // The object table, a field at a time across the slots.
 const rec = (r, s) =>
     s < 140
@@ -228,12 +267,36 @@ for (const f of map.objects) {
     else if (f.kind === "zero")     // not kept: always 0 (but in the silo's two, which keep what TOS left)
         items.push({ name: f.name, put: () => {}, get: () => each(() => 0), want: (r) => each((s) => (s >= 140 ? 0 : (rec(r, s)[f.field] << 8) | rec(r, s)[f.field + 1])) });
 }
+// The camera-space positions of the objects the list phase rotated
+// approximately (decision 11, ob_exact 0) are the ST's only to within the
+// approximation's slack, and only for an object the ST neither drew nor had
+// within reach of the player on every axis (tools/scenecheck.py's rule): a
+// slot that keeps to that is taken as matching. Drawn is the ST's draw list
+// at the exit, not the record's flag: the silo's two records keep what TOS
+// left in theirs, which nothing clears.
+const ROT_SLACK = 512;
+const NEAR_BOX = 2000 + ROT_SLACK;
+const exactAt = need("ob_exact");
+const drawList = items.find((it) => it.name === "st_draw_list");
+const camera = ["ob_cx", "ob_cy", "ob_cz"].map((n) => items.find((it) => it.name === n));
+const s16 = (v) => (v & 0x8000 ? v - 0x10000 : v);
+for (const it of camera)
+    it.approx = (got, want, exit) => {
+        for (let s = 0; s < got.length; s++) {
+            if (got[s] === want[s] || ram[exactAt + s]) continue;
+            const st = camera.map((c) => s16(c.want(exit)[s]));
+            const drawn = drawList.want(exit).slice(1).some((ptr) => slotOf(ptr) === s);
+            const off = Math.abs(s16((got[s] - want[s]) & 0xffff));
+            if (off <= ROT_SLACK && !drawn && !st.every((c) => Math.abs(c) <= NEAR_BOX)) got[s] = want[s];
+        }
+    };
 
 ram[need("logic_bank")] = need(routine.bank) | need("ROMSEL_ANDY");
 ram[need("logic_call")] = need(routine.call) & 0xff;
 ram[need("logic_call") + 1] = need(routine.call) >> 8;
 const diffs = new Map();
 let frames = 0;
+let poked = 0;
 const differ = (name, n, got, want) => {
     if (!diffs.has(name)) diffs.set(name, []);
     diffs.get(name).push({ frame: n, got, want });
@@ -244,19 +307,35 @@ for (let n = 0; n < steps.frames.length; n++) {
     const exitFrame = next ? steps.frames[n + 1] : fr;
     const exitPoint = next ? routine.to.slice(5) : routine.to;
     if (!exitFrame || (routine.unless && fr.points[routine.unless])) continue;
+    // a debugger write of the capture script's (st_steps.py) anywhere in the
+    // span is in the ST's result, but no routine's
+    const order = steps.points;
+    const after = (point) => order.indexOf(point) > order.indexOf(routine.from);
+    const inSpan = next
+        ? (fr.poked || []).some(after) || (exitFrame.poked || []).includes(exitPoint)
+        : (fr.poked || []).some((point) => after(point) && order.indexOf(point) <= order.indexOf(exitPoint));
+    if (inSpan) {
+        poked++;
+        continue;
+    }
     const entry = regionsAt(fr, routine.from);
     const exit = regionsAt(exitFrame, exitPoint);
     if (!entry || !exit) continue;
     frames++;
-    for (const it of items) it.put(entry);
+    const given = (routine.inputs && regionsAt(fr, routine.inputs)) || entry;
+    for (const it of items) it.put(it.input ? given : entry);
     const rngD0 = need("rng_d0");
     const d0 = fr.d0 ?? {};                     // (older captures have no d0)
     ram[rngD0] = (d0[routine.from] ?? 0) & 0xff;
     ram[rngD0 + 1] = (d0[routine.from] ?? 0) >> 8;
+    const t0 = tm.elapsedCycles;
     await run(need("spike_logic"));
+    if (cycles) cycles.push(tm.elapsedCycles - t0);
     for (const it of items) {
+        if (it.input) continue;
         const got = it.get();
         const want = it.want(exit);
+        if (it.approx) it.approx(got, want, exit);
         if (got.some((x, i) => x !== want[i])) {
             const at = got.findIndex((x, i) => x !== want[i]);
             differ(it.name, n, got.length > 2 ? `[${at}] ${got[at]}` : got.join(" "), want.length > 2 ? `[${at}] ${want[at]}` : want.join(" "));
@@ -268,7 +347,13 @@ for (let n = 0; n < steps.frames.length; n++) {
         if (got !== exitD0[exitPoint]) differ("d0 (rng_d0)", n, got, exitD0[exitPoint]);
     }
 }
-console.log(`logicrun ${routineName}: ${frames} frames, ${items.length} variables and fields, ${diffs.size} differ`);
+console.log(
+    `logicrun ${routineName}: ${frames} frames` +
+        (poked ? ` (${poked} more with the script's writes in)` : "") +
+        `, ${items.length} variables and fields, ${diffs.size} differ`,
+);
+if (cycles && cycles.length)
+    console.log(`  cycles: mean ${Math.round(cycles.reduce((a, b) => a + b, 0) / cycles.length)}, least ${Math.min(...cycles)}, most ${Math.max(...cycles)}`);
 for (const [name, list] of diffs) {
     console.log(`  ${name}: ${list.length} frames, e.g. ` + list.slice(0, show).map((d) => `frame ${d.frame} port ${d.got} ST ${d.want}`).join("; "));
 }

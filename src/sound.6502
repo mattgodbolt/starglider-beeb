@@ -9,10 +9,10 @@
 .sfx_start
     RTS
 
-\ sample_start (the ST's &01A50): speech clip A, 1-4 the ST's clare1-4
-\ (docs/research/st.md, "Samples"), which the ST plays only with the sound
-\ on (sound_on). Its callers set the ST's clip in &A0-&A4 and Timer A's
-\ rate in &2CF-&2D0 first, which the speech layer will know by the number.
+\ sample_start (the ST's &01A50): speech clip A (1-4: clare1-4), as the
+\ ST's callers start it; with C set, only if no clip is playing (the
+\ callers that test D_01E56 first). It changes no state the game's logic
+\ reads.
 .sample_start
     RTS
 

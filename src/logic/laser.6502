@@ -1,0 +1,240 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - world_render's logic after the draw loop
+\ (the ST's &05108 on): the draw loop's matrices, and the player's laser
+\
+\ The second half of world_render's logic (worldlogic.6502 has the first),
+\ in the logic bank: sincos, in the world bank, comes by world_call.
+\ ***************************************************************************
+
+\ The projection's shift ($212, colour), which the laser's boxes use.
+LASER_SHIFT = PROJ_SHIFT
+
+\ The laser's box half-height by type (&0ACF2), as the ST indexes it:
+\ types 30 and 31 read the table after it. (The half-width is &0ACB6,
+\ size_z.)
+.size_y_lo
+    EQUB 0, 134, 240, 34, 14, 80, 180, 128, 72, 132, 134, 120, 50, 120, 180, 164
+    EQUB 84, 0, 180, 120, 90, 72, 0, 60, 60, 60, 120, 210, 0, 0, &E8, &E8
+.size_y_hi
+    EQUB 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1
+    EQUB 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3
+
+\ A laser kill's score by type (&0AE9A, BCD): types 30 and 31 read the
+\ table after it (&0AED6).
+.kill_bcd_lo
+    EQUB &00, &00, &50, &50, &50, &50, &50, &00, &00, &00, &00, &00, &00, &20, &00, &50
+    EQUB &50, &50, &00, &00, &00, &90, &00, &00, &05, &10, &75, &00, &00, &00, &00, &00
+.kill_bcd_hi
+    EQUB &00, &00, &00, &00, &00, &00, &00, &05, &01, &02, &01, &01, &01, &01, &05, &01
+    EQUB &02, &01, &03, &02, &04, &02, &02, &02, &00, &00, &02, &00, &00, &00, &00, &15
+
+\ ---------------------------------------------------------------------------
+\ world_after (&05108 to the end): the draw loop's matrices, then in the
+\ normal view the player's laser (the waveforms and the refuelling
+\ message only draw). In the missile view nothing is drawn while its
+\ window moves.
+.world_after
+{
+    LDA mv_render : BEQ normal
+    LDA m_iris : BNE done
+    MOVW draw_p, m_pitch : MOVW draw_h, m_heading
+    LDA #0 : SEC : SBC m_roll : STA draw_r : LDA #0 : SBC m_roll+1 : STA draw_r+1
+    JMP draw_matrices
+.normal
+    MOVW draw_p, pl_pitch : MOVW draw_h, pl_heading
+    LDA #0 : SEC : SBC pl_roll : STA draw_r : LDA #0 : SBC pl_roll+1 : STA draw_r+1
+    JSR draw_matrices
+    JMP player_laser
+.done
+    RTS
+}
+
+\ draw_matrices (&05108, &04114): each object drawn builds its matrix
+\ from its angles plus the camera's, unless they're the last matrix's,
+\ and building one leaves its heading's sines in trig_sin and trig_cos.
+ZA_AUTO2 draw_p, draw_h, draw_r
+.draw_matrices
+{
+    ZA_AUTO2 ap, ah
+    ZA_AUTO1 built, i
+    STZ built
+    LDX draw_n : BEQ walked
+.each
+    DEX : STX i
+    LDY draw_slots,X
+    LDA ob_type,Y : BEQ next
+    LDA ob_pitch_lo,Y : CLC : ADC draw_p : STA ap
+    LDA ob_pitch_hi,Y : ADC draw_p+1 : STA ap+1
+    LDA ob_heading_lo,Y : CLC : ADC draw_h : STA ah
+    LDA ob_heading_hi,Y : ADC draw_h+1 : STA ah+1
+    LDA ap : CMP obm_pitch : BNE build
+    LDA ap+1 : CMP obm_pitch+1 : BNE build
+    LDA ah : CMP obm_heading : BNE build
+    LDA ah+1 : CMP obm_heading+1 : BNE build
+    LDA draw_r : CMP obm_roll : BNE build
+    LDA draw_r+1 : CMP obm_roll+1 : BEQ next
+.build
+    MOVW obm_pitch, ap : MOVW obm_heading, ah : MOVW obm_roll, draw_r
+    LDA #1 : STA built
+.next
+    LDX i : BNE each
+.walked
+    LDA built : BEQ done
+    LDA obm_heading : STA m_idx : LDA obm_heading+1 : AND #&0F : STA m_idx+1
+    LDA #LO(sincos) : STA world_vec : LDA #HI(sincos) : STA world_vec+1
+    JSR world_call
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+.done
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ player_laser (&0866C): fired (not docked, with energy, a fire key held
+\ and no bolt in flight) at the sight; the bolt's count, stepped more
+\ slowly with fewer drawn; at its end the first drawn object whose
+\ projected box holds the target is hit.
+.player_laser
+{
+    LDA bolt_timer : BNE count
+    LDA laser_energy : ORA laser_energy+1 : BEQ done
+    LDA docked : BNE done
+    LDA key_state+&74 : ORA key_state+&1C : ORA key_state+&52 : ORA key_state+&72
+    BEQ done
+    LDA #4 : STA bolt_timer
+    MOVW bolt_target_x, sight_x
+    MOVW bolt_target_y, sight_y
+    INC shots_fired : BNE counted
+    INC shots_fired+1 : BNE counted
+    INC shots_fired+2 : BNE counted
+    INC shots_fired+3
+.counted
+    LDA #&14 : LDX #1
+    JSR sfx_start
+    \ &100 a shot, down to 0
+    LDA laser_energy+1 : BEQ empty
+    DEC laser_energy+1
+    BRA count
+.empty
+    STZ laser_energy
+.count
+    \ every step with 6 or more drawn, odd frames with 3-5, 3 in 4 with 0-2
+    LDA draw_n : CMP #3 : BCS three
+    LDA frame_count : AND #3 : BEQ done
+    BRA step
+.three
+    CMP #6 : BCS step
+    LDA frame_count : AND #1 : BEQ done
+.step
+    DEC bolt_timer : BNE done
+    LDA draw_n : BEQ done
+    JMP laser_hit
+.done
+    RTS
+}
+
+\ laser_hit (&08708): the draw list in order (from its last pushed),
+\ skipping the exploding, beams and anything at z 0; each box projected
+\ (&08748: its centre and half-sizes << 7 / z, divs's overflow leaving
+\ the operand) and tested on N flags.
+.laser_hit
+{
+    ZA_AUTO2 d
+    ZA_AUTO1 i, slot_
+    LDX draw_n
+.each
+    DEX : STX i
+    LDY draw_slots,X : STY slot_
+    LDA ob_exploding,Y : BNE next
+    LDA ob_type,Y : CMP #11 : BEQ next
+    LDA ob_cz_lo,Y : STA div_d : ORA ob_cz_hi,Y : BEQ next
+    LDA ob_cz_hi,Y : STA div_d+1
+    JSR box : BCS next
+    JMP hit
+.next
+    LDX i : BNE each
+    RTS
+\ box: C clear if slot_'s box holds the target: x, the centre then the
+\ half-width, then y.
+.box
+    LDY slot_
+    LDA ob_cx_lo,Y : LDX ob_cx_hi,Y : JSR box_div
+    LDA div_q : CLC : ADC #LO(VIEW_CX) : STA laser_px
+    LDA div_q+1 : ADC #HI(VIEW_CX) : STA laser_px+1
+    LDA bolt_target_x : SEC : SBC laser_px : STA d
+    LDA bolt_target_x+1 : SBC laser_px+1 : STA d+1
+    LDX slot_ : LDY ob_type,X
+    LDA size_z_lo,Y : LDX size_z_hi,Y : JSR box_div
+    MOVW laser_half_w, div_q
+    JSR box_test : BCS missed
+    LDY slot_
+    LDA ob_cy_lo,Y : LDX ob_cy_hi,Y : JSR box_div
+    LDA div_q : CLC : ADC #LO(VIEW_CY) : STA laser_py
+    LDA div_q+1 : ADC #HI(VIEW_CY) : STA laser_py+1
+    LDA bolt_target_y : SEC : SBC laser_py : STA d
+    LDA bolt_target_y+1 : SBC laser_py+1 : STA d+1
+    LDX slot_ : LDY ob_type,X
+    LDA size_y_lo,Y : LDX size_y_hi,Y : JSR box_div
+    MOVW laser_half_h, div_q
+    JMP box_test
+.missed
+    RTS
+.hit
+    \ unless it's proof: a hit taken, and under 0 hits left it explodes,
+    \ its score into the mailbox and colour 0 &222
+    LDX slot_
+    LDA ob_flags,X : BMI struck
+    LDA ob_proof,X : BNE struck
+    INC hits_scored : BNE hit_counted
+    INC hits_scored+1 : BNE hit_counted
+    INC hits_scored+2 : BNE hit_counted
+    INC hits_scored+3
+.hit_counted
+    LDA ob_hits_lo,X : BNE hits_lo
+    DEC ob_hits_hi,X
+.hits_lo
+    DEC ob_hits_lo,X
+    LDA ob_hits_hi,X : BPL struck
+    LDA #&FF : STA ob_exploding,X
+    STZ ob_explosion,X
+    LDY ob_type,X
+    LDA kill_bcd_lo,Y : STA pending_score
+    LDA kill_bcd_hi,Y : STA pending_score+1
+    LDA #&22 : STA flash0 : LDA #&02 : STA flash0+1
+.struck
+    \ a tower (&08894): from level 2 the layout's own tower (timer_c set)
+    \ switches its group's beam, three slots on, between types 11 and 0
+    LDA ob_type,X : CMP #4 : BNE sound
+    LDA level : CMP #1 : BEQ sound
+    LDA ob_timer_c_lo,X : ORA ob_timer_c_hi,X : BEQ sound
+    LDA ob_type+3,X : EOR #&0B : STA ob_type+3,X
+.sound
+    LDA #2 : LDX #1
+    JMP sfx_start
+\ box_test: C clear if -s < d < s, by the N flags of d - s and -d - s.
+.box_test
+    LDA d : SEC : SBC div_q : LDA d+1 : SBC div_q+1 : BPL beyond
+    LDA #0 : SEC : SBC d : STA d : LDA #0 : SBC d+1 : STA d+1
+    LDA d : SEC : SBC div_q : LDA d+1 : SBC div_q+1 : BPL beyond
+    CLC : RTS
+.beyond
+    SEC : RTS
+}
+
+\ box_div: div_q = the word A (low), X (high), sign-extended and shifted
+\ left 7, divs div_d: on an overflow the operand's low word, as divs
+\ leaves it.
+.box_div
+{
+    STZ mul_p
+    STA mul_p+1 : STX mul_p+2
+    LDA #0 : CPX #&80 : BCC pos
+    LDA #&FF
+.pos
+    STA mul_p+3
+    CMP #&80 : ROR mul_p+3 : ROR mul_p+2 : ROR mul_p+1 : ROR mul_p
+    JSR sdiv32 : BCC done
+    MOVW div_q, mul_p
+.done
+    RTS
+}
+
