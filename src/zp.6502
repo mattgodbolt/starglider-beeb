@@ -27,6 +27,7 @@ SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
 .silo_missile SKIP 1        ; non-zero while the silo's missile is there
 .all_faces  SKIP 1          ; &80: every face visible (the Interrogate screen's H, $2BD)
 .beam_colour SKIP 1         ; the beam's colour, which animate_shapes cycles
+.bank_now   SKIP 1          ; the sideways bank paged, as BANK pages it
 ENDSECTION
 
 ZA_POOL ZP_FIXED..&FF
@@ -103,6 +104,8 @@ SECTION Work, org = WORK, guard = &0E00, virtual = TRUE
 .log_n      SKIP 2          ; lines in line_log
 .mat_valid  SKIP 1          ; non-zero: mat is for mat_angles
 .mat_angles SKIP 6
+.ground_valid SKIP 1        ; non-zero: mat is ground_matrix's for ground_h
+.ground_h   SKIP 2
 .stamp      SKIP 1          ; the object's stamp on its edges and vertices
 .rot_exact  SKIP SLOTS + 2  ; by slot: 1 if this frame's rotation was exact (decision 11)
     \ by shape and colour
@@ -123,14 +126,16 @@ SECTION Work, org = WORK, guard = &0E00, virtual = TRUE
 .v_syhi     SKIP 128
 ENDSECTION
 
-\ HAZEL, which the spike pages in (it makes no OS calls): the tables, every
-\ line drawn (for the harness: slot, edge, x0 (word), y0, x1 (word), y1,
-\ colour), and code (spike.6502).
+\ HAZEL, which the spike pages in (it makes no OS calls): the tables and
+\ code (spike.6502).
 TABLES = &C000
-LOG = &CF00
+CODE2 = &D000
+
+\ Every line drawn, for the harness (slot, edge, x0 (word), y0, x1 (word),
+\ y1, colour), in a sideways bank of its own.
+LOG = &8000
 LOG_ENTRY = 9
-LOG_LINES = 250
-CODE2 = &D800
-SECTION Log, org = LOG, guard = CODE2, virtual = TRUE
+LOG_LINES = 400
+SECTION Log, org = LOG, guard = &C000, virtual = TRUE
 .line_log   SKIP LOG_ENTRY * LOG_LINES
 ENDSECTION

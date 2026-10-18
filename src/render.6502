@@ -115,7 +115,7 @@ MACRO WORLD acc, t, out
 ENDMACRO
 
 MACRO BANK n
-    LDA #n : STA romsel
+    LDA #n : STA romsel : STA bank_now
 ENDMACRO
 
 \ ---------------------------------------------------------------------------
@@ -141,7 +141,32 @@ ENDMACRO
     MOVW ang_h, pl_heading
     LDA #0 : SEC : SBC pl_roll : STA ang_r
     LDA #0 : SBC pl_roll+1 : STA ang_r+1
-    JSR build_matrix
+    STZ mat_valid                       ; a full build: its sines are wanted below
+    JSR build_matrix                    ; (which invalidates ground_matrix's mat)
+    \ The ground objects' constants (ground_matrix): their pitch and roll
+    \ are the camera's.
+    FMUL build_matrix.m_s1, build_matrix.m_c3
+    MOVW kconst+2, mul_r
+    MOVW kconst, build_matrix.m_d6
+    MOVW kconst+4, build_matrix.m_c1
+    MOVW kconst+6, build_matrix.m_c3
+    MOVW kconst+8, build_matrix.m_s3
+    LDX #8
+.kconst_mag
+    TXA : LSR A : TAY
+    LDA kconst+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    AND #&80 : STA ksign,Y : ZA_INDEXEDBY 0..4
+    LDA kconst,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA ksign,Y : ZA_INDEXEDBY 0..4
+    BPL kconst_pos
+    LDA #0 : SEC : SBC kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA #0 : SBC kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.kconst_pos
+    DEX : DEX : BPL kconst_mag
     LDX #17
     ZA_DISCARD cam
 .camera_copy
@@ -182,6 +207,7 @@ ENDMACRO
     DEX : BPL same
     RTS
 .build
+    STZ ground_valid            ; mat isn't ground_matrix's now
     LDX #5
 .keep
     LDA ang,X : ZA_INDEXEDBY 0..5
@@ -214,6 +240,95 @@ ENDMACRO
     FMUL m_s3, m_s2 : MOVW mat+10, mul_r
     FMUL m_d7, m_s1 : ADDW mat+10, mul_r                            ; y' on z
     FMUL m_c1, m_c2 : MOVW mat+16, mul_r                            ; z' on z
+    RTS
+}
+
+\ ground_matrix: mat for an object with no pitch of its own, at heading
+\ ang_h: with the camera's pitch and roll, each entry of the ST's matrix
+\ (&04190) is a mix of sin and cos of the heading by five of the frame's
+\ constants (kconst: s3 s1, s1 c3, c1, c3, s3), so ten products make it.
+\ The ST nests its products differently; this is for drawing only.
+ZA_AUTO 10, kconst          ; the constants, words ...
+ZA_AUTO 10, kmag            ; ... as magnitudes ...
+ZA_AUTO 5, ksign            ; ... and signs
+.ground_matrix
+{
+    ZA_AUTO 10, ps              ; sin h by each constant
+    \ the last ground object's heading, while mat is still its
+    LDA ground_valid : BEQ build
+    LDA ang_h : CMP ground_h : BNE build
+    LDA ang_h+1 : CMP ground_h+1 : BNE build
+    RTS
+.build
+    MOVW ground_h, ang_h
+    LDA #&FF : STA ground_valid
+    STZ mat_valid               ; mat isn't build_matrix's now
+    BANK BANK_SINE
+    LDA ang_h : STA m_idx : LDA ang_h+1 : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW kv, m_sin : JSR kmul
+    LDX #9
+.keep
+    LDA kp,X : ZA_INDEXEDBY 0..9
+    STA ps,X : ZA_INDEXEDBY 0..9
+    DEX : BPL keep
+    MOVW kv, m_cos : JSR kmul           ; kp: cos h by each
+    LDA kp+6 : CLC : ADC ps : STA mat : LDA kp+7 : ADC ps+1 : STA mat+1           ; c c3 + s s3s1
+    LDA ps+2 : SEC : SBC kp+8 : STA mat+6 : LDA ps+3 : SBC kp+9 : STA mat+7       ; s s1c3 - c s3
+    MOVW mat+12, ps+4                                                             ; s c1
+    LDA kp : SEC : SBC ps+6 : STA mat+4 : LDA kp+1 : SBC ps+7 : STA mat+5         ; c s3s1 - s c3
+    LDA ps+8 : CLC : ADC kp+2 : STA mat+10 : LDA ps+9 : ADC kp+3 : STA mat+11     ; s s3 + c s1c3
+    MOVW mat+16, kp+4                                                             ; c c1
+    MOVW mat+2, cam+2                   ; c1 s3, c1 c3, -s1: the camera's own
+    MOVW mat+8, cam+8
+    MOVW mat+14, cam+14
+    RTS
+}
+
+\ kmul: kp = kv (a signed word) by each of the five constants, each
+\ (kv K) >> 14 in magnitude, signed.
+ZA_AUTO2 kv
+ZA_AUTO 10, kp
+.kmul
+{
+    ZA_AUTO 20, ka              ; each product, 32 bits
+    ZA_AUTO1 kneg, tlo
+    LDA kv+1 : STA kneg : BPL positive
+    LDA #0 : SEC : SBC kv : STA kv : LDA #0 : SBC kv+1 : STA kv+1
+.positive
+    LDA kv : MUL_SET
+FOR k = 0..4
+    LDY kmag + 2 * k : MUL8 ka + 4 * k : STA ka + 4 * k + 1
+    LDY kmag + 2 * k + 1 : MUL8 tlo : STA ka + 4 * k + 2
+    LDA ka + 4 * k + 1 : CLC : ADC tlo : STA ka + 4 * k + 1
+    LDA ka + 4 * k + 2 : ADC #0 : STA ka + 4 * k + 2
+    STZ ka + 4 * k + 3
+NEXT
+    LDA kv+1 : MUL_SET
+FOR k = 0..4
+    LDY kmag + 2 * k : MUL8 tlo
+    CLC : ADC ka + 4 * k + 2 : STA ka + 4 * k + 2
+    LDA ka + 4 * k + 3 : ADC #0 : STA ka + 4 * k + 3
+    LDA ka + 4 * k + 1 : CLC : ADC tlo : STA ka + 4 * k + 1
+    LDA ka + 4 * k + 2 : ADC #0 : STA ka + 4 * k + 2
+    LDA ka + 4 * k + 3 : ADC #0 : STA ka + 4 * k + 3
+    LDY kmag + 2 * k + 1 : MUL8 tlo
+    CLC : ADC ka + 4 * k + 3 : STA ka + 4 * k + 3
+    LDA ka + 4 * k + 2 : CLC : ADC tlo : STA ka + 4 * k + 2
+    LDA ka + 4 * k + 3 : ADC #0 : STA ka + 4 * k + 3
+NEXT
+FOR k = 0..4
+    \ >> 14: bytes 1-3 shifted left 2, the top two
+    ASL ka + 4 * k + 1 : ROL ka + 4 * k + 2 : ROL ka + 4 * k + 3
+    ASL ka + 4 * k + 1 : ROL ka + 4 * k + 2 : ROL ka + 4 * k + 3
+    LDA kneg : EOR ksign + k : BMI negative
+    LDA ka + 4 * k + 2 : STA kp + 2 * k : LDA ka + 4 * k + 3 : STA kp + 2 * k + 1
+    BRA done
+.negative
+    LDA #0 : SEC : SBC ka + 4 * k + 2 : STA kp + 2 * k
+    LDA #0 : SBC ka + 4 * k + 3 : STA kp + 2 * k + 1
+.done
+NEXT
     RTS
 }
 
@@ -450,7 +565,14 @@ NEAR_BOX = 2000 + ROT_SLACK
     RTS
 .known
     STA shape
+    \ An object with no pitch of its own has the camera's pitch and roll.
+    LDA ang_p : CMP pl_pitch : BNE pitched
+    LDA ang_p+1 : CMP pl_pitch+1 : BNE pitched
+    JSR ground_matrix
+    BRA got_matrix
+.pitched
     JSR build_matrix
+.got_matrix
     BANK BANK_SHAPES
     LDX shape
     LDA shape_lo,X : STA hdr : LDA shape_hi,X : STA hdr+1
@@ -1276,6 +1398,7 @@ ZA_AUTO1 proj_shift
     LDA log_n : CMP #LO(LOG_LINES) : LDA log_n+1 : SBC #HI(LOG_LINES) : BCC room
     JMP draw                            ; full
 .room
+    LDA #BANK_LOG : STA romsel
     LDY #0
     LDA slot : STA (log_ptr),Y : INY
     LDA edge_i : STA (log_ptr),Y : INY
@@ -1286,6 +1409,7 @@ ZA_AUTO1 proj_shift
     LDA cx1+1 : STA (log_ptr),Y : INY
     LDA cy1 : STA (log_ptr),Y : INY
     LDA ocolour : STA (log_ptr),Y : INY
+    LDA bank_now : STA romsel
     TYA : CLC : ADC log_ptr : STA log_ptr
     BCC logged
     INC log_ptr+1

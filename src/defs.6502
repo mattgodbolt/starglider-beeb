@@ -21,6 +21,7 @@ SCREEN      = &8000 - SCREEN_ROWS * SCREEN_ROW
 BANK_SHAPES  = 4
 BANK_SINE    = 5
 BANK_OBJECTS = 6
+BANK_LOG     = 7                    ; the spike's line log
 
 \ --- Objects --------------------------------------------------------------
 \ The ST's 140 slots, then the silo's tunnel (the ST's &1218) and its

@@ -177,7 +177,8 @@ for (let n = lo; n <= Math.min(hi, scenes.length - 1); n++) {
     }
     const lines = [];
     const logN = peekw(need("log_n"));
-    for (let i = 0, a = where(need("line_log")); i < Math.min(logN, need("LOG_LINES")); i++, a += need("LOG_ENTRY")) {
+    const logAt = bank(need("BANK_LOG")) + (need("line_log") - 0x8000);
+    for (let i = 0, a = logAt; i < Math.min(logN, need("LOG_LINES")); i++, a += need("LOG_ENTRY")) {
         lines.push([ram[a], ram[a + 1], peekw(a + 2), ram[a + 4], peekw(a + 5), ram[a + 7], ram[a + 8]]);
     }
     out.push({
