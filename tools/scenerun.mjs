@@ -63,6 +63,7 @@ const load = (file, at) => {
 };
 load("SPIKE", need("spike_init"));
 load("TABLES", where(need("TABLES")));
+load("CODE2", where(need("CODE2")));
 load("SHAPES", bank(need("BANK_SHAPES")));
 load("SINE", bank(need("BANK_SINE")));
 
@@ -77,7 +78,7 @@ function routines() {
     const out = [];
     for (const a of all.assemblies)
         for (const sec of a.sections) {
-            if (sec.name !== "Spike") continue;
+            if (sec.name !== "Spike" && sec.name !== "Code2") continue;
             for (const [name, v] of Object.entries(sec.labels ?? {})) {
                 if (name.includes(".") || name.includes("@")) continue;
                 // the generated files' labels count as their file's

@@ -440,7 +440,6 @@ ENDMACRO
     INX : INX : CPX #18 : BEQ scaled
     JMP scale_term
 .scaled
-    JSR xform_setup
     \ The camera in object space, in world units: c = -(mat transposed) t.
     ZA_DISCARD objc
     LDX #0
@@ -495,7 +494,243 @@ ENDMACRO
     INC stamp
 .stamped
     JSR faces
+    \ Far enough away (16 radii or more), the perspective is linear across
+    \ the object, to within half a pixel: its vertices go straight onto
+    \ the screen (decision 10).
+    LDA sh_radius : STA t16 : LDA sh_radius+1
+    ASL t16 : ROL A : ASL t16 : ROL A : ASL t16 : ROL A : ASL t16 : ROL A
+    STA t16+1
+    CMPS16 tz, t16 : BMI near
+    JSR far_setup
+    JMP edges_far
+.near
+    JSR xform_setup
     JMP edges
+}
+
+\ far_setup: the object's centre on the screen (sc_x0, sc_y0, from the
+\ view's centre), the first-order matrix B onto the screen, and whether
+\ the object lies wholly inside the window. To first order in the
+\ object's offsets, its x on the screen is X0 + (128 / tz)(A_x - (tx /
+\ tz) A_z) k / 1024, and tx / tz is X0 / 128: so B_x = 128 (A_x - X0 A_z
+\ / 128) / tz, which is proj_x's, and the same for y.
+ZA_AUTO2 sc_x0, sc_y0
+ZA_AUTO2 sc_x0q, sc_y0q         ; ... and in quarters of a pixel
+ZA_AUTO1 far_inside             ; bit 7: no edge needs the window clip
+ZA_AUTO 12, sc_bmag             ; B: |B| words, two rows of x, y, z ...
+ZA_AUTO 6, sc_bsign             ; ... and signs
+\ quarters: pq = 512 px / pz, in quarters of a pixel, as precisely as
+\ px allows (proj_z's depth).
+.quarters
+{
+    ZA_AUTO1 shifts
+    LDA #2 : STA shifts
+.try
+    \ px << shifts fits a word if its top shifts + 1 bits agree
+    LDA px : STA pq : LDA px+1 : STA pq+1
+    LDX shifts : BEQ fits
+.up
+    ASL pq : ROL pq+1                       ; it fits while the bit out is the sign
+    BCS was_neg
+    BMI too_big
+    BRA shifted
+.was_neg
+    BPL too_big
+.shifted
+    DEX : BNE up
+.fits
+    MOVW px, pq
+    JSR proj_x
+    LDA #2 : SEC : SBC shifts : TAX : BEQ done
+.back
+    ASL pq : ROL pq+1
+    DEX : BNE back
+.done
+    RTS
+.too_big
+    DEC shifts
+    BRA try
+}
+
+.far_setup
+{
+    ZA_AUTO1 j, row, term, halved
+    ZA_AUTO2 az, d
+    ZA_AUTO 3, d24
+    MOVW pz, tz : JSR proj_z
+    MOVW px, tx : JSR proj_x : MOVW sc_x0, pq
+    MOVW px, ty : JSR proj_x : MOVW sc_y0, pq
+    \ and in quarters of a pixel, for the vertices: 128 (4 t) / tz, or 2 t
+    \ when 4 t won't fit a word, or t
+    MOVW px, tx : JSR quarters : MOVW sc_x0q, pq
+    MOVW px, ty : JSR quarters : MOVW sc_y0q, pq
+    ZA_DISCARD sc_bmag, sc_bsign
+    LDX #0
+.column
+    STX j
+    \ A_z, signed
+    TXA : CLC : ADC #6 : TAY
+    LDA xf_asign,Y : ZA_INDEXEDBY 6..8
+    STA mul_sign
+    TYA : ASL A : TAY
+    LDA xf_amag,Y : ZA_INDEXEDBY {12, 14, 16}
+    STA az : LDA xf_amag+1,Y : ZA_INDEXEDBY {12, 14, 16}
+    STA az+1
+    BIT mul_sign : BPL az_pos
+    LDA #0 : SEC : SBC az : STA az : LDA #0 : SBC az+1 : STA az+1
+.az_pos
+    STZ row
+.each_row
+    \ d = A_row - X0 A_z / 128 (X0 or Y0)
+    LDA row : BNE use_y
+    MOVW mul_x, sc_x0
+    BRA got_centre
+.use_y
+    MOVW mul_x, sc_y0
+.got_centre
+    MOVW mul_y, az
+    JSR smul16
+    ASL mul_p : ROL mul_p+1 : ROL mul_p+2 : ROL mul_p+3     ; / 128: bytes 1-3 of the product << 1
+    LDA row : ASL A : ADC row : ADC j : STA term   ; 3 row + j
+    TAX
+    LDA xf_asign,X : ZA_INDEXEDBY 0..5
+    STA mul_sign
+    TXA : ASL A : TAX
+    LDA xf_amag,X : ZA_INDEXEDBY 0..10
+    STA d24 : LDA xf_amag+1,X : ZA_INDEXEDBY 0..10
+    STA d24+1 : STZ d24+2
+    BIT mul_sign : BPL a_pos
+    LDA #0 : SEC : SBC d24 : STA d24 : LDA #0 : SBC d24+1 : STA d24+1 : LDA #0 : SBC #0 : STA d24+2
+.a_pos
+    LDA d24 : SEC : SBC mul_p+1 : STA d24
+    LDA d24+1 : SBC mul_p+2 : STA d24+1
+    LDA d24+2 : SBC mul_p+3 : STA d24+2
+    \ B = 128 d / tz, d halved (and B doubled) until it fits proj_x's word
+    STZ halved
+.fit
+    LDA d24+1 : ASL A : LDA d24+2 : ADC #0 : BEQ fits   ; bits 15-23 all one or all zero
+    LDA d24+2 : CMP #&80 : ROR d24+2 : ROR d24+1 : ROR d24
+    INC halved
+    BRA fit
+.fits
+    MOVW px, d24
+    JSR proj_x
+    LDX halved : BEQ unhalved
+.double
+    ASL pq : ROL pq+1
+    DEX : BNE double
+.unhalved
+    LDX term
+    LDA pq+1 : AND #&80 : STA sc_bsign,X : ZA_INDEXEDBY 0..5
+    TXA : ASL A : TAX
+    BIT pq+1 : BPL b_pos
+    LDA #0 : SEC : SBC pq : STA pq : LDA #0 : SBC pq+1 : STA pq+1
+.b_pos
+    LDA pq : STA sc_bmag,X : ZA_INDEXEDBY 0..10
+    LDA pq+1 : STA sc_bmag+1,X : ZA_INDEXEDBY 0..10
+    INC row : LDA row : CMP #2 : BEQ rows_done
+    JMP each_row
+.rows_done
+    LDX j : INX : CPX #3 : BEQ columns_done
+    JMP column
+.columns_done
+    JSR screen_setup
+    \ Inside the window? The centre, a radius (on the screen, plus one)
+    \ from each edge.
+    STZ far_inside
+    MOVW px, sh_radius : JSR proj_x
+    INC pq : BNE r_ok
+    INC pq+1
+.r_ok
+    LDA sc_x0 : SEC : SBC pq : STA d : LDA sc_x0+1 : SBC pq+1 : STA d+1
+    CMPS16 d, #VIEW_XMIN - VIEW_CX : BMI outside
+    LDA sc_x0 : CLC : ADC pq : STA d : LDA sc_x0+1 : ADC pq+1 : STA d+1
+    CMPS16 d, #VIEW_XMAX - VIEW_CX + 1 : BPL outside
+    LDA sc_y0 : SEC : SBC pq : STA d : LDA sc_y0+1 : SBC pq+1 : STA d+1
+    CMPS16 d, #VIEW_YMIN - VIEW_CY : BMI outside
+    LDA sc_y0 : CLC : ADC pq : STA d : LDA sc_y0+1 : ADC pq+1 : STA d+1
+    CMPS16 d, #VIEW_YMAX - VIEW_CY + 1 : BPL outside
+    LDA #&80 : STA far_inside
+.outside
+    RTS
+}
+
+\ edges_far: each marked edge of a far object, its vertices straight onto
+\ the screen; clipped to the window only if the object reaches past it.
+.edges_far
+{
+    STZ edge_i
+.each
+    LDY edge_i : CPY sh_nedges : BCC test
+    RTS
+.test
+    LDA edge_mark,Y : CMP stamp : BNE next
+    LDA (sh_ev0),Y : STA va
+    LDA (sh_ev1),Y : STA vb
+    LDA va : JSR vertex_far
+    LDA vb : JSR vertex_far
+    LDX va : LDY vb
+    LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
+    LDA v_sylo,X : STA cy0 : LDA v_syhi,X : STA cy0+1
+    LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
+    LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
+    BIT far_inside : BPL clip
+    JSR clip_line.accept
+    BRA next
+.clip
+    JSR clip_line
+.next
+    INC edge_i
+    BRA each
+}
+
+\ vertex_far: vertex A of a far object onto the screen; once an object.
+.vertex_far
+{
+    ZA_AUTO1 vtx
+    TAX
+    LDA vert_mark,X : CMP stamp : BNE new
+    RTS
+.new
+    LDA stamp : STA vert_mark,X
+    STX vtx
+    TXA : TAY
+    CPY sh_nstill : BCS moving
+    LDA (sh_vx),Y : EOR #&80 : STA xf_u
+    LDA (sh_vy),Y : EOR #&80 : STA xf_u+1
+    LDA (sh_vz),Y : EOR #&80 : STA xf_u+2
+    BRA got
+.moving
+    LDA (fr_vx),Y : EOR #&80 : STA xf_u
+    LDA (fr_vy),Y : EOR #&80 : STA xf_u+1
+    LDA (fr_vz),Y : EOR #&80 : STA xf_u+2
+.got
+    JSR screen_vertex
+    \ the centre's quarters added, then truncated towards zero to pixels,
+    \ as the ST's divs truncates
+    LDY vtx
+    LDA sc_acc : CLC : ADC sc_x0q : STA sc_acc : LDA sc_acc+1 : ADC sc_x0q+1
+    JSR to_pixels
+    LDA sc_acc : CLC : ADC #LO(VIEW_CX) : STA v_sxlo,Y
+    LDA sc_acc+1 : ADC #HI(VIEW_CX) : STA v_sxhi,Y
+    LDA sc_acc+2 : CLC : ADC sc_y0q : STA sc_acc : LDA sc_acc+3 : ADC sc_y0q+1
+    JSR to_pixels
+    LDA sc_acc : CLC : ADC #LO(VIEW_CY) : STA v_sylo,Y
+    LDA sc_acc+1 : ADC #HI(VIEW_CY) : STA v_syhi,Y
+    RTS
+\ to_pixels: sc_acc (its low byte; the high byte in A) / 4, truncated
+\ towards zero, into sc_acc.
+.to_pixels
+    BPL quarter
+    EOR #&FF : STA sc_acc+1 : LDA sc_acc : EOR #&FF : CLC : ADC #1 : STA sc_acc
+    LDA sc_acc+1 : ADC #0
+    LSR A : ROR sc_acc : LSR A : ROR sc_acc
+    EOR #&FF : STA sc_acc+1 : LDA sc_acc : EOR #&FF : CLC : ADC #1 : STA sc_acc
+    LDA sc_acc+1 : ADC #0 : STA sc_acc+1
+    RTS
+.quarter
+    LSR A : ROR sc_acc : LSR A : ROR sc_acc : STA sc_acc+1
+    RTS
 }
 
 \ faces: each face's edges marked if it's visible: always-visible, or the
@@ -659,7 +894,7 @@ ZA_AUTO1 proj_shift
     LDX pz
     LDY zsmall_idx,X
     LDA zsmall_sh,X : STA proj_shift
-    BRA got
+    BRA exact
 .big
     TAX
     LDA zhigh_sh,X : TAX
@@ -670,14 +905,19 @@ ZA_AUTO1 proj_shift
 .shift
     LSR A : ROR m
     DEX : BNE shift
+    LDY m
+    LDA rcp_lo,Y : PHA : LDA rcp_hi,Y : TAY : PLA
+    BRA got
 .shifted
     LDY m
+.exact
+    LDA rcpx_lo,Y : PHA : LDA rcpx_hi,Y : TAY : PLA
 .got
-    LDA rcp_lo,Y
+    \ A, Y: R's low and high bytes
     STA proj_x.a+1 : STA proj_x.g+1 : STA proj_x.i+1
     EOR #&FF
     STA proj_x.b+1 : STA proj_x.h+1 : STA proj_x.j+1
-    LDA rcp_hi,Y
+    TYA
     STA proj_x.c+1 : STA proj_x.e+1 : STA proj_x.k+1 : STA proj_x.m+1
     EOR #&FF
     STA proj_x.d+1 : STA proj_x.f+1 : STA proj_x.l+1 : STA proj_x.n+1

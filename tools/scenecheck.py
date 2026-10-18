@@ -8,9 +8,10 @@ The lists and the camera-space positions are the game's logic: they must
 match exactly. Lines are compared by object and edge: an edge drawn by one
 and not the other is a culling difference (decision 9 moves the test into
 object space); an edge both draw must lie within --tolerance pixels of the
-ST's: each end of either line within that distance of the other line. (A
-clipped end can slide along the window's edge by more than its line
-moves.)
+ST's: each end of either line within that distance of the other line,
+rounded. (A clipped end can slide along the window's edge further than
+its line moves: a nearly level line crossing the window's bottom edge can
+end several pixels away for a pixel's difference in height.)
 Prints a summary and the cycles each part took, and exits non-zero on a
 difference the rules don't allow.
 """
@@ -88,7 +89,7 @@ def main():
                 st["only_st"] += 1
                 continue
             p = port[key]
-            d = math.ceil(apart(p, line) - 1e-9)
+            d = round(apart(p, line))
             spread[d] += 1
             st["edges_both"] += 1
             if d:

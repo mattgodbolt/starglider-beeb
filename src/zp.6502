@@ -50,7 +50,7 @@ ang_r = ang + 4
 ZA_AUTO1 slot, otype
 ZA_AUTO2 tx, ty, tz         ; the object's camera-space position
 \ the shape's header, as it lies: HDR_BYTES, then HDR_WORDS pointers
-HDR_BYTES = 8
+HDR_BYTES = 10
 HDR_WORDS = 12
 ZA_AUTO HDR_BYTES + HDR_WORDS * 2, sh
 sh_nverts  = sh
@@ -61,18 +61,19 @@ sh_scale   = sh + 4
 sh_nframes = sh + 5
 sh_nstill  = sh + 6
 sh_nrigid  = sh + 7
-sh_frames  = sh + 8
-sh_ev0     = sh + 10
-sh_ev1     = sh + 12
-sh_fflags  = sh + 14
-sh_fedges  = sh + 16
-sh_elists  = sh + 18
-sh_vx      = sh + 20
-sh_vy      = sh + 22
-sh_vz      = sh + 24
-sh_nx      = sh + 26
-sh_ny      = sh + 28
-sh_nz      = sh + 30
+sh_radius  = sh + 8
+sh_frames  = sh + 10
+sh_ev0     = sh + 12
+sh_ev1     = sh + 14
+sh_fflags  = sh + 16
+sh_fedges  = sh + 18
+sh_elists  = sh + 20
+sh_vx      = sh + 22
+sh_vy      = sh + 24
+sh_vz      = sh + 26
+sh_nx      = sh + 28
+sh_ny      = sh + 30
+sh_nz      = sh + 32
 \ the frame's arrays, each set back so it's indexed by vertex or face
 ZA_AUTO2 fr_vx, fr_vy, fr_vz, fr_nx, fr_ny, fr_nz, fr_klo, fr_khi
 ZA_AUTO 6, objc             ; the camera in the object's space
@@ -121,12 +122,14 @@ SECTION Work, org = WORK, guard = &0E00, virtual = TRUE
 .v_syhi     SKIP 128
 ENDSECTION
 
-\ Every line drawn, for the harness: slot, edge, x0 (word), y0, x1 (word),
-\ y1, colour. In HAZEL, which the spike pages in (it makes no OS calls).
-LOG = &C000
+\ HAZEL, which the spike pages in (it makes no OS calls): the tables, every
+\ line drawn (for the harness: slot, edge, x0 (word), y0, x1 (word), y1,
+\ colour), and code (spike.6502).
+TABLES = &C000
+LOG = &CF00
 LOG_ENTRY = 9
-LOG_LINES = 400
-TABLES = &D000
-SECTION Log, org = LOG, guard = TABLES, virtual = TRUE
+LOG_LINES = 250
+CODE2 = &D800
+SECTION Log, org = LOG, guard = CODE2, virtual = TRUE
 .line_log   SKIP LOG_ENTRY * LOG_LINES
 ENDSECTION

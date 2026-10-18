@@ -30,8 +30,9 @@ them), and faces with the ones whose normal no frame changes first
 the rest. The layout, every list a byte an entry:
 
     shape_lo, shape_hi   each shape's header, by shape number
-    header   nverts nedges nfaces colour scale nframes nstill nrigid, then
-             the addresses of: frames (a word per animation-list entry),
+    header   nverts nedges nfaces colour scale nframes nstill nrigid, the
+             radius (a word: world units, rounded up), then the
+             addresses of: frames (a word per animation-list entry),
              ev0 ev1 (each edge's two vertices), fflags (bit 7: always
              visible), fedges (each face's offset into edgelists),
              edgelists (a count, then the edges, per face), vx vy vz (the
@@ -114,8 +115,12 @@ def shape_source(s, alias=None):
     colour = s["faces"][-1]["colour"] & 15 if s["faces"] else 0
     if k == BEAM:
         colour = 0xFF                               # animate_shapes cycles it
+    # the radius in world units, rounded up: how far any frame's vertex
+    # (as the port has it, g k) is from the object's centre
+    radius = math.ceil(max(math.sqrt(sum((round(c / g) * g) ** 2 for c in v)) for fr in unique for v in fr) / 16)
     out.append(f".shape{k}")
     out.append(f"    EQUB {nv}, {ne}, {nf}, {colour}, {g // 32}, {len(frames)}, {len(still)}, {len(rigid)}")
+    out.append(f"    EQUW {radius}")
     out.append(f"    EQUW shape{k}_frames, shape{k}_ev0, shape{k}_ev1, shape{k}_fflags, shape{k}_fedges, "
                f"shape{k}_edgelists, shape{k}_vx, shape{k}_vy, shape{k}_vz, shape{k}_nx, shape{k}_ny, shape{k}_nz")
     out.append(f".shape{k}_frames")

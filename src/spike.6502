@@ -29,7 +29,6 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = SCREEN, cmos = TRUE
 INCLUDE "maths.6502"
 INCLUDE "render.6502"
 INCLUDE "screen.6502"
-INCLUDE "../build/gen/line.6502"
 INCLUDE "../build/gen/rotate.6502"
 INCLUDE "../build/gen/xform.6502"
 INCLUDE "../build/gen/types.6502"
@@ -48,9 +47,14 @@ NEXT
 ENDSECTION
 
 \ The tables, in HAZEL (the spike pages it in) beside the line log.
-SECTION Tables, org = TABLES, filename = "TABLES", guard = &E000
+SECTION Tables, org = TABLES, filename = "TABLES", guard = LOG
 INCLUDE "squares.6502"
 INCLUDE "recip.6502"
+ENDSECTION
+
+\ More code, in HAZEL.
+SECTION Code2, org = CODE2, filename = "CODE2", guard = &E000, cmos = TRUE
+INCLUDE "../build/gen/line.6502"
 ENDSECTION
 
 SECTION Shapes, org = &8000, filename = "SHAPES", guard = &C000
