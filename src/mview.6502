@@ -382,10 +382,12 @@ ENDMACRO
 \ as none is while the missile view's window moves; otherwise, in the
 \ missile view, the camera made the missile (its place and angles stand
 \ in for the player's, as they did for its lists: worldlogic.6502's
-\ missile_lists) and the clip its window. objects_unview puts back what
+\ missile_lists) and the clip its window; and the objects' boxes onto this
+\ screen's erase list (box.6502's box_aim). objects_unview puts back what
 \ objects_view changed. (code.6502's view_objects.)
 .objects_view
 {
+    JSR box_aim
     CLC
     LDA mv_render : BEQ done
     LDA m_iris : BEQ open

@@ -1196,3 +1196,53 @@ The sound's interrupt costs about 120 cycles a field while a noise sounds
 and about 220 a tick: with the laser held, 1.8% of the CPU (measured
 2026-10-18).
 
+### The objects erased by their boxes
+
+Decision 20 is built. The erase was measured first (`tools/eraseprof.mjs`,
+30 seconds a run): flying straight it took 14,159 cycles a frame. Of that,
+drawing the objects' lines again took 9,135 (3.2 objects a frame, 13
+lines each, 219 cycles a line), the dots 2,326, the gunsight 1,527, the
+bolt and the shots 530, and the list itself 471. In a hard turn it took
+16,616, the objects' share 11,059.
+
+- **The box.** Each vertex an object draws goes into the object's box:
+  the columns and lines it lies in within the window. A vertex past the
+  window records the edges it's past (from its outcode), and the box goes
+  out to those edges, where the lines are cut. An object that may cross
+  the near plane gets no box: its cut ends can land anywhere, and an
+  object that near is seldom small.
+- **The choice.** Once the object is drawn, box_end (`src/box.6502`, bank
+  7) gives up its entries for a single box entry when (H + 3)(W + 3) is
+  under 64 n - 27 for its n lines. On the four scenes that is within 2% of
+  choosing each object's cheaper erase by its measured costs. In flight
+  99% of objects are boxed; the silo tunnel's long lines are not.
+- **The clear.** line_go sends the box's code to erase_box, which clears
+  each character row's part a column at a time with eight unrolled STZ
+  abs,X.
+- **The reach.** The box relies on a far object's vertices being inside
+  the window whenever far_setup says the object is, and they weren't
+  always. The first-order matrix can put a vertex up to sqrt(1 +
+  (X0/128)^2) radii (on the screen) from the centre, so on the missile
+  capture three edges ran a pixel onto the cockpit's frame, and drawing
+  them again as zeros cut holes in the picture. The reach is now pq (1 +
+  |X0|/256), which bounds that anywhere in the window, and those edges are
+  clipped as the ST clips them.
+- **The missile view.** A box lies within the clip's window, so it never
+  clears the window's walls. erasecheck checks every frame of the view.
+
+| On the disc, a frame | Straight | Hard turn |
+|---|---|---|
+| The erase | 14,159 → 6,517 | 16,616 → 7,371 |
+| … the objects' part | 9,135 → 1,644 | 11,059 → 2,060 |
+| Every step drawn: the erase | 10,626 → 5,798 | 16,954 → 7,006 |
+| … the objects' drawing | 105,821 → 109,582 | 155,829 → 160,462 |
+| … the two together | -1,075 | -5,303 |
+
+The model's erase came true. What it left out is the bookkeeping on the
+drawing side: about 50 cycles a vertex to take it into its box and 250 an
+object to decide and log the box, plus the reach's own few hundred a
+frame. That takes back about three quarters of the erase's fall flying
+straight and half of it in a turn (measured 2026-10-18). The reach makes
+a larger saving possible, untried yet: a far object whose reach lies
+wholly outside the window can be skipped before its vertices are made.
+

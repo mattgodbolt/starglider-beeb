@@ -41,9 +41,10 @@ NEXT
 
 \ erase_screen: the screen draw_buffer names (draw_bank set to match)
 \ made empty for drawing: the lines on its erase list drawn again as
-\ zeros, from their set-ups, or if the list overflowed, the window
-\ cleared (screen.6502). X is set to read the list, and for the main screen cleared
-\ for each line's drawing.
+\ zeros, from their set-ups, and its boxes cleared (line_go takes them to
+\ box.6502's erase_box, which code.6502's screen_erase pages in), or if
+\ the list overflowed, the window cleared (screen.6502). X is set to read
+\ the list, and for the main screen cleared for each entry's erasing.
 .erase_screen
 {
     ZA_AUTO1 i

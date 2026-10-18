@@ -86,7 +86,8 @@ use to put the ST's records into it and read them back.
 Where things live (`src/memory.6502`): the drawing in main RAM and HAZEL,
 the lists and objects at the top of main RAM, the list phase and the sine
 table in the world's bank (5, `src/world.6502`), the shapes in bank 4,
-the erase lists in shadow RAM below the shadow screen. The loading area
+the erase lists in shadow RAM below the shadow screen (an object's box, when
+clearing it is cheaper, erased by `src/box.6502` in bank 7: decision 20). The loading area
 (bank 7) holds WINDOW, read with the start's files: the missile view's
 window, its picture (`tools/mkcockpit.py --window`) and the draw phase's
 view code (`src/view_under.6502`: the gunsight, the ground dots,

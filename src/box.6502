@@ -1,0 +1,209 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - objects erased by their boxes (decision 20)
+\
+\ An object whose lines would cost more to draw again as zeros than the
+\ bytes they lie in cost to clear gives up its entries on its screen's
+\ erase list, once it's drawn, for one that holds those bytes' box
+\ (box_end), and the erase clears the box (erase_box, line_go's way for the
+\ entry's code, LINE_BOX). Everything in an object's box is the old
+\ frame's, as the rest of the window is, and the box lies within the window
+\ the object was clipped to, so it never clears the missile view's walls or
+\ the panel (win_draw puts back what it takes of the missile view's inner
+\ window, as it does for the lines).
+\
+\ In the loading area's bank, past ANDY: draw_objects pages it for box_end
+\ (render.6502), and screen_erase for erase_box (code.6502). Each sets, or
+\ runs with, ACCCON's X, and reads only zero page, the workspace, HAZEL and
+\ the bank meanwhile.
+\ ***************************************************************************
+
+\ box_aim: box_end's stores onto the erase list of the screen draw_buffer
+\ names, as draw_begin's erase_aim aims line_plot's (objects_view calls it
+\ each frame, before the objects).
+.box_aim
+    LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
+    ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
+    STA box_end.f_lo+2 : ADC #2
+    STA box_end.f_hi+2 : ADC #2
+    STA box_end.f_row+2 : ADC #2
+    STA box_end.f_dx+2 : ADC #2
+    STA box_end.f_dy+2 : ADC #2
+    STA box_end.f_code+2
+    RTS
+
+\ box_end: the object just drawn, its entries from box_start on, erased by
+\ its box if that's the cheaper. The box is its vertices' within the window
+\ (render.6502's BOX_Y and box_x; a far object inside the window has every
+\ vertex in it, by far_setup's reach), taken to the window's edges any
+\ vertex is past (each edge patched: CLIP_SITES), so it holds every line
+\ the object drew. The cheaper is by erase_box's cycles for H lines of W
+\ columns, about (H + 3)(W + 3) units, and a line's drawn again, about
+\ BOX_PER_LINE units, less the box's own set-up, BOX_FIXED.
+BOX_PER_LINE = 64
+BOX_FIXED = 27
+.box_end
+{
+    ZA_AUTO1 n, w, h, t, lo, hi
+    LDX box_start : BEQ none                ; the list was full before it
+    TXA : SEC : SBC erase_i : BNE some
+.none                                       ; (or it drew nothing)
+    RTS
+.some
+    STA n
+    LDA box_codes : BEQ within
+    STA t
+.e_top
+    LDA #VIEW_YMIN
+    LSR t : BCS top                         ; a vertex above the window
+    CMP box_y0 : BCC top_in
+.top
+    STA box_y0
+.top_in
+.e_left
+    LDA #VIEW_XMIN DIV 4
+    LSR t : BCS left
+    CMP box_c0 : BCC left_in
+.left
+    STA box_c0
+.left_in
+.e_bottom
+    LDA #VIEW_YMAX
+    LSR t : BCS bottom
+    CMP box_y1 : BCS bottom_in
+.bottom
+    STA box_y1
+.bottom_in
+.e_right
+    LDA #VIEW_XMAX DIV 4
+    LSR t : BCS right
+    CMP box_c1 : BCS right_in
+.right
+    STA box_c1
+.right_in
+.within
+    \ W - 1 and H - 1
+    LDA box_c1 : SEC : SBC box_c0 : BCC none : STA w
+    LDA box_y1 : SEC : SBC box_y0 : BCC none : STA h
+    \ the cheaper surely, with W + 3 up to 16 and H + 3 up to 4 n - 2 (at
+    \ most 64 n - 32 units) ...
+    ASSERT BOX_PER_LINE = 64 AND BOX_FIXED < 32
+    LDA w : CMP #13 : BCS product
+    LDA n : CMP #64 : BCS boxed
+    ASL A : ASL A : SBC #5 : BCC product    ; 4 n - 6 (C = 0 from the CMP)
+    CMP h : BCS boxed
+.product
+    \ ... or by the product, in hi and lo
+    LDA h : CLC : ADC #4 : MUL_SET
+    LDA w : CLC : ADC #4 : TAY
+    MUL8 lo : STA hi
+    LDA n : LSR A : LSR A : STA t           ; n << 6, less BOX_FIXED
+    LDA n : ASL A : ASL A : ASL A : ASL A : ASL A : ASL A
+    SEC : SBC #BOX_FIXED : STA n
+    LDA t : SBC #0 : STA t : BMI replayed
+    LDA lo : CMP n : LDA hi : SBC t : BCC boxed
+.replayed
+    RTS
+.boxed
+    \ the entry, at box_start: the cell of its first line and column, its
+    \ first line in the cell's character row, its columns and lines
+    LDA box_y0 : LSR A : LSR A : LSR A : TAY
+    STZ hi
+    LDA box_c0 : ASL A : ASL A : ROL hi : ASL A : ROL hi    ; 8 bytes a column (C = 0 after)
+    ADC screen_row_lo,Y : STA lo
+    LDA hi : ADC screen_row_hi,Y : STA hi
+    LDA #ACCCON_X : TSB acccon              ; (the list is in shadow RAM)
+    LDA lo
+.f_lo
+    STA ERASE_LIST + EF_LO * 512,X          ; (each on the screen's page: box_aim)
+    LDA hi
+.f_hi
+    STA ERASE_LIST + EF_HI * 512,X
+    LDA box_y0 : AND #7
+.f_row
+    STA ERASE_LIST + EF_ROW * 512,X
+    LDA w : INC A
+.f_dx
+    STA ERASE_LIST + EF_DX * 512,X
+    LDA h : INC A
+.f_dy
+    STA ERASE_LIST + EF_DY * 512,X
+    LDA #LINE_BOX
+.f_code
+    STA ERASE_LIST + EF_CODE * 512,X
+    LDA #ACCCON_X : TRB acccon
+    DEX : STX erase_i
+    RTS
+}
+
+\ erase_box: an erase list's box, its bytes zeroed: from the cell at
+\ line_scr, line Y of its character row, line_dx columns across and
+\ line_dy lines down. Each character row's part is cleared a column at a
+\ time, by a store a line (s0 on, each at its line's offset in a cell,
+\ indexed by the cell's), their page patched, entered at the row's first
+\ line, and in the box's last row left after its last line by a branch
+\ put in the store after it.
+STZ_ABSX = &9E
+.erase_box
+{
+    ZA_AUTO1 out, out3
+    STZ out3
+    \ into the stores at line Y's ...
+    STY out : TYA : ASL A : ADC out         ; 3 Y (C = 0: Y < 8)
+    ADC #LO(s0 - (loop + 2)) : STA loop + 1
+    TYA : CLC : ADC line_dy
+.row
+    \ (A: the row's first line, and the lines left)
+    CMP #8 : BCS whole
+    \ ... and out after the box's last line, short of the row's end
+    STA out : ASL A : ADC out : STA out3 : TAX  ; (C = 0 from the CMP, and the ASL)
+    LDA #BRA_OP : STA s0,X
+    LDA #LO(step - (s0 + 2)) : SEC : SBC out3 : STA s0 + 1,X
+    LDA #8                                  ; (none left after it; C = 1)
+.whole
+    SBC #8 : STA line_dy                    ; the lines left after the row
+    \ the stores on the row's page, from the first column's cell
+    LDA line_scr+1
+FOR k = 0..7
+    STA s0 + 3 * k + 2
+NEXT
+    LDX line_scr
+    LDY line_dx : INY
+    CLC
+    BRA next
+.page
+    \ (into the next page)
+FOR k = 0..7
+    INC s0 + 3 * k + 2
+NEXT
+    CLC
+    BRA next
+.s0
+FOR k = 0..7
+    STZ &FF00 + k, X                        ; the page patched
+NEXT
+.step
+    TXA : ADC #8 : TAX                      ; the next column's cell
+    BCS page
+.next
+    DEY
+.loop
+    BNE s0                                  ; patched: to the row's first line's store
+    LDX out3 : BNE last
+    LDA line_dy : BEQ done
+    \ the next row, from its first line
+    LDA #LO(s0 - (loop + 2)) : STA loop + 1
+    LDA line_scr : CLC : ADC #LO(SCREEN_ROW) : STA line_scr
+    LDA line_scr+1 : ADC #HI(SCREEN_ROW) : STA line_scr+1
+    LDA line_dy
+    JMP row
+.last
+    \ (the store the branch out took put back)
+    LDA #STZ_ABSX : STA s0,X
+    LDA out : STA s0 + 1,X
+.done
+    RTS
+}
+\ (a cell's lines share its page, so only a column's step crosses one)
+ASSERT LO(SCREEN) MOD 8 = 0 AND SCREEN_ROW MOD 8 = 0
+\ (it sets X, which moves &3000-&7FFF, code's fetches too)
+ASSERT box_aim >= &8000

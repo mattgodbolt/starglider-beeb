@@ -49,7 +49,8 @@ ENDSECTION
 
 \ The draw phase's drawing besides the objects (view_under.6502), with
 \ the missile view's window (mview.6502) and the cockpit picture's part it
-\ copies, for the loading area's bank, past ANDY (they run with it paged)
+\ copies, and the objects' boxes (box.6502), for the loading area's bank,
+\ past ANDY (they run with it paged)
 \ and the spike's line log there: the picture first, so that the code lies
 \ past the world bank's list phase, as the logic bank's does (baron#29:
 \ see the logic bank below).
@@ -62,6 +63,7 @@ IF P% < world_list_end
 ENDIF
 INCLUDE "view_under.6502"
 INCLUDE "mview.6502"
+INCLUDE "box.6502"
 ENDSECTION
 
 \ The logic's bank: the rest of the game's logic, which needn't read the

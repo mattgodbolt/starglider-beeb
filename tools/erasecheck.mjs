@@ -107,5 +107,5 @@ for (let f = 0; f < frames; f++) {
     }
   if (lit) { bad++; if (bad < 8) console.log(`frame ${f} buffer ${buf}: ${lit} bytes left, step ${ram[sym.steps] | (ram[sym.steps + 1] << 8)}`); }
 }
-console.log(`erasecheck: ${frames} frames, ${bad} with something left; ${mvFrames} of the missile view, ${mvBad} windows not the ST's, ${mvLines} lines erased from them`);
+console.log(`erasecheck: ${frames} frames, ${bad} with something left; ${mvFrames} of the missile view, ${mvBad} windows not the ST's, ${mvLines} lines and boxes erased from them`);
 process.exit(bad || mvBad || !mvFrames ? 1 : 0);

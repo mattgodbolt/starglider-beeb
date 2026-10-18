@@ -700,7 +700,7 @@ ASSERT LO(&1000) = 0 AND LO(&700) = 0
 \ dots_wipe: the dots dot_put put on the screen draw_buffer names, as many
 \ as dot_wipes says, zeroed (each one's top byte, the one below, both in
 \ the window, and the next byte's too if its second column is there), and
-\ the list emptied (code.6502's dots_erase calls it). ACCCON's X is set for
+\ the list emptied (code.6502's screen_erase calls it). ACCCON's X is set for
 \ the shadow screen.
 .dots_wipe
 {

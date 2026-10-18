@@ -28,9 +28,11 @@ the 65C12.
 `line_plot` sets a line up (its first byte's address, its row in the
 character row, |dx|, dy and its block), logs the set-up on the erase
 list and draws it; `line_go` draws a line set up, so erasing one from the
-list (hazel.6502's erase_screen) skips the set-up. The caller sets
-line_x0 (two bytes), line_y0, line_x1 (two bytes) and line_y1 in zero
-page, every coordinate on the screen, and the colour with set_colour.
+list (hazel.6502's erase_screen) skips the set-up; an entry of code
+LINE_BOX holds a box of bytes instead (decision 20), which line_go
+clears (box.6502's erase_box). The caller sets line_x0 (two bytes),
+line_y0, line_x1 (two bytes) and line_y1 in zero page, every coordinate
+on the screen, and the colour with set_colour.
 `screen_row_lo/hi` (hazel.6502) give each character row's address.
 """
 
@@ -181,12 +183,14 @@ ZA_AUTO1 erase_i
 
 \\ line_go: a line set up drawn: its first byte's character row and column
 \\ in line_scr, Y its row in the character row, X its code (kind * 8 +
-\\ block * 2), line_dx = |dx| and line_dy = dy, both under 256.
+\\ block * 2), line_dx = |dx| and line_dy = dy, both under 256. Code
+\\ LINE_BOX, an erase list's box, is cleared instead (erase_box).
+LINE_BOX = {len(KINDS) * 8}
 .line_go
     JMP (line_setups,X)
-    ZA_CANJUMP {", ".join(k for _, k in KINDS)}
+    ZA_CANJUMP {", ".join(k for _, k in KINDS)}, erase_box
 .line_setups
-    EQUW {", ".join(k for _, k in KINDS for _p in range(4))}
+    EQUW {", ".join(k for _, k in KINDS for _p in range(4))}, erase_box
 .line_entries
     EQUW {", ".join(f"{v}_s{p}" for v, _ in KINDS for p in range(4))}
 """)
