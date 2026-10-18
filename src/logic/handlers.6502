@@ -48,9 +48,14 @@ INCLUDE "../../build/gen/handlers.6502"
 \ that make one clear it, so only one there at the start is cleared here,
 \ after the first slot (whose handler sees it, as the ST's does). random32's
 \ state is in zero page meanwhile (h_random32).
+\
+\ The walk stops at the slot past its last (the table always has one: the
+\ ST's count stops short of the silo's records), made to look exploding
+\ until then, so that only an exploding slot tests for the end; no
+\ handler reads another slot's exploding.
 .object_handlers
 {
-    ZA_AUTO1 limit
+    ZA_AUTO1 limit, kept
     STZ shot_n                  ; (for the drawing: this step's shots, enemy_laser's)
     LDX #0
     LDA n_slots : BEQ done
@@ -60,6 +65,13 @@ INCLUDE "../../build/gen/handlers.6502"
     STA limit
     LDA rng32 : STA h_rng : LDA rng32+1 : STA h_rng+1
     LDA rng32+2 : STA h_rng+2 : LDA rng32+3 : STA h_rng+3
+.walk
+    LDY limit
+    LDA ob_exploding,Y : STA kept
+    LDA #1 : STA ob_exploding,Y
+    BRA each
+.next
+    INX
 .each
     LDA ob_exploding,X : BNE exploding
     LDY ob_type,X
@@ -70,8 +82,16 @@ INCLUDE "../../build/gen/handlers.6502"
     TAX
     JSR handler_dispatch
     LDX h_slot
-.next
-    INX : CPX limit : BNE each
+    INX
+    BRA each
+.exploding
+    CPX limit : BEQ walked
+    \ frames 0-31, then the slot is freed (beq on &1F: equality)
+    LDA ob_explosion,X : CMP #&1F : BEQ free
+    INC ob_explosion,X
+    BRA next
+.walked
+    LDA kept : STA ob_exploding,X
     STZ homing
     CPX n_slots : BNE rest
     LDA h_rng : STA rng32 : LDA h_rng+1 : STA rng32+1
@@ -80,7 +100,7 @@ INCLUDE "../../build/gen/handlers.6502"
     RTS
 .rest
     LDA n_slots : STA limit
-    BRA each
+    BRA walk
 .gated
     \ (N is still the gate's bit 7: BIT # sets Z alone)
     BMI drawn
@@ -92,11 +112,6 @@ INCLUDE "../../build/gen/handlers.6502"
     BEQ next
     AND #&FF EOR (GATE_DRAWN OR GATE_NEAR)
     BRA call
-.exploding
-    \ frames 0-31, then the slot is freed (beq on &1F: equality)
-    LDA ob_explosion,X : CMP #&1F : BEQ free
-    INC ob_explosion,X
-    BRA next
 .free
     STZ ob_exploding,X : STZ ob_explosion,X : STZ ob_type,X
     TXA : LDY free_n : STA free_stack,Y
