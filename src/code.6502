@@ -39,6 +39,17 @@ INCLUDE "step.6502"
     JSR ground_setup
     BANK_ANDY BANK_WORLD
     RTS
+
+\ dots_erase: the ground dots on the screen draw_buffer names erased from
+\ their own list (view_under.6502's dots_wipe, in the loading area's bank),
+\ if it has any.
+.dots_erase
+    LDX draw_buffer
+    LDA dot_wipes,X : BEQ none
+    BANK BANK_PIC
+    JMP dots_wipe
+.none
+    RTS
 INCLUDE "sound.6502"
 
 

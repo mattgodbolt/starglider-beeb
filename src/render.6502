@@ -47,6 +47,7 @@ ENDIF
 \ screen_copy's pages).
 .erase_init
     STZ erase_stop : STZ erase_stop+1
+    STZ dot_wipes : STZ dot_wipes+1
     LDA #&FF : STA win_shown : STA win_shown+1
 \ marks_wipe: every edge's and vertex's mark 0, and stamp, so the next
 \ stamp is on none of them.

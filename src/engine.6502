@@ -151,6 +151,7 @@ ASSERT irq_handler < &3000
     LDA draw_buffer : EOR #1 : STA draw_buffer
     TAX : LDA buffer_bank,X : STA draw_bank
     JSR erase_screen
+    JSR dots_erase
 .erased
     JSR draw_begin
     JSR view_under

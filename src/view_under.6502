@@ -125,15 +125,9 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     LDA #0 : SBC at+3 : STA rot_d+3
     \ (ground_dots made the ground's rotation for this camera)
     JSR dots_steady
-    \ dot_put's stores onto this screen's erase list, and its colour
-    LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
-    ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
-    STA dot_put.f_lo+2 : ADC #2
-    STA dot_put.f_hi+2 : ADC #2
-    STA dot_put.f_row+2 : ADC #2
-    STA dot_put.f_dx+2 : ADC #2
-    STA dot_put.f_dy+2 : ADC #2
-    STA dot_put.f_code+2
+    \ this screen's list of dots, from its start, and their colour
+    LDX draw_buffer
+    LDA dpe_base,X : STA dpe_i
     LDA colour_map+2 : STA dot_colour
     LDA #39 : STA dot
 .each
@@ -145,6 +139,9 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     JSR one
 .next
     DEC dot : BPL each
+    \ how many, for dots_wipe
+    LDX draw_buffer
+    LDA dpe_i : SEC : SBC dpe_base,X : STA dot_wipes,X
     RTS
 \ one: dot X, in view
 .one
@@ -633,85 +630,116 @@ ASSERT LO(512) = 0
 
 \ dot_put (&0976E): the dot at (line_x0, line_y0), rot_acc+4 deep, as the
 \ ST plots it: a column of a pixel, or 2 down when it's under &1000 deep,
-\ and a second column beside it when it's under &700. Each column goes onto
-\ the erase list as the line drawer sets a column up (line_go's kind 0,
-\ dx 0: tools/mkline.py), and is ORed into the screen draw_bank names.
-\ ACCCON's X is set for the erase list, and stays set to draw into shadow
-\ RAM: this runs from the logic's bank, and reads only zero page, the bank
-\ and HAZEL while it's set.
+\ and a second column beside it when it's under &700, ORed into the screen
+\ draw_bank names. It goes onto the screen's list of its dots (dots_wipe's)
+\ rather than its erase list (a change to decision 14, Matt's call 7): the
+\ address of its top byte, bit 15 set if its second column is in the next
+\ byte. ACCCON's X is set to draw into shadow RAM: this runs from the
+\ loading area's bank, and reads only zero page, the bank and HAZEL while
+\ it's set.
 .dot_put
 {
-    STZ dy : LDA #1 : STA cols
-    LDA rot_acc+5 : CMP #HI(&1000) : BCS sized
-    INC dy
-    CMP #HI(&700) : BCS sized
-    INC cols
-.sized
-.column
-    \ the column's lower end, from which the line drawer draws: its byte
-    \ (its character row's, 8 a column of 4 pixels) and its row in that
-    LDA line_y0 : CLC : ADC dy : TAY
-    AND #7 : STA row
-    TYA : LSR A : LSR A : LSR A : TAY
+    \ the top byte: its character row's, its column's (8 a column of 4
+    \ pixels) and its line in the row (every row's and column's a multiple
+    \ of 8)
+    LDA line_y0 : LSR A : LSR A : LSR A : TAY
     LDA line_x0 : AND #&FC : ASL A : STA line_scr   ; C = bit 7 of x
     LDA line_x0+1 : ROL A : STA line_scr+1
-    LDA line_scr : CLC : ADC screen_row_lo,Y : STA line_scr
+    LDA line_y0 : AND #7 : ORA line_scr
+    CLC : ADC screen_row_lo,Y : STA line_scr
     LDA line_scr+1 : ADC screen_row_hi,Y : STA line_scr+1
+    \ its pixels: the second column's in this byte, or in the next
+    STZ across
     LDA line_x0 : AND #3 : TAX
-    LDA dot_pix,X : AND dot_colour : STA mask
-    LDA #ACCCON_X : TSB acccon
-    LDY erase_i
-    LDA line_scr
-.f_lo
-    STA ERASE_LIST + EF_LO * 512,Y          ; (each patched to this screen's page)
-    LDA line_scr+1
-.f_hi
-    STA ERASE_LIST + EF_HI * 512,Y
-    LDA row
-.f_row
-    STA ERASE_LIST + EF_ROW * 512,Y
-    LDA #0
-.f_dx
-    STA ERASE_LIST + EF_DX * 512,Y
-    LDA dy
-.f_dy
-    STA ERASE_LIST + EF_DY * 512,Y
-    TXA : ASL A                             ; kind 0, its pixel's block * 2
-.f_code
-    STA ERASE_LIST + EF_CODE * 512,Y
-    TYA : BEQ logged                        ; full: the overflow stays on index 0
-    DEC erase_i
-.logged
-    LDA draw_bank : BNE drawn_x
-    LDA #ACCCON_X : TRB acccon
-.drawn_x
-    LDY row
+    LDA dot_pix,X
+    LDY rot_acc+5 : CPY #HI(&700) : BCS narrow
+    CPX #3 : BEQ next_byte
+    ORA dot_pix+1,X
+    BRA narrow
+.next_byte
+    DEC across
+.narrow
+    AND dot_colour : STA mask
+    \ onto the list
+    LDY dpe_i
+    LDA line_scr : STA dpe_lo,Y
+    LDA across : AND #&80 : ORA line_scr+1 : STA dpe_hi,Y
+    INC dpe_i
+    \ its top line, and the one below if it's 2 down (the next character
+    \ row's first, after its last), each in the next byte too if it's there
+    LDA draw_bank : TSB acccon
+    LDY #0 : JSR lines
+    LDA rot_acc+5 : CMP #HI(&1000) : BCS drawn
+    LDY #1
+    LDA line_scr : AND #7 : CMP #7 : BNE below
+    LDA line_scr : CLC : ADC #LO(SCREEN_ROW - 7) : STA line_scr
+    LDA line_scr+1 : ADC #HI(SCREEN_ROW - 7) : STA line_scr+1
+    LDY #0
+.below
+    JSR lines
+.drawn
+    LDA draw_bank : TRB acccon
+    RTS
+\ lines: the dot's pixels ORed in at line_scr + Y, and Y + 8 if it's there.
+.lines
     LDA mask : ORA (line_scr),Y : STA (line_scr),Y
-    LDA dy : BEQ shown
-    DEY : BPL up
-    LDA line_scr : SEC : SBC #LO(SCREEN_ROW) : STA line_scr
-    LDA line_scr+1 : SBC #HI(SCREEN_ROW) : STA line_scr+1
-    LDY #7
-.up
-    LDA mask : ORA (line_scr),Y : STA (line_scr),Y
-.shown
-    LDA #ACCCON_X : TRB acccon
-    DEC cols : BEQ done
-    INC line_x0 : BNE again
-    INC line_x0+1
-.again
-    JMP column
-.done
+    BIT across : BPL line_done
+    TYA : ORA #8 : TAY
+    LDA dot_colour : AND #&88 : ORA (line_scr),Y : STA (line_scr),Y
+.line_done
     RTS
 \ (in the bank's own RAM, which X leaves where it is)
-.dy   SKIP 1                            ; the column's rows less 1
-.cols SKIP 1                            ; the columns to go
-.mask SKIP 1                            ; the column's pixel in the colour
-.row  SKIP 1                            ; its lower end's row in its character row
+.across SKIP 1                          ; bit 7: the second column's in the next byte
+.mask   SKIP 1                          ; its pixels in this byte, in the colour
 }
 .dot_colour SKIP 1                      ; colour_map's byte for the ST's colour 2
 .dot_pix                                ; each pixel of a byte, from the left
     EQUB &88, &44, &22, &11
 ASSERT LO(&1000) = 0 AND LO(&700) = 0
+
+\ dots_wipe: the dots dot_put put on the screen draw_buffer names, as many
+\ as dot_wipes says, zeroed (each one's top byte, the one below, both in
+\ the window, and the next byte's too if its second column is there), and
+\ the list emptied (code.6502's dots_erase calls it). ACCCON's X is set for
+\ the shadow screen.
+.dots_wipe
+{
+    ZA_AUTO2 p, q
+    LDX draw_buffer
+    LDA dpe_base,X : STA stop
+    LDA dot_wipes,X : STZ dot_wipes,X
+    CLC : ADC stop : TAX
+    LDA draw_bank : TSB acccon
+.each
+    DEX
+    LDA dpe_lo,X : STA p
+    LDA dpe_hi,X : AND #&7F : STA p+1
+    \ the line below: the next, or the next character row's first
+    LDA p : AND #7 : CMP #7 : BEQ wrap
+    LDA p : INC A : STA q : LDA p+1 : STA q+1   ; (no carry: not a row's last)
+    BRA zero
+.wrap
+    LDA p : CLC : ADC #LO(SCREEN_ROW - 7) : STA q
+    LDA p+1 : ADC #HI(SCREEN_ROW - 7) : STA q+1
+.zero
+    LDA #0 : TAY
+    STA (p),Y : STA (q),Y
+    BIT dpe_hi,X : BPL next
+    LDY #8
+    STA (p),Y : STA (q),Y
+.next
+    CPX stop : BNE each
+    LDA draw_bank : TRB acccon
+    RTS
+.stop SKIP 1                            ; (in the bank's own RAM)
+}
+
+\ The dots' lists, by screen, the first from 0, the second from DPE_DOTS:
+\ each dot's top byte's address (dot_put's).
+DPE_DOTS = 40
+.dpe_base EQUB 0, DPE_DOTS
+.dpe_i    SKIP 1                        ; the next dot's place
+.dpe_lo   SKIP 2 * DPE_DOTS
+.dpe_hi   SKIP 2 * DPE_DOTS
 
 INCLUDE "../build/gen/ground.6502"

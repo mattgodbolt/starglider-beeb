@@ -57,11 +57,13 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 .frame_show
     RTS
 
-\ spike_erase: the last frame's lines erased (from its erase list), as the
-\ disc erases a screen before drawing it again.
+\ spike_erase: the last frame's lines erased (from its erase list) and its
+\ ground dots (from theirs), as the disc erases a screen before drawing it
+\ again.
 .spike_erase
     ZA_ENTRY
-    JMP erase_screen
+    JSR erase_screen
+    JMP dots_erase
 
 \ spike_under, spike_over: the view's drawing besides the objects
 \ (view_under.6502, view.6502), for tools/viewrun.mjs: logic_call's routine (world_lists,
