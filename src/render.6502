@@ -824,11 +824,15 @@ ENDMACRO
     BRA magnitude
 .pos
     STA xh : LDA px : STA xl
+    ORA xh : BEQ zero
 .magnitude
     LDA pz+1 : BNE fits
     LDA xh : CMP pz : BCC fits
     LDA px+1 : LSR A : LDA px : ROR A : STA pq+1
     LDA #0 : ROR A : STA pq
+    RTS
+.zero
+    STZ pq : STZ pq+1
     RTS
 .fits
     \ |x| R >> 8 into A:pq:p1: x's low byte by R's high byte and by its low

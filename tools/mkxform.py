@@ -43,10 +43,19 @@ CARRY_BIT = CLC_OP EOR SEC_OP   ; a sign's mask AND this, OR CLC_OP: CLC or SEC
 """)
 
 
-def row_start(i, start, origin):
-    """The row's starting value from its sum (sum, 24 bits)."""
+def row_start(i, start, origin, ones=False):
+    """The row's starting value from its sum (sum, 24 bits), and with ones,
+    plus X (signed) for the ones its terms add."""
     emit("    LDA sum+2 : CMP #&80 : ROR A : ROR sum+1 : ROR sum")
-    if origin:
+    if ones:
+        assert not origin
+        emit(f"    \\ row {i} starts at X - (the row's sum) / 2")
+        emit("    LDY #0 : TXA : BPL ones_pos" + str(i))
+        emit("    DEY")
+        emit(f".ones_pos{i}")
+        emit(f"    SEC : SBC sum : STA {start}+{2 * i}")
+        emit(f"    TYA : SBC sum+1 : STA {start}+{2 * i + 1}")
+    elif origin:
         emit(f"    \\ row {i} starts at {origin[i]} - (the row's sum) / 2")
         emit(f"    LDA {origin[i]} : SEC : SBC sum : STA {start}+{2 * i}")
         emit(f"    LDA {origin[i]}+1 : SBC sum+1 : STA {start}+{2 * i + 1}")
@@ -63,8 +72,10 @@ def lookups(prefix, e, mag):
     emit(f"    LDA {mag}+{2 * e + 1} : STA {t}_c+1 : STA {t}_e+1 : EOR #&FF : STA {t}_d+1 : STA {t}_f+1")
 
 
-def setup(name, prefix, rows, mag, sign, start, origin):
-    """name_setup, unrolled: each term patched, each row's sum made as it goes."""
+def setup(name, prefix, rows, mag, sign, start, origin, ones=False):
+    """name_setup, unrolled: each term patched, each row's sum made as it goes.
+    With ones (vertex's), each term adds one too much, so a row starts one
+    lower for each term that adds and one higher for each that subtracts."""
     emit(f"""\\ {name}_setup: specialise {name}_vertex to the object's {mag} and
 \\ {sign} (by term: {rows} rows of x, y, z).
 .{name}_setup
@@ -72,6 +83,8 @@ def setup(name, prefix, rows, mag, sign, start, origin):
     ZA_AUTO 3, sum""")
     for i in range(rows):
         emit("    STZ sum : STZ sum+1 : STZ sum+2")
+        if ones:
+            emit("    LDX #0")
         for j in range(3):
             e = 3 * i + j
             t = f"{prefix}{e}"
@@ -82,14 +95,18 @@ def setup(name, prefix, rows, mag, sign, start, origin):
             emit(f"    CLC : LDA sum : ADC {mag}+{2 * e} : STA sum")
             emit(f"    LDA sum+1 : ADC {mag}+{2 * e + 1} : STA sum+1")
             emit("    LDA sum+2 : ADC #0 : STA sum+2")
+            if ones:
+                emit("    DEX")
             emit(f"    JMP done{e}")
             emit(f".neg{e}")
             emit(f"    LDA #SEC_OP : STA {t}_c0 : LDA #&FF : STA {t}_m0+1 : STA {t}_m1+1")
             emit(f"    SEC : LDA sum : SBC {mag}+{2 * e} : STA sum")
             emit(f"    LDA sum+1 : SBC {mag}+{2 * e + 1} : STA sum+1")
             emit("    LDA sum+2 : SBC #0 : STA sum+2")
+            if ones:
+                emit("    INX")
             emit(f".done{e}")
-        row_start(i, start, origin)
+        row_start(i, start, origin, ones)
     emit("    RTS")
     emit("}")
     emit()
@@ -149,11 +166,15 @@ def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
     emit()
 
 
-def vertex(name, prefix, rows, acc, start, back):
+def vertex(name, prefix, rows, acc, start, back, ones=False):
     emit(f"\\ {name}_vertex: {acc} = the matrix by (xf_u - 128), / 256. A term is the")
     emit("\\ high byte by u (X:xf_plo) and the low byte by u, its high byte, added in")
-    emit("\\ A; the first column's terms add to the starting values. Its one caller")
-    emit(f"\\ jumps here, and it jumps back to {back}.")
+    if ones:
+        emit("\\ A with the carry the SBC leaves, one (the setup takes them off the")
+        emit("\\ starting values); the first column's terms add to the starting values.")
+    else:
+        emit("\\ A; the first column's terms add to the starting values.")
+    emit(f"\\ Its one caller jumps here, and it jumps back to {back}.")
     emit(f".{name}_vertex")
     for j in range(3):
         emit(f"    LDY xf_u+{j}")
@@ -176,7 +197,7 @@ def vertex(name, prefix, rows, acc, start, back):
             emit("    LDA sqr_hi,Y")
             emit(f".{t}_b")
             emit("    SBC neg_hi,Y")
-            emit("    CLC : ADC xf_plo")
+            emit("    ADC xf_plo" if ones else "    CLC : ADC xf_plo")
             emit(f"    BCC {t}_nc")
             emit("    INX")
             emit(f".{t}_nc")
@@ -230,8 +251,8 @@ def sums(rows, acc, start, what):
 
 
 sums(3, "xf_acc", "xf_start", "x', y', z' in world units")
-setup("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start", None)
-vertex("xform", "xf", 3, "xf_acc", "xf_start", "vertex.back")
+setup("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start", None, ones=True)
+vertex("xform", "xf", 3, "xf_acc", "xf_start", "vertex.back", ones=True)
 sums(2, "sc_acc", "sc_start", "the screen's x and y")
 setup_choosing("screen", "sc", "s8", 2, "sc_bmag", "sc_bsign", "sc_start", ["sc_x0q", "sc_y0q"],
                "vertex_far.screen")
