@@ -5,7 +5,8 @@
 # starts from what the first left: it ends with Esc (scancode 1, put in
 # the last-key latch: the script's keys can't name it) while banking
 # left. Then the score's level byte (&0150D) is poked, so world_render
-# raises the level: 2, 3, 4, then from 33 to 34 and past it, to the cap.
+# raises the level: 2, 3 (banking, so the turn is in init_objects' random
+# numbers), 4, then from 33 to 34 and past it, to the cap.
 wait 38
 debug w w $12200 $ff70
 debug w w $5c02e $1234 $0064 $4321
@@ -26,9 +27,13 @@ wait 3
 debug w b $11ecb 1
 debug echo \nSEG level2\n
 wait 3
+down 0x4b
+wait 1
 debug w b $11ecb 2
 debug echo \nSEG level3\n
-wait 3
+wait 2
+up 0x4b
+wait 1
 debug w b $11ecb 3
 debug echo \nSEG level4\n
 wait 3
