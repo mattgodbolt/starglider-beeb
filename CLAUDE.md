@@ -50,7 +50,8 @@ make spike      # the spike on every captured scene: checked against the
 make check      # sincos against the ST's sine table at every angle, make spike, the
                 # disc's erasing (tools/erasecheck.mjs), its own disc reader
                 # (tools/disccheck.mjs), its controls (tools/inputcheck.mjs)
-                # make panel and make view
+                # make panel, make view and make rot (the rotations against
+                # the ST's exact one and the approximation's model)
 make logic      # the port's game logic against the ST's, routine by routine
                 # and a whole step (tools/logicrun.mjs, on the captures make
                 # steps makes)
@@ -128,7 +129,8 @@ the ST's mouse moves.
   bank may set it too (the panel), but mustn't read &3000-&7FFF meanwhile:
   the objects and lists are there.
 `node tools/scenerun.mjs SCENES OUT --profile 37` samples where the cycles
-go.
+go. On the disc, `tools/listprof.mjs` splits world_lists into its parts and
+`tools/stepprof.mjs` times named routines a step, both holding keys.
 
 `tools/fat12.py IMAGE [OUTDIR]` lists or extracts an ST (or PC) floppy,
 `tools/adf.py IMAGE [OUTDIR]` an Amiga one.

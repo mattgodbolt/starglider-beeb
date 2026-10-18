@@ -51,7 +51,7 @@ BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short 
 TARGET   = build/starglider.ssd
 DISC     = starglider.ssd
 
-.PHONY: all run disc check spike logic view panel steps memory fps scenes fetch venv clean
+.PHONY: all run disc check spike logic view panel rot steps memory fps scenes fetch venv clean
 
 all: $(TARGET) build/spike/SPIKE
 
@@ -138,7 +138,7 @@ build/st build/gen build/spike:
 build/scenes/%/beeb.json: build/scenes/%/scenes.json $(PRG) tools/mkscene.py tools/st_render.py
 	$(PYTHON) -I tools/mkscene.py $(PRG) $< $@
 
-check: build/spike/SPIKE spike panel view $(TARGET)
+check: build/spike/SPIKE spike panel view rot $(TARGET)
 	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike
 	node tools/erasecheck.mjs
 	node tools/disccheck.mjs
@@ -169,6 +169,13 @@ view: build/spike/SPIKE
 	@for s in $(SCENES); do node tools/viewrun.mjs --scenes build/scenes/$$s/scenes.json || exit 1; done
 
 # The panel on every capture's frames (tools/panelcheck.mjs).
+# the rotations against the ST's exact one and the approximation's model
+build/rotcases.json: tools/rotcases.py tools/st_render.py $(PRG) | build
+	$(PYTHON) -I tools/rotcases.py . $@ > /dev/null
+
+rot: build/spike/SPIKE build/rotcases.json
+	node tools/rotcheck.mjs build/rotcases.json
+
 panel: build/spike/SPIKE build/gen/panel.json
 	node tools/panelcheck.mjs --quiet $(STEPS:%=build/steps/%/steps.json)
 
