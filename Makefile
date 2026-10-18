@@ -35,7 +35,7 @@ ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
 SCENES   = flight towers docked
 SOURCES  = $(wildcard src/*.6502 src/logic/*.6502)
-GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502
+GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502
 
 # A failed step leaves no half-made target behind (asm.sh fails on a
 # warning after baron has written its output).
@@ -78,6 +78,11 @@ $(PRG): | build/st
 build/gen/shapes.6502 build/gen/types.6502 &: $(PRG) tools/mkshapes.py tools/st_shapes.py | build/gen
 	$(PYTHON) -I tools/mkshapes.py $(PRG) build/gen
 
+# The object handlers' tables (the handler by type, the arctan tables, the
+# missiles' by type and by level).
+build/gen/handlers.6502: $(PRG) tools/mkhandlers.py tools/st_prg.py | build/gen
+	$(PYTHON) -I tools/mkhandlers.py $(PRG) $@
+
 build/gen/line.6502 build/gen/linemode.6502 &: tools/mkline.py | build/gen
 	python3 -I tools/mkline.py build/gen
 
@@ -117,7 +122,7 @@ spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	done
 
 # The logic's routines, each on every capture (tools/logicrun.mjs's ROUTINES).
-LOGIC    = animate flight keys
+LOGIC    = animate flight keys handlers
 STEPS    = $(patsubst tests/st/steps_%.txt,%,$(wildcard tests/st/steps_*.txt))
 
 logic: build/spike/SPIKE

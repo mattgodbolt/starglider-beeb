@@ -1,0 +1,81 @@
+# The object handlers' rarest draws, made likely: on level 3's rules (the
+# level variable $296 set on level 1's layout), with 51 more beams (the
+# types of the static objects more than &2400 off the player in z written
+# 11), each going out 1 step in 2048; and the player still beside two
+# tanks, both near, each asking for a homing missile 1 step in 128. The
+# shields and energy refilled as it runs. On the keys. (The capture slows
+# Hatari to about a quarter of real time.)
+wait 38
+key 57
+wait 3
+debug parse {arm}
+debug w w $5c196 3
+debug echo \nSEG beams\n
+# beside tanks 57 (x &E9EC, z &5B08) and 58 (x &DE34, z &5338)
+debug w w $12206 0
+debug w w $5c02e $e710 $ffd0 $5338
+debug w w $5c03c 0
+debug w w $5d61a $b
+debug w w $5d65a $b
+debug w w $5d69a $b
+debug w w $5d6da $b
+debug w w $5d71a $b
+debug w w $5d79a $b
+debug w w $5d7da $b
+debug w w $5d8da $b
+debug w w $5d91a $b
+debug w w $5d95a $b
+debug w w $5de1a $b
+debug w w $5de9a $b
+debug w w $5e05a $b
+debug w w $5e09a $b
+debug w w $5e0da $b
+debug w w $5e11a $b
+debug w w $5e15a $b
+debug w w $5e19a $b
+debug w w $5e1da $b
+debug w w $5e21a $b
+debug w w $5e25a $b
+debug w w $5e29a $b
+debug w w $5e2da $b
+debug w w $5e31a $b
+debug w w $5e35a $b
+debug w w $5e39a $b
+debug w w $5e3da $b
+debug w w $5e41a $b
+debug w w $5e45a $b
+debug w w $5e49a $b
+debug w w $5e4da $b
+debug w w $5e55a $b
+debug w w $5e59a $b
+debug w w $5e5da $b
+debug w w $5e61a $b
+debug w w $5e69a $b
+debug w w $5e6da $b
+debug w w $5e71a $b
+debug w w $5e75a $b
+debug w w $5e79a $b
+debug w w $5e7da $b
+debug w w $5e81a $b
+debug w w $5e85a $b
+debug w w $5e89a $b
+debug w w $5ea5a $b
+debug w w $5ea9a $b
+debug w w $5eada $b
+debug w w $5eb1a $b
+debug w w $5eb5a $b
+debug w w $5eb9a $b
+debug w w $5ebda $b
+wait 20
+debug w w $5c15e $ffff $ffff
+wait 20
+debug w w $5c15e $ffff $ffff
+wait 20
+debug w w $5c15e $ffff $ffff
+wait 20
+debug w w $5c15e $ffff $ffff
+wait 20
+debug w w $5c15e $ffff $ffff
+wait 20
+debug echo \nSEG end\n
+quit

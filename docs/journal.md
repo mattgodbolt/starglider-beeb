@@ -475,3 +475,48 @@ lost, went there as a comment. Until it's fixed, the logic bank's code
 starts past the world bank's list phase, where the rotations' annotated
 jumps are (`world_list_end` in `src/banks.6502`). Any annotated jump
 elsewhere in the banks needs the same care.
+
+### The object handlers
+
+`object_handlers` (the ST's &07A54) and every handler its table reaches
+are in `src/logic/handlers.6502`, in the world bank beside the sine
+table, with `angle_to_player` (&08390) and its arctan tables. `make
+logic` checks them against the flight capture and seven captures of
+their own, 701 frames in all, with every variable and field the map
+holds the same as the ST's, and d0 too. Between them they reach every
+branch the game can take but two: an enemy's laser at camera z 0, and
+the count of hits taken carrying past 255.
+
+- **The table is the ST's.** `tools/mkhandlers.py` reads the 62 handler
+  pointers at &08252 and names the port's routine for each, so the five
+  places where the second half differs from the first come from the ST's
+  data. It also takes the arctan tables, the guns' heights, the missiles'
+  heading flips, speeds and lives, and the lasers' damage off level 1,
+  which is the same for every type and so a constant (it asserts that).
+  The arctan tables are odd about their centres over every entry the
+  lookup reaches, so only their upper halves are kept; the tool checks
+  each entry.
+- **d0 is followed through every handler.** A mine that goes off calls
+  random8, which adds whatever d0 the slots before it left. In the mines
+  capture it was 7, an earlier wanderer's `r & &F`, and the port matched
+  it. The harness compares d0 at the routine's exit, which checks the
+  whole chain.
+- **The free stack** holds slots. Its count ($25C) and the ST's pointer
+  past its top ($9C) are one byte in the port: a new map kind, `index`,
+  turns the pointer into an entry number and back.
+- **angle_to_player's edges**: dx = 0 divides by zero, which EmuTOS's
+  vector 5 returns from with d1 unchanged, so the "quotient" is the
+  dividend's low word; dz = -32768 takes table B (the signed compare of
+  the neg.w values) and overflows there for small dx. The frozen capture
+  puts the player at a Juno cannon's x and at a fighter's with dz =
+  -32768, and checks both.
+
+The captures teleport the player (and set the level, the freeze, the
+docked flag, counts and types) with Hatari's `w` between steps; the
+rarest draws (a beam going out, 1 step in 2048) were made likely by
+turning 51 far objects into beams. A coverage run of the port's code
+(jsbeeb's instruction hook, every branch both ways) showed what each
+capture still missed. What
+the ST draws or prints from here, the enemies' laser lines and the
+mines' messages, isn't in the port yet: the logic runs in steps, the
+drawing in frames, and the two need a way to meet.

@@ -7,7 +7,9 @@ ST's is in tools/st_steps.py's regions.
 
     stmap.py SYMBOLS [OBJECTS.json]     the map, as JSON, to stdout
 
-A port address in &8000-&8FFF is ANDY's.
+A port address in &8000-&8FFF is ANDY's. Two declarations of one ST
+variable are refused, but for a deliberate copy, marked `also` after the
+kind.
 """
 import json
 import re
@@ -61,11 +63,21 @@ def variables(syms):
             if not m:
                 continue
             name, spec = m.group(1), m.group(2).split()
+            also = spec[-1] == "also"           # a second copy of the ST's, on purpose
+            if also:
+                spec = spec[:-1]
             if name not in syms:
                 raise SystemExit(f"{path}: {name} isn't in the build's symbols")
-            addr, kind, args = spec[0], spec[1], [int(x) for x in spec[2:]]
+            addr, kind = spec[0], spec[1]
             region, offset = st_place(addr)
-            e = {"name": name, "at": syms[name], "kind": kind, "region": region, "offset": offset}
+            e = {"name": name, "at": syms[name], "kind": kind, "region": region, "offset": offset, "also": also,
+                 "where": str(path.relative_to(SRC.parent))}
+            if kind == "index":
+                # (the array's own ST address, then its entries' size)
+                e["base"], e["stride"] = int(spec[2].lstrip("&"), 16), int(spec[3])
+                out.append(e)
+                continue
+            args = [int(x) for x in spec[2:]]
             if kind == "raw":
                 e["count"] = args[0]
             elif kind in ("wlo", "whi", "barr"):
@@ -75,6 +87,20 @@ def variables(syms):
             elif kind not in SIZES:
                 raise SystemExit(f"{path}: {name}: no such kind {kind}")
             out.append(e)
+    # One port variable for each of the ST's: two would each be put from the
+    # ST's state, and pass, while the code that writes one never feeds the
+    # code that reads the other. A word's low and high arrays share an
+    # address, and a copy marked `also` is one on purpose.
+    seen = {}
+    for e in out:
+        key = (e["region"], e["offset"], e["kind"] if e["kind"] in ("wlo", "whi") else "")
+        if e["also"]:
+            continue
+        if key in seen:
+            o = seen[key]
+            raise SystemExit(f"{e['where']}: {e['name']} is the ST's variable {o['where']} declares as {o['name']}: "
+                             "keep one (or mark a deliberate copy `also`)")
+        seen[key] = e
     return out
 
 

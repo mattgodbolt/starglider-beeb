@@ -1,0 +1,32 @@
+# The object handlers' homing missiles and a launch refused while docked.
+# The enemies frozen ($2C7 cleared) and the level variable $296 at 3; the
+# player high (y -1790) and the enemy missiles in slots 0-3 made homing
+# (their type 25), which climb after the player until they go off above
+# -1700. Then the player still by a Juno cannon, whose launches the
+# freeze refuses while the missiles' slots come free, and docked ($2CA
+# set), which refuses them first. On the keys. (The capture slows Hatari
+# to about a quarter of real time.)
+wait 38
+key 57
+wait 3
+debug parse {arm}
+debug w b $5c1c7 0
+debug w w $5c196 3
+debug echo \nSEG homing\n
+debug w w $5c030 $f902
+debug w w $5d19a $19
+debug w w $5d1da $19
+debug w w $5d21a $19
+debug w w $5d25a $19
+wait 16
+debug echo \nSEG juno\n
+# Juno cannon 47 (x &8540, z &5200), 3,072 ahead
+debug w w $12206 0
+debug w w $5c02e $8540 $ffd0 $4600
+debug w w $5c03c 0
+wait 16
+debug echo \nSEG docked\n
+debug w b $5c1ca $ff
+wait 20
+debug echo \nSEG end\n
+quit

@@ -1,8 +1,721 @@
 \ ***************************************************************************
 \ STARGLIDER for the BBC Master - the object handlers (the ST's &07A54)
 \
-\ To be transcribed exactly (docs/research/st-logic.md, "The object handlers, first half and second half").
+\ Each slot the level uses, in order: an exploding object's countdown, its
+\ slot pushed on the free stack at the end; any other object's handler by
+\ its type, through the ST's table (&08252, which tools/mkhandlers.py
+\ reads). Exactly the ST's (docs/research/st-logic.md, "The object
+\ handlers"): each compare the N flag of a wrapped difference where the
+\ ST's is, each heading's add unmasked where the ST's is, each random
+\ number the ST's draws. rng_d0 follows the ST's d0 through every
+\ handler, as a mine's random8 adds whatever the slots before it left.
+\
+\ In the world's bank, for the sine table; ANDY paged. X is the slot; a
+\ handler may take Y, and after any call reloads X from h_slot. What the
+\ ST draws or prints here (the enemies' laser lines, the mines' warnings)
+\ is the drawing's, and isn't here.
 \ ***************************************************************************
 
+ZA_AUTO1 h_slot             ; the slot being handled
+ZA_AUTO2 h_vec              ; its handler
+ZA_AUTO2 h_bear             ; angle_to_player's bearing (the ST's d1)
+ZA_AUTO2 h_t                ; a word's working
+
+\ HADDX lo, hi, n: the word at lo,X and hi,X plus the constant n.
+MACRO HADDX lo, hi, n
+    LDA lo,X : CLC : ADC #LO(n) : STA lo,X
+    LDA hi,X : ADC #HI(n) : STA hi,X
+ENDMACRO
+
+\ HDECX lo, hi: the word at lo,X and hi,X less 1.
+MACRO HDECX lo, hi
+    LDA lo,X : BNE low
+    DEC hi,X
+.low
+    DEC lo,X
+ENDMACRO
+
+\ HASR4 v: the word v four bits right, as asr.w #4.
+MACRO HASR4 v
+    ASRW v : ASRW v : ASRW v : ASRW v
+ENDMACRO
+
 .object_handlers
+{
+    LDX #0
+    LDA n_slots : BEQ done
+.each
+    LDA ob_exploding,X : BNE exploding
+    LDA ob_type,X : BEQ next
+    STX h_slot
+    TAY
+    LDA handler_lo,Y : STA h_vec
+    LDA handler_hi,Y : STA h_vec+1
+    JSR dispatch
+    LDX h_slot
+.next
+    STZ homing                  ; (a handler's request, for its own launch)
+    INX : CPX n_slots : BNE each
+.done
     RTS
+.exploding
+    \ frames 0-31, then the slot is freed (beq on &1F: equality)
+    LDA ob_explosion,X : CMP #&1F : BEQ free
+    INC ob_explosion,X
+    BRA next
+.free
+    STZ ob_exploding,X : STZ ob_explosion,X : STZ ob_type,X
+    TXA : LDY free_n : STA free_stack,Y
+    INC free_n
+    BRA next
+.dispatch
+    JMP (h_vec)
+    ZA_CANJUMP HANDLERS
+}
+
+\ The types that do nothing (and the loop's tail, on the ST).
+.h_none
+    RTS
+
+\ h_gameover (&0834A, types 28-30): the ST bumps colour 0's hardware
+\ register, which is the drawing's. No code makes these types.
+.h_gameover
+    RTS
+
+\ h_move: on by the velocity, in x and z.
+.h_move
+    LDA ob_x_lo,X : CLC : ADC ob_vx_lo,X : STA ob_x_lo,X
+    LDA ob_x_hi,X : ADC ob_vx_hi,X : STA ob_x_hi,X
+    LDA ob_z_lo,X : CLC : ADC ob_vz_lo,X : STA ob_z_lo,X
+    LDA ob_z_hi,X : ADC ob_vz_hi,X : STA ob_z_hi,X
+    RTS
+
+\ ---------------------------------------------------------------------------
+\ h_silo (&07AAE): it turns, and counts &7D0 down to -1 (bpl: 0 still
+\ counts) to a missile: +14's byte, the word's high byte here.
+.h_silo
+{
+    HADDX ob_heading_lo, ob_heading_hi, &10
+    HDECX ob_timer_b_lo, ob_timer_b_hi
+    LDA ob_timer_b_hi,X : BPL done
+    LDA #LO(&7D0) : STA ob_timer_b_lo,X
+    LDA #HI(&7D0) : STA ob_timer_b_hi,X
+    LDA #&FF : STA ob_timer_a_hi,X
+.done
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ h_mine (&07AC6): drawn and within &800 ahead (the N flags of z - &F800
+\ and z - &800, each constant's low byte 0) it warns or goes off; then it
+\ spins and bobs, the pyramid (type 2 alone) turning back at each end of
+\ its bob, the others pitching on to a half turn first.
+.h_mine
+{
+    LDA ob_drawn,X : BEQ motion
+    LDA ob_cz_hi,X : CMP #&F8 : BMI motion
+    CMP #&08 : BPL motion
+    JSR mine_near
+    LDX h_slot
+.motion
+    LDA ob_heading_lo,X : SEC : SBC #&40 : STA ob_heading_lo,X
+    BCS spun
+    DEC ob_heading_hi,X
+.spun
+    LDA ob_timer_b_lo,X : STA rng_d0 : CLC : ADC ob_y_lo,X : STA ob_y_lo,X
+    LDA ob_timer_b_hi,X : STA rng_d0+1 : ADC ob_y_hi,X : STA ob_y_hi,X
+    LDA ob_timer_a_lo,X : ORA ob_timer_a_hi,X : BEQ still
+    HDECX ob_timer_a_lo, ob_timer_a_hi
+    LDA ob_timer_a_lo,X : ORA ob_timer_a_hi,X : BNE done
+    LDA ob_type,X : CMP #2 : BEQ reverse
+.pitch
+    HADDX ob_pitch_lo, ob_pitch_hi, &40
+.done
+    RTS
+.still
+    \ at the bob's end: pitching on while the pitch isn't a half turn
+    LDA ob_pitch_lo,X : STA rng_d0
+    LDA ob_pitch_hi,X : AND #&07 : STA rng_d0+1
+    ORA rng_d0 : BNE pitch
+.reverse
+    LDA ob_timer_c_lo,X : STA ob_timer_a_lo,X
+    LDA ob_timer_c_hi,X : STA ob_timer_a_hi,X
+    LDA #0 : SEC : SBC ob_timer_b_lo,X : STA ob_timer_b_lo,X
+    LDA #0 : SBC ob_timer_b_hi,X : STA ob_timer_b_hi,X
+    RTS
+}
+
+\ mine_near (&07B28): not while "LEVEL n" shows or docked. Within &600
+\ (z - &600's N flag) it goes off: in the missile view the player's
+\ missile has hit it and the view ends; otherwise a jolt to the roll, the
+\ shields' loss and a flash. Further, the ST prints its warning (the
+\ drawing's). The ST keeps its registers round all of it, so rng_d0 here
+\ is only random8's input.
+.mine_near
+{
+    ZA_AUTO2 jolted
+    LDA level_msg : ORA level_msg+1 : BNE done
+    LDA docked : BNE done
+    LDA ob_cz_hi,X : CMP #&06 : BPL done
+    LDA #&FF : STA ob_exploding,X : STZ ob_explosion,X
+    LDA missile_view : BEQ hurt
+    LDA #&10 : STA m_life : STZ m_life+1
+    STZ m_iris : STZ m_iris+1
+.done
+    RTS
+.hurt
+    JSR random8
+    LDA rng_d0 : AND #&3E : SEC : SBC #&20 : STA jolted
+    LDA #0 : SBC #0 : STA jolted+1
+    ADDW jolt, jolted
+    LDA shields : SEC : SBC #LO(&3A98) : STA shields
+    LDA shields+1 : SBC #HI(&3A98) : STA shields+1
+    BCS shielded
+    STZ shields : STZ shields+1
+.shielded
+    LDA #1 : LDX #1
+    JSR sfx_start
+    LDA #LO(&333) : STA flash0 : LDA #HI(&333) : STA flash0+1
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ near_test (&07C0A, &080E0): C set if near: dx - &3E8's N flag set and
+\ dx - &FC18's clear; or both set and dz between the same two. The z test
+\ runs only when dx < -1000, as the ST's does.
+.near_test
+{
+    ZA_AUTO2 d
+    LDA ob_x_lo,X : SEC : SBC pl_x : STA d
+    LDA ob_x_hi,X : SBC pl_x+1 : STA d+1
+    LDA d : CMP #LO(&3E8) : LDA d+1 : SBC #HI(&3E8) : BPL far
+    LDA d : CMP #LO(&FC18) : LDA d+1 : SBC #HI(&FC18) : BPL near
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA d
+    LDA ob_z_hi,X : SBC pl_z+1 : STA d+1
+    LDA d : CMP #LO(&3E8) : LDA d+1 : SBC #HI(&3E8) : BPL far
+    LDA d : CMP #LO(&FC18) : LDA d+1 : SBC #HI(&FC18) : BMI far
+.near
+    SEC
+    RTS
+.far
+    CLC
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ h_fighter (&07BF4): on unless frozen; then, near, StarGlider One (27
+\ alone) fires 1 in 64, else turns 3 in 4 or asks for a homing missile;
+\ the others fire 1 in 128, else aim 1 in 8 or turn; far, any fires 1 in
+\ 128, else turns 1 in 32 or aims 1 in 16, else nothing. Each test is on
+\ the one number (frozen fighters still turn and fire).
+.h_fighter
+{
+    LDA enemies_active : BEQ moved
+    JSR h_move
+.moved
+    JSR near_test : BCC far
+    LDA ob_type,X : CMP #27 : BNE near
+    JSR random32
+    LDA rng_d0 : AND #&3F : BEQ laser
+    AND #3 : BNE turn
+    LDA #&FF : STA homing
+.to_aim
+    JMP aim
+.near
+    JSR random32
+    LDA rng_d0 : AND #&7F : BEQ laser
+    AND #7 : BEQ to_aim
+.turn
+    JMP turn_to_player
+.far
+    JSR random32
+    LDA rng_d0 : AND #&7F : BEQ laser
+    LDA rng_d0 : AND #&1F : BEQ turn
+    AND #&0F : BEQ to_aim
+    RTS
+.laser
+    JMP enemy_laser
+}
+
+\ aim (&07C98): the bearing, and a missile if the heading is near it.
+.aim
+    JSR angle_to_player
+    LDX h_slot
+    LDA h_bear+1 : AND #&0F : STA h_bear+1
+    \ (on into try_missile)
+
+\ try_missile (&07EDC): a missile if |h_bear - heading & &FFF| < &50,
+\ with no wrap at 0.
+.try_missile
+{
+    LDA ob_heading_lo,X : STA rng_d0
+    LDA ob_heading_hi,X : AND #&0F : STA rng_d0+1
+    LDA h_bear : SEC : SBC rng_d0 : STA h_t
+    LDA h_bear+1 : SBC rng_d0+1 : STA h_t+1
+    BPL apart
+    NEGW h_t
+.apart
+    LDA h_t : CMP #&50 : LDA h_t+1 : SBC #0 : BMI launch
+    RTS
+}
+
+\ launch (&07EF2): a missile from the free stack, if there is one, the
+\ launcher is near, the player isn't docked and the enemies aren't frozen.
+\ Type 25 if a homing one was asked for, but never on level 1, else 24. It
+\ takes the launcher's place and angles, its gun's height, its heading
+\ turned half round for the types &08354 marks, the level's speed and
+\ life. What it doesn't set, the slot keeps from the object it last held.
+.launch
+{
+    ZA_AUTO1 kind, new
+    LDA free_n : BEQ done
+    LDA ob_near,X : BEQ done
+    LDA docked : BNE done
+    LDA enemies_active : BNE go
+.done
+    RTS
+.go
+    DEC free_n
+    LDY free_n : LDA free_stack,Y : STA new : TAY
+    LDA ob_type,X : STA kind
+    ASL A : STA rng_d0 : STZ rng_d0+1           ; (the ST's d0: the type * 2)
+    LDA homing : BEQ plain
+    LDA level+1 : BNE homes
+    LDA level : CMP #1 : BEQ plain
+.homes
+    LDA #25 : BRA typed
+.plain
+    LDA #24
+.typed
+    STA ob_type,Y
+    LDA #1 : STA ob_flags,Y
+    LDA ob_x_lo,X : STA ob_x_lo,Y : LDA ob_x_hi,X : STA ob_x_hi,Y
+    LDA ob_z_lo,X : STA ob_z_lo,Y : LDA ob_z_hi,X : STA ob_z_hi,Y
+    LDA ob_pitch_lo,X : STA ob_pitch_lo,Y : LDA ob_pitch_hi,X : STA ob_pitch_hi,Y
+    LDA ob_roll_lo,X : STA ob_roll_lo,Y : LDA ob_roll_hi,X : STA ob_roll_hi,Y
+    LDA ob_y_lo,X : STA h_t : LDA ob_y_hi,X : STA h_t+1
+    LDA ob_heading_lo,X : STA ob_heading_lo,Y
+    LDA ob_heading_hi,X
+    LDX kind
+    SEC : SBC missile_flip,X : AND #&0F : STA ob_heading_hi,Y
+    LDA h_t : CLC : ADC gun_y_lo,X : STA ob_y_lo,Y
+    LDA h_t+1 : ADC gun_y_hi,X : STA ob_y_hi,Y
+    LDX level
+    LDA missile_speed_lo,X : STA ob_speed_lo,Y
+    LDA missile_speed_hi,X : STA ob_speed_hi,Y
+    LDA missile_life,X : STA ob_timer_a_lo,Y
+    LDA #0 : STA ob_timer_a_hi,Y
+    STA ob_hits_lo,Y : STA ob_hits_hi,Y
+    LDX new
+    JSR set_velocity
+    LDX h_slot
+    RTS
+}
+
+\ turn_to_player (&07D2A): a sixteenth of the way round to the bearing.
+.turn_to_player
+    JSR angle_to_player
+    LDX h_slot
+    LDA h_bear+1 : AND #&0F : STA h_bear+1
+    \ (on into turn_step)
+
+\ turn_step (&07D32): the heading masked (and kept so), then turned by
+\ (h_bear - it) asr 4, which floors and never takes the short way across
+\ 0; then the velocity. rng_d0 is the masked heading, as the ST's d0.
+.turn_step
+    JSR turn_by
+    \ (on into set_velocity)
+
+\ set_velocity (&07D46): the velocity by the heading and speed, as the
+\ 68000's muls, asl.l #1, swap: vx = -(floor(speed sin / 32768)), vz =
+\ floor(speed cos / 32768), vy 0 (the map's zero). Its sine and cosine
+\ are left in trig_sin and trig_cos, as the ST leaves them.
+.set_velocity
+{
+    ZA_AUTO1 at
+    STX at
+    LDA ob_heading_lo,X : STA m_idx
+    LDA ob_heading_hi,X : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+    LDX at
+    LDA ob_speed_lo,X : STA mul_x : LDA ob_speed_hi,X : STA mul_x+1
+    MOVW mul_y, trig_sin
+    JSR fmul15
+    LDX at
+    LDA #0 : SEC : SBC mul_r : STA ob_vx_lo,X
+    LDA #0 : SBC mul_r+1 : STA ob_vx_hi,X
+    LDA ob_speed_lo,X : STA mul_x : LDA ob_speed_hi,X : STA mul_x+1
+    MOVW mul_y, trig_cos
+    JSR fmul15
+    LDX at
+    LDA mul_r : STA ob_vz_lo,X : LDA mul_r+1 : STA ob_vz_hi,X
+    RTS
+}
+
+\ turn_by: the heading = h0 + (h_bear - h0) asr 4, h0 the heading masked
+\ (kept in the heading and rng_d0).
+.turn_by
+    LDA ob_heading_lo,X : STA rng_d0
+    LDA ob_heading_hi,X : AND #&0F : STA rng_d0+1
+    LDA h_bear : SEC : SBC rng_d0 : STA h_t
+    LDA h_bear+1 : SBC rng_d0+1 : STA h_t+1
+    HASR4 h_t
+    LDA rng_d0 : CLC : ADC h_t : STA ob_heading_lo,X
+    LDA rng_d0+1 : ADC h_t+1 : STA ob_heading_hi,X
+    RTS
+
+\ ---------------------------------------------------------------------------
+\ h_wanderer (&07CA4): nothing while frozen; on, and 1 in 64 it turns by
+\ -16 to 15 (a second number), else 1 in 16 of the rest it fires.
+.h_wanderer
+{
+    LDA enemies_active : BEQ done
+    JSR h_move
+    JSR random32
+    STZ rng_d0+1
+    LDA rng_d0 : AND #&3F : STA rng_d0 : BEQ turn
+    AND #&0F : STA rng_d0 : BEQ laser
+.done
+    RTS
+.laser
+    JMP enemy_laser
+.turn
+    JSR random32
+    LDA rng_d0 : AND #&1F : SEC : SBC #&10 : STA rng_d0
+    LDA #0 : SBC #0 : STA rng_d0+1
+    LDA ob_heading_lo,X : CLC : ADC rng_d0 : STA ob_heading_lo,X
+    LDA ob_heading_hi,X : ADC rng_d0+1 : STA ob_heading_hi,X
+    JMP set_velocity
+}
+
+\ ---------------------------------------------------------------------------
+\ h_neutron (&07D8E): on, an eighth of the way to the player's height (the
+\ wrapped difference, asr), spinning, until its life is out (ble on the
+\ count less 1). It doesn't heed the freeze.
+.h_neutron
+{
+    JSR h_move
+    LDA pl_y : SEC : SBC ob_y_lo,X : STA rng_d0
+    LDA pl_y+1 : SBC ob_y_hi,X : STA rng_d0+1
+    ASRW rng_d0 : ASRW rng_d0 : ASRW rng_d0
+    JSR climb_spin
+    JSR life : BCS missile_explode
+    RTS
+}
+
+\ climb_spin: the height on by rng_d0, the roll by &40.
+.climb_spin
+    LDA ob_y_lo,X : CLC : ADC rng_d0 : STA ob_y_lo,X
+    LDA ob_y_hi,X : ADC rng_d0+1 : STA ob_y_hi,X
+    HADDX ob_roll_lo, ob_roll_hi, &40
+    RTS
+
+\ life: the count at +14 less 1; C set if subq.w #1 then ble would take
+\ the branch, which is when the count was 1 or less (its overflow at
+\ -32768 included).
+.life
+{
+    LDA ob_timer_a_hi,X : BMI out
+    BNE living
+    LDA ob_timer_a_lo,X : CMP #2 : BCC out
+.living
+    HDECX ob_timer_a_lo, ob_timer_a_hi
+    CLC
+    RTS
+.out
+    HDECX ob_timer_a_lo, ob_timer_a_hi
+    SEC
+    RTS
+}
+
+\ missile_explode (&07DBC): set off, unless it already is.
+.missile_explode
+{
+    LDA ob_exploding,X : BNE done
+    LDA #&FF : STA ob_exploding,X : STZ ob_explosion,X
+.done
+    RTS
+}
+
+\ h_homing (&07DD2): as the neutron missile, a quarter of the way to the
+\ player's height, and off too above -1700 (y - &F95C's N flag); then it
+\ faces the player again, heading half round from the bearing.
+.h_homing
+{
+    JSR h_move
+    LDA pl_y : SEC : SBC ob_y_lo,X : STA rng_d0
+    LDA pl_y+1 : SBC ob_y_hi,X : STA rng_d0+1
+    ASRW rng_d0 : ASRW rng_d0
+    JSR climb_spin
+    JSR life : BCS missile_explode
+    LDA ob_y_lo,X : CMP #LO(&F95C) : LDA ob_y_hi,X : SBC #HI(&F95C) : BMI missile_explode
+    JSR angle_to_player
+    LDX h_slot
+    LDA h_bear : STA ob_heading_lo,X
+    LDA h_bear+1 : SEC : SBC #&08 : AND #&0F : STA ob_heading_hi,X
+    JMP set_velocity
+}
+
+\ ---------------------------------------------------------------------------
+\ enemy_laser (&07E18): if it's drawn and the player is neither docked nor
+\ in the missile view, the shields lose 100 on level 1, else the type's
+\ (the same for all). At camera z 0 that's all; otherwise the line to
+\ the view's bottom edge (the drawing's) takes a random number for its
+\ end, and there's a flash, a sound and a hit counted.
+.enemy_laser
+{
+    ZA_AUTO2 damage
+    LDA ob_drawn,X : BEQ done
+    LDA docked : BNE done
+    LDA missile_view : BNE done
+    LDA ob_type,X : ASL A : STA rng_d0 : STZ rng_d0+1
+    LDA #LO(LASER_DAMAGE) : STA damage : LDA #HI(LASER_DAMAGE) : STA damage+1
+    LDA level+1 : BNE hurt
+    LDA level : CMP #1 : BNE hurt
+    LDA #100 : STA damage : STZ damage+1
+.hurt
+    LDA shields : SEC : SBC damage : STA shields
+    LDA shields+1 : SBC damage+1 : STA shields+1
+    BCS shielded
+    STZ shields : STZ shields+1
+.shielded
+    LDA ob_cz_lo,X : ORA ob_cz_hi,X : BEQ done
+    JSR random32
+    LDA #LO(&20) : STA flash0 : LDA #HI(&20) : STA flash0+1
+    LDA #0 : LDX #1
+    JSR sfx_start
+    STZ rng_d0 : STZ rng_d0+1
+    INC hits_taken : BNE done
+    INC hits_taken+1 : BNE done
+    INC hits_taken+2 : BNE done
+    INC hits_taken+3
+.done
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ h_tank (&080D8): nothing while frozen. Near, one number: 1 in 128 it
+\ asks for a homing missile, and 1 in 4 it aims, else it turns. Far, it
+\ turns on the spot by &20 a step to the next quarter, then drives for 100
+\ steps, aiming 1 in 16 of them.
+.h_tank
+{
+    LDA enemies_active : BNE on
+.done
+    RTS
+.on
+    JSR near_test : BCC far
+    JSR random32
+    STZ rng_d0+1
+    LDA rng_d0 : AND #&7F : STA rng_d0 : BNE asked
+    LDA #&FF : STA homing
+.asked
+    LDA rng_d0 : AND #3 : STA rng_d0 : BEQ to_aim
+    JSR angle_to_player
+    LDX h_slot
+    LDA h_bear+1 : AND #&0F : STA h_bear+1
+    JMP turn_step
+.to_aim
+    JMP aim
+.far
+    LDA ob_timer_b_lo,X : ORA ob_timer_b_hi,X : BNE drive
+    HADDX ob_heading_lo, ob_heading_hi, &20
+    LDA ob_heading_lo,X : STA rng_d0
+    LDA ob_heading_hi,X : AND #&03 : STA rng_d0+1
+    ORA rng_d0 : BNE turned
+    LDA #100 : STA ob_timer_b_lo,X : STZ ob_timer_b_hi,X
+.turned
+    JMP set_velocity
+.drive
+    JSR h_move
+    HDECX ob_timer_b_lo, ob_timer_b_hi
+    JSR random32
+    STZ rng_d0+1
+    LDA rng_d0 : AND #&0F : STA rng_d0 : BEQ to_aim
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ h_juno (&08174): near, 1 in 8 a missile (never homing: nothing asks),
+\ unaligned; else a sixteenth of the way round to face half round from
+\ the bearing. Its freeze is the launch's alone.
+.h_juno
+{
+    LDA ob_near,X : BEQ done
+    JSR random32
+    STZ rng_d0+1
+    LDA rng_d0 : AND #7 : STA rng_d0 : BEQ launch_now
+    JSR angle_to_player
+    LDX h_slot
+    LDA h_bear+1 : SEC : SBC #&08 : AND #&0F : STA h_bear+1
+    JSR turn_by
+    LDA ob_heading_lo,X : STA rng_d0                ; (the ST's d0: the heading)
+    LDA ob_heading_hi,X : STA rng_d0+1
+.done
+    RTS
+.launch_now
+    JMP launch
+}
+
+\ h_pyramid (&081AA): near and not on level 1, it spins, and 1 in 16 asks
+\ for a homing missile, unaligned.
+.h_pyramid
+{
+    LDA ob_near,X : BEQ done
+    LDA level+1 : BNE spin
+    LDA level : CMP #1 : BEQ done
+.spin
+    LDA ob_heading_lo,X : SEC : SBC #&40 : STA ob_heading_lo,X
+    BCS spun
+    DEC ob_heading_hi,X
+.spun
+    JSR random32
+    STZ rng_d0+1
+    LDA rng_d0 : AND #&0F : STA rng_d0 : BNE done
+    LDA #&FF : STA homing
+    JMP launch
+.done
+    RTS
+}
+
+\ h_old_pyramid (&081D6, type 57 alone, which no code makes): near, it
+\ spins, and 1 in 8 aims as the tri-launcher does.
+.h_old_pyramid
+{
+    LDA ob_near,X : BEQ done
+    LDA ob_heading_lo,X : SEC : SBC #&40 : STA ob_heading_lo,X
+    BCS spun
+    DEC ob_heading_hi,X
+.spun
+    JSR random32
+    STZ rng_d0+1
+    LDA rng_d0 : AND #7 : STA rng_d0 : BEQ to_aim
+.done
+    RTS
+.to_aim
+    JMP h_tri.aim
+}
+
+\ h_tri (&081F4): near, it spins; and while the player carries a missile
+\ it aims, its missiles heading half round from the bearing.
+.h_tri
+{
+    LDA ob_near,X : BEQ done
+    LDA ob_heading_lo,X : SEC : SBC #&60 : STA ob_heading_lo,X
+    BCS aim
+    DEC ob_heading_hi,X
+.aim
+    LDA missiles : ORA missiles+1 : BEQ done
+    JSR angle_to_player
+    LDX h_slot
+    LDA h_bear+1 : SEC : SBC #&08 : AND #&0F : STA h_bear+1
+    JMP try_missile
+.done
+    RTS
+}
+
+\ h_type3 (&0821A): drawn, it fires 1 in 32, frozen or not.
+.h_type3
+{
+    LDA ob_drawn,X : BEQ done
+    JSR random32
+    STZ rng_d0+1
+    LDA rng_d0 : AND #&1F : STA rng_d0 : BEQ laser
+.done
+    RTS
+.laser
+    JMP enemy_laser
+}
+
+\ h_beam (&08232): from level 3 (level - 3's N flag), wherever it is, 1 in
+\ 2048 it goes out: its type 0, its slot not freed.
+.h_beam
+{
+    LDA level : CMP #3 : LDA level+1 : SBC #0 : BMI done
+    JSR random32
+    LDA rng_d0+1 : AND #&07 : STA rng_d0+1
+    ORA rng_d0 : BNE done
+    STZ ob_type,X
+.done
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ angle_to_player (&08390): h_bear = the ST's bearing from the player to
+\ the object, T - base: base &C00 for dx >= 0, &400 for dx < 0, and T from
+\ table A by dz / dx when |dz| >= |dx| (the signed compare of the neg.w
+\ values, so -32768 stays least), else table B by (dz << 8) / dx; each
+\ quotient clamped by the N flags of q - &FF and q - &FF01, then the
+\ table's entry (q + &FF) & &1FF (one below its centre, as the ST's).
+\ divs by 0 (EmuTOS's vector 5 is an rte) or overflowing leaves the
+\ dividend, whose low word is then q. rng_d0 is dx, as the ST's d0.
+.angle_to_player
+{
+    ZA_AUTO2 dx, dz, adx, adz, q, m, p, tab
+    ZA_AUTO1 base, top, bottom, neg
+    LDA ob_x_lo,X : SEC : SBC pl_x : STA dx : STA rng_d0
+    LDA ob_x_hi,X : SBC pl_x+1 : STA dx+1 : STA rng_d0+1
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA dz
+    LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
+    LDA #HI(&C00) : LDY dx+1 : BPL based
+    LDA #HI(&400)
+.based
+    STA base
+    MOVW adx, dx : LDA adx+1 : BPL dx_pos
+    NEGW adx
+.dx_pos
+    MOVW adz, dz : LDA adz+1 : BPL dz_pos
+    NEGW adz
+.dz_pos
+    \ the dividend: ext.l dz, or for table B, that << 8
+    LDA dz+1 : AND #&80 : BEQ ext
+    LDA #&FF
+.ext
+    STA mul_p+3 : STA mul_p+2
+    CMPS16 adz, adx : BMI path_b
+    MOVW mul_p, dz
+    LDA #LO(atan_a) : STA tab : LDA #HI(atan_a) : STA tab+1
+    LDA #HI(&400) : STA top : LDA #HI(&FC00) : STA bottom
+    BRA divide
+.path_b
+    LDA dz+1 : STA mul_p+2
+    LDA dz : STA mul_p+1 : STZ mul_p
+    LDA #LO(atan_b) : STA tab : LDA #HI(atan_b) : STA tab+1
+    LDA #HI(&200) : STA top : LDA #HI(&FE00) : STA bottom
+.divide
+    MOVW q, mul_p
+    LDA dx : ORA dx+1 : BEQ clamp
+    MOVW div_d, dx
+    JSR sdiv32 : BCS clamp
+    MOVW q, div_q
+.clamp
+    \ the clamps' constants have low bytes 0; T's low byte is then 0
+    LDA q : CMP #&FF : LDA q+1 : SBC #0 : BPL clamp_top
+    LDA q : CMP #&01 : LDA q+1 : SBC #&FF : BPL lookup
+    LDA bottom : BRA clamped
+.clamp_top
+    LDA top
+.clamped
+    STA h_bear+1 : STZ h_bear
+    BRA based_off
+.lookup
+    \ the entry q + &FF is 256 + (q - 1): kept as its upper half H, the
+    \ lower negated (tools/mkhandlers.py)
+    LDA q : SEC : SBC #1 : STA m
+    LDA q+1 : SBC #0 : STA m+1 : STA neg
+    BPL m_pos
+    NEGW m
+.m_pos
+    LDA m : ASL A : STA p : LDA m+1 : ROL A : STA p+1
+    ADDW p, tab
+    LDY #0 : LDA (p),Y : STA h_bear
+    INY : LDA (p),Y : STA h_bear+1
+    LDA neg : BPL based_off
+    NEGW h_bear
+.based_off
+    LDA h_bear+1 : SEC : SBC base : STA h_bear+1
+    RTS
+}
+
+INCLUDE "../../build/gen/handlers.6502"

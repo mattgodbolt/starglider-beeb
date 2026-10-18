@@ -9,7 +9,9 @@
 \ its low byte), long, raw N (N bytes as they are), slot (the ST's pointer
 \ to an object record, kept as the slot: &FF for none), or for an array
 \ wlo N S / whi N S / barr N S (N words' low or high bytes, or N bytes, S
-\ bytes apart on the ST) or slots N (N record pointers, kept as slots). tools/stmap.py reads them, and the harness
+\ bytes apart on the ST) or slots N (N record pointers, kept as slots), or
+\ index A S (the ST's pointer into its array at A of S-byte entries, kept
+\ as the entry's number). tools/stmap.py reads them, and the harness
 \ translates the ST's state into the port's and back by them
 \ (tools/logicrun.mjs). Variables declared elsewhere carry the same braces
 \ (the player, in zp.6502).
@@ -36,7 +38,6 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .key_latch    SKIP 1        ; {ST P&01852 byte} 0 for none
     \ what the keys and commands (logic/keys.6502) keep that the panel,
     \ the drawing or the sound read
-.missiles     SKIP 1        ; {ST $278(a6) word8} 0-2
 .m_iris       SKIP 2        ; {ST $27C(a6) word} the missile view's opening and closing
 .sound_on     SKIP 1        ; {ST $2CB(a6) byte} Q's and S's
 .cheat_mode   SKIP 1        ; {ST $2CD(a6) byte}
@@ -44,6 +45,13 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .shields      SKIP 2        ; {ST $260(a6) word}
 .laser_energy SKIP 2        ; {ST $28A(a6) word}
 .world_vec    SKIP 2        ; world_call's routine (logic/arith.6502)
+    \ the game's state the handlers (logic/handlers.6502) read and write,
+    \ which the panel and the drawing show
+.level        SKIP 2        ; {ST $296(a6) word} from 1
+.level_msg    SKIP 2        ; {ST $298(a6) word} the steps "LEVEL n" has left
+.missiles     SKIP 2        ; {ST $278(a6) word} the player's
+.flash0       SKIP 2        ; {ST $242(a6) word} this step's flash of colour 0 (0 none)
+.hits_taken   SKIP 4        ; {ST $0C4(a6) long} the enemies' laser hits, for the rating
 .logic_work_end
 ENDSECTION
 
@@ -51,7 +59,7 @@ ENDSECTION
 \ lists number them: list &0D6CE drives shapes 1 and 10.
 anim_s7  = anim_frame + 7           ; {ST P&0C17E word8}
 anim_s1  = anim_frame + 1           ; {ST P&0D6CE word8}
-anim_s10 = anim_frame + 10          ; {ST P&0D6CE word8}
+anim_s10 = anim_frame + 10          ; {ST P&0D6CE word8 also}
 anim_s15 = anim_frame + 15          ; {ST P&0FD4C word8}
 anim_s11 = anim_frame + 11          ; {ST P&0D99C word8}
 anim_s18 = anim_frame + 18          ; {ST P&10768 word8}
@@ -112,6 +120,10 @@ SECTION LogicAndy, org = ANDY_OBJECTS_END, guard = ANDY_TOP, virtual = TRUE
 .docked_silo  SKIP 1        ; {ST $0A8(a6) slot} the silo docked with
 
     \ the object handlers (logic/handlers.6502)
+.free_stack   SKIP SLOTS    ; {ST &94C slots 140} the free slots, the last freed on top
+.free_n       SKIP 1        ; {ST $25C(a6) word8} how many
+free_top = free_n           ; {ST $09C(a6) index &94C 4} (the ST's pointer past the top)
+.homing       SKIP 1        ; {ST $2D6(a6) byte} non-zero: this handler's launch is homing
 
     \ collisions, docking, refuelling and the laser (logic/collide.6502)
 

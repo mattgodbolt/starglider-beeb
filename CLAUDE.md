@@ -60,7 +60,9 @@ make venv       # .venv (uv sync): SkoolKit, Capstone, Pillow, NumPy
 ```
 
 The build makes the shapes and per-type tables from the ST's STAR.PRG
-(`tools/mkshapes.py`) and generates the line drawer, the camera rotation
+(`tools/mkshapes.py`), and the object handlers' tables (the handler by
+type, the arctan tables, the missiles' by type and level:
+`tools/mkhandlers.py`), and generates the line drawer, the camera rotation
 and the vertex transforms (`tools/mkline.py`, `mkrotate.py`,
 `mkxform.py`) into `build/gen/`; baron computes the sine table
 (`src/sine.6502`) and the multiply and reciprocal tables.
