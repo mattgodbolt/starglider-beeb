@@ -25,10 +25,9 @@ INCLUDE "../build/gen/shapes.6502"
 ENDSECTION
 
 \ The world's bank: the list phase, and the sine table its camera and the
-\ objects' matrices read.
+\ objects' matrices read (world.6502 includes it where it fits).
 SECTION WorldBank, org = &8000, filename = "WORLD", guard = &C000, cmos = TRUE
     EQUD 0, 0
 INCLUDE "world.6502"
 INCLUDE "../build/gen/rotate.6502"
-INCLUDE "sine.6502"
 ENDSECTION

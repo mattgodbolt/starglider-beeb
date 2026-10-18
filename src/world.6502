@@ -277,6 +277,11 @@ NEXT
     BRA next
 }
 
+\ The sine table starts at the bank's first 1K boundary, which the code so
+\ far stops short of: what follows it grows the bank byte by byte.
+INCLUDE "sine.6502"
+ASSERT sine_qlo = &8400
+
 \ ---------------------------------------------------------------------------
 \ WITHIN c, h, out: on to out unless -h <= c <= h, for a signed word c and
 \ a word h (or the constant #h) from 0 to 32767, where neither c + h (c
