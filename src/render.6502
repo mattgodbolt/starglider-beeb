@@ -958,19 +958,48 @@ ENDMACRO
 
 \ faces: each face's edges marked if it's visible: always-visible, or the
 \ camera on its outer side, n.c > 4K.
+\
+\ dot = 4K - n.c is made in two passes, by |c|'s high bytes then its low.
+\ The low pass changes dot by at most 127 (l_x + l_y + l_z), l being
+\ |c|'s low bytes, which is under 256 E (E = (l_x + l_y + l_z + 1) / 2):
+\ so with the high pass's top two bytes D, D >= E is a face not visible,
+\ and D + E < 0 one visible, without the low pass. That's tested only
+\ when D can't pass a word (|c| < 16384 on every axis) and |c| isn't
+\ under 512 on every axis, where it seldom settles a face.
 .faces
 {
     ZA_AUTO1 face_i, last
-    ZA_AUTO 3, nrm              ; the face's normal, x y z
-    ZA_AUTO 3, dot, pp
+    ZA_AUTO 3, nrm              ; the face's normal, x y z ...
+    ZA_AUTO 3, nmag             ; ... and its magnitudes
+    ZA_AUTO 3, dot
+    ZA_AUTO2 pp
+    ZA_AUTO2 epos, eneg         ; E, -E
     LDA sh_elists : STA mark_edge+1 : LDA sh_elists+1 : STA mark_edge+2
-    \ each axis's products by its |c| (faceterm.6502)
-    LDA objc_mag : STA fx.lo_a+1 : STA fx.lo_c+1 : EOR #&FF : STA fx.lo_b+1 : STA fx.lo_d+1
-    LDA objc_mag+1 : STA fx.hi_a+1 : STA fx.hi_c+1 : EOR #&FF : STA fx.hi_b+1 : STA fx.hi_d+1
-    LDA objc_mag+2 : STA fy.lo_a+1 : STA fy.lo_c+1 : EOR #&FF : STA fy.lo_b+1 : STA fy.lo_d+1
-    LDA objc_mag+3 : STA fy.hi_a+1 : STA fy.hi_c+1 : EOR #&FF : STA fy.hi_b+1 : STA fy.hi_d+1
-    LDA objc_mag+4 : STA fz.lo_a+1 : STA fz.lo_c+1 : EOR #&FF : STA fz.lo_b+1 : STA fz.lo_d+1
-    LDA objc_mag+5 : STA fz.hi_a+1 : STA fz.hi_c+1 : EOR #&FF : STA fz.hi_b+1 : STA fz.hi_d+1
+    \ each axis's products by its |c|'s bytes (faceterm.6502)
+    LDA objc_mag : STA fxl.lo_a+1 : STA fxl.lo_c+1 : EOR #&FF : STA fxl.lo_b+1 : STA fxl.lo_d+1
+    LDA objc_mag+1 : STA fxh.hi_a+1 : STA fxh.hi_c+1 : EOR #&FF : STA fxh.hi_b+1 : STA fxh.hi_d+1
+    LDA objc_mag+2 : STA fyl.lo_a+1 : STA fyl.lo_c+1 : EOR #&FF : STA fyl.lo_b+1 : STA fyl.lo_d+1
+    LDA objc_mag+3 : STA fyh.hi_a+1 : STA fyh.hi_c+1 : EOR #&FF : STA fyh.hi_b+1 : STA fyh.hi_d+1
+    LDA objc_mag+4 : STA fzl.lo_a+1 : STA fzl.lo_c+1 : EOR #&FF : STA fzl.lo_b+1 : STA fzl.lo_d+1
+    LDA objc_mag+5 : STA fzh.hi_a+1 : STA fzh.hi_c+1 : EOR #&FF : STA fzh.hi_b+1 : STA fzh.hi_d+1
+    \ the high pass to settle faces, or not
+    LDX #BRA_OP
+    LDA objc_mag+1 : ORA objc_mag+3 : ORA objc_mag+5
+    CMP #64 : BCS settling              ; some |c| >= 16384
+    CMP #2 : BCC settling               ; every |c| < 512
+    LDX #LDA_IMM
+    \ E = (l_x + l_y + l_z + 1) / 2
+    LDA objc_mag : SEC : ADC objc_mag+2 : STA epos
+    LDA #0 : ROL A : STA epos+1
+    LDA epos : CLC : ADC objc_mag+4 : STA epos
+    BCC e_sum
+    INC epos+1
+.e_sum
+    LSR epos+1 : ROR epos
+    LDA #0 : SEC : SBC epos : STA eneg
+    LDA #0 : SBC epos+1 : STA eneg+1
+.settling
+    STX settle_k
     LDA sh_nfaces : STA face_i
 .next
     LDY face_i : BNE test               ; the last first
@@ -1004,20 +1033,50 @@ ENDMACRO
     ASL A : ROL dot+1 : ROL dot+2
     ASL A : ROL dot+1 : ROL dot+2
     STA dot
-    \ each component's |n| |c| taken away, or added if n c is negative
-.fx
+    \ each component's |n| |c| taken away, or added if n c is negative:
+    \ by |c|'s high bytes ...
+.fxh
 {
-    AXIS = 0
+    AXIS = 0 : HIGH = TRUE
     INCLUDE "faceterm.6502"
 }
-.fy
+.fyh
 {
-    AXIS = 1
+    AXIS = 1 : HIGH = TRUE
     INCLUDE "faceterm.6502"
 }
-.fz
+.fzh
 {
-    AXIS = 2
+    AXIS = 2 : HIGH = TRUE
+    INCLUDE "faceterm.6502"
+}
+    \ ... settled by them, if they can (settle_k: LDA # to try, BRA not to)
+.settle_k
+    BRA low
+    ZA_CANJUMP low, settle
+.settle
+    LDA dot+1 : CLC : ADC eneg
+    LDA dot+2 : ADC eneg+1 : BMI not_out
+    JMP next                            ; D >= E
+.not_out
+    LDA dot+1 : CLC : ADC epos
+    LDA dot+2 : ADC epos+1 : BPL low
+    JMP visible                         ; D + E < 0
+.low
+    \ ... and by the low
+.fxl
+{
+    AXIS = 0 : HIGH = FALSE
+    INCLUDE "faceterm.6502"
+}
+.fyl
+{
+    AXIS = 1 : HIGH = FALSE
+    INCLUDE "faceterm.6502"
+}
+.fzl
+{
+    AXIS = 2 : HIGH = FALSE
     INCLUDE "faceterm.6502"
 }
     LDA dot+2 : BMI visible
