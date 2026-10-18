@@ -562,6 +562,8 @@ NEXT
 .scale_term
     LDA mat,X : ZA_INDEXEDBY 0..16
     STA u_lo
+    ORA mat+1,X : ZA_INDEXEDBY 0..16
+    BEQ scale_zero
     LDA mat+1,X : ZA_INDEXEDBY 0..16
     BPL scale_pos
     LDA #0 : SEC : SBC u_lo : STA u_lo
@@ -576,6 +578,12 @@ NEXT
     INC xf_amag+1,X : ZA_INDEXEDBY 0..16
 .scale_next
     INX : INX : CPX #18 : BNE scale_term
+    BRA scaled
+.scale_zero                                     ; (as the products would make it)
+    STZ xf_amag,X : ZA_INDEXEDBY 0..16
+    STZ xf_amag+1,X : ZA_INDEXEDBY 0..16
+    BRA scale_next
+.scaled
     \ and the signs, &00 or &80 (the transforms' setups widen them in place)
 FOR e = 0..8
     LDA mat + 2 * e + 1 : AND #&80 : STA xf_asign + e
