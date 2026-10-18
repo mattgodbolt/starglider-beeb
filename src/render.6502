@@ -352,6 +352,7 @@ OM_SIZE = 6 + 18
 {
     ZA_AUTO1 shape, nmove, nturn, row_i, u_lo, h0, l0, far
     ZA_AUTO2 fr, t16, hp
+    BANK BANK_SHAPES                    ; (type_shape's, and the header's)
     LDX otype
     LDA type_shape,X : CMP #SHAPES : BCC known
     RTS
@@ -365,7 +366,6 @@ OM_SIZE = 6 + 18
     \ every vertex, so the object draws nothing, and goes no further, not
     \ even to its matrix.
     TAX
-    BANK BANK_SHAPES
     LDA shape_lo,X : STA hp : LDA shape_hi,X : STA hp+1
     STZ far
     LDY #sh_radius - sh
