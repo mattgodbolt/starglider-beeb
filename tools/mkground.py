@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Generate the ground dots' rotation into camera space, for drawing
-(Baron source).
+"""Generate the ground dots' rotation into camera space, for ground_dots'
+decision and their drawing (Baron source).
 
     mkground.py > build/gen/ground.6502
 
@@ -14,16 +14,18 @@ as rotate_exact's are (tools/mkrotate.py): D = d + 32768, unsigned, and a
 table reads, so that floor(m d / 16384) is the high word of M D, plus
 -2m (and for m < 0, negated: the high word's ceiling).
 
-Only drawing reads them (decision 1), so each term takes M's high byte by
-D's, and the high bytes only of M's low byte by D's high and M's high by
-D's low, each read without the borrow from its low byte: the high word
-less the carries the dropped bytes would have made (0 to 2), and plus
-the borrows (0 or 1 each), which about cancel. A term is within 2 of the
-ST's, a coordinate within 4, and a dot then within a pixel when its
-offset is NEAR_D or more on x or z (view.6502, which rotates the nearer
-ones exactly, measures it: tools/viewrun.mjs). An entry of +-16384 (M =
-65536) takes M = &FFFF and 1 more in the constant. The sign of each term
-picks its add or subtract, patched.
+Each term takes M's high byte by D's, and the high bytes only of M's low
+byte by D's high and M's high by D's low, each read without the borrow
+from its low byte: the high word less the carries the dropped bytes would
+have made (0 to 2), and plus the borrows (0 or 1 each), which about
+cancel. A term is within 2 of the ST's (tools/groundcheck.py checks every
+m and d), a coordinate within 4: ground_dots decides by that bound, the
+exact rotation deciding only within it of the cone's edges, and a dot is
+drawn within a pixel by it when its offset is NEAR_D or more on x or z
+(view_under.6502, which rotates the nearer ones exactly, measures it:
+tools/viewrun.mjs). An entry of +-16384 (M = 65536) takes M = &FFFF and 1
+more in the constant. The sign of each term picks its add or subtract,
+patched.
 """
 
 out = []

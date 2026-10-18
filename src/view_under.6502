@@ -84,12 +84,13 @@ INCLUDE "../build/gen/sight.6502"
 \ that's inside the window (strictly, as the ST tests it), as the ST plots
 \ it (dot_put), in the ST's colour 2. A dot whose offset from the camera is
 \ under NEAR_D on both x and z is rotated exactly (rotate_exact, as the
-\ logic does) and projected by the drawing's projection (proj_z, proj_x).
-\ The rest are where they were, moved with the camera while its matrix
-\ holds (dot_kept), or else rotated by ground_x, ground_y and ground_z
-\ (build/gen/ground.6502), within a pixel, a row at a time, depth first,
-\ so that one outside the window in x needs no y; and they're projected by
-\ their own (far_x, far_y). In the missile view the camera is
+\ logic does, unless it did) and projected by the drawing's projection
+\ (proj_z, proj_x). The rest are where ground_dots rotated them, or where
+\ they were, moved with the camera while its matrix holds (dot_kept), or
+\ else rotated by ground_x, ground_y and ground_z (build/gen/ground.6502,
+\ which ground_dots made for this camera), within a pixel, a row at a
+\ time, depth first, so that one outside the window in x needs no y; and
+\ they're projected by their own (far_x, far_y). In the missile view the camera is
 \ the missile, and the window its own (L_05248), its bottom where the
 \ window's opening leaves it: the dots are only drawn when it's open.
 NEAR_D = 1024
@@ -123,17 +124,8 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     \ the ground's dy, the same for every dot
     LDA #0 : SEC : SBC at+2 : STA rot_d+2
     LDA #0 : SBC at+3 : STA rot_d+3
-    \ the rotation made for the frame's matrix and dy, unless they're the
-    \ last frame's
+    \ (ground_dots made the ground's rotation for this camera)
     JSR dots_steady
-    BIT dv_steady : BPL setup
-    LDA rot_d+2 : CMP dv_dy : BNE setup
-    LDA rot_d+3 : CMP dv_dy+1 : BEQ set
-.setup
-    LDA rot_d+2 : STA dv_dy : LDA rot_d+3 : STA dv_dy+1
-    JSR ground_start
-    JSR ground_setup
-.set
     \ dot_put's stores onto this screen's erase list, and its colour
     LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
     ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
@@ -164,12 +156,26 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     LDA dot_z_hi,X : SBC at+5 : STA rot_d+5
     LDA rot_d+1 : CLC : ADC #HI(NEAR_D) : CMP #2 * HI(NEAR_D) : BCS far
     LDA rot_d+5 : CLC : ADC #HI(NEAR_D) : CMP #2 * HI(NEAR_D) : BCS far
+    \ near: exactly, as ground_dots may have rotated it
+    LDA dot_seen,X : CMP #DOT_EXACT : BNE exact
+    JSR dot_given
+    BRA near
+.exact
     JSR dot_exact
+.near
     JSR dot_x : BCS done
     JSR dot_y : BCS done
     JMP dot_put
 .far
-    \ as it was, or rotated
+    \ as ground_dots rotated it, or as it was, or rotated
+    BIT dot_seen,X : BVC unrotated
+    JSR dot_given
+    BIT dv_steady : BPL given
+    JSR dot_base
+.given
+    JSR far_x : BCS done
+    BRA y_known
+.unrotated
     BIT dv_steady : BPL rotate
     JSR dot_kept : BCS rotate
     JSR far_x : BCS done
@@ -301,6 +307,14 @@ DV_F = 0 : DV_LO = 1 : DV_HI = 2          ; a base's fraction, low and high byte
 .row    SKIP 1                          ; dv_t's, by its offset
 }
 
+\ dot_given: rot_acc = dot X's camera-space position as ground_dots
+\ rotated it.
+.dot_given
+    LDA dot_cx_lo,X : STA rot_acc : LDA dot_cx_hi,X : STA rot_acc+1
+    LDA dot_cy_lo,X : STA rot_acc+2 : LDA dot_cy_hi,X : STA rot_acc+3
+    LDA dot_cz_lo,X : STA rot_acc+4 : LDA dot_cz_hi,X : STA rot_acc+5
+    RTS
+
 \ dot_kept: rot_acc = dot X's position from its base, moved with the
 \ camera, and C clear; C set if it has none it can use. (dv_steady is
 \ set.)
@@ -345,7 +359,6 @@ NEXT
 .dv_steady SKIP 1                       ; bit 7: cam is the last frame's
 .dv_mv     EQUB &FF                     ; the view the matrix was for (none yet)
 .dv_cam    SKIP 18                      ; the last frame's matrix
-.dv_dy     SKIP 2                       ; the dy the ground's rotation was last made for
 .dv_c0     SKIP 6
 .dv_d      SKIP 6                       ; c - c0
 .dv_acc    SKIP 4

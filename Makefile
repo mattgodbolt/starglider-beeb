@@ -96,8 +96,11 @@ build/gen/rotate.6502: tools/mkrotate.py | build/gen
 build/gen/xform.6502: tools/mkxform.py | build/gen
 	python3 -I tools/mkxform.py > $@
 
-# The ground dots' rotation for drawing (src/view.6502).
-build/gen/ground.6502: tools/mkground.py | build/gen
+# The ground dots' rotation (src/view_under.6502), for ground_dots' decision
+# and their drawing, with the bound on its terms that the decision takes
+# checked for every entry and offset (tools/groundcheck.py, about a minute).
+build/gen/ground.6502: tools/mkground.py tools/groundcheck.py | build/gen
+	$(PYTHON) -I tools/groundcheck.py
 	python3 -I tools/mkground.py > $@
 
 # The gunsight's pixels, from the ST's STAR.PRG.
