@@ -10,7 +10,9 @@ code:
 
 - xform: into camera space, x' = (A k) / 1024 + t, where A is the object's
   matrix scaled to its shape (A = m x g / 256, xf_amag and xf_asign,
-  render.6502), three rows;
+  render.6502), three rows, summed into px, xf_y and pz; render.6502's
+  vertex adds t, or its fold put 4t in the starting values and patched
+  xform_back to say so;
 - screen: straight onto the screen, for an object far enough away that
   its perspective is linear across it (render.6502, decision 10): two rows
   of B, the first-order change in x' and y' on the screen, sc_bmag and
@@ -196,8 +198,16 @@ def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
     emit()
 
 
-def vertex(name, prefix, rows, acc, start, back, skipping=False):
-    emit(f"\\ {name}_vertex: {acc} = the matrix by (xf_u - 128), / 256. A term is the")
+def row_sum(acc, i):
+    """Row i's sum: acc, a word a row, or a name for each row."""
+    return acc[i] if isinstance(acc, (list, tuple)) else f"{acc}+{2 * i}"
+
+
+def vertex(name, prefix, rows, acc, start, back, skipping=False, backs=None):
+    """With backs, the jump back is patched (name_back), to back or one of
+    backs."""
+    sums_named = ", ".join(row_sum(acc, i) for i in range(rows))
+    emit(f"\\ {name}_vertex: {sums_named} = the matrix by (xf_u - 128), / 256. A term is the")
     emit("\\ high byte by u (X:xf_plo) and the low byte by u, its high byte, added in")
     if skipping:
         emit("\\ A with the carry the SBC leaves, one (the setup takes them off the")
@@ -206,26 +216,31 @@ def vertex(name, prefix, rows, acc, start, back, skipping=False):
         emit("\\ the first of its row, the row's starting value copied (the row's _k).")
     else:
         emit("\\ A; the first column's terms add to the starting values.")
-    emit(f"\\ Its one caller jumps here, and it jumps back to {back}.")
+    if backs:
+        emit(f"\\ Its one caller jumps here, and it jumps back to {back} or {', '.join(backs)}")
+        emit(f"\\ ({name}_back, patched).")
+    else:
+        emit(f"\\ Its one caller jumps here, and it jumps back to {back}.")
     emit(f".{name}_vertex")
     if skipping:
         # Every row's first term that's done writes the row, so the sums'
         # old values are dead here, whatever skips Baron can see.
-        emit(f"    ZA_DISCARD {acc}")
+        emit(f"    ZA_DISCARD {acc if isinstance(acc, str) else sums_named}")
         for i in range(rows):
             r = f"{prefix}row{i}"
+            a = row_sum(acc, i)
             emit(f".{r}_k")
             emit(f"    BRA {r}_go                            ; patched: BRA, or LDA # to copy")
             emit(f"    ZA_CANJUMP {r}_go, {r}_copy")
             emit(f".{r}_copy")
-            emit(f"    LDA {start}+{2 * i} : STA {acc}+{2 * i} : LDA {start}+{2 * i + 1} : STA {acc}+{2 * i + 1}")
+            emit(f"    LDA {start}+{2 * i} : STA {a} : LDA {start}+{2 * i + 1} : STA {a}+1")
             emit(f".{r}_go")
     for j in range(3):
         emit(f"    LDY xf_u+{j}")
         for i in range(rows):
             e = 3 * i + j
             t = f"{prefix}{e}"
-            a = f"{acc}+{2 * i}"
+            a = row_sum(acc, i)
             src = f"{start}+{2 * i}" if j == 0 else a
             emit(f"    \\ term {e}: row {i} on {'xyz'[j]}")
             if skipping:
@@ -261,7 +276,12 @@ def vertex(name, prefix, rows, acc, start, back, skipping=False):
             emit(f"    ADC {src}+1 : STA {a}+1")
             if skipping:
                 emit(f".{t}_end")
-    emit(f"    JMP {back}")
+    if backs:
+        emit(f".{name}_back")
+        emit(f"    JMP {back}                            ; patched")
+        emit(f"    ZA_CANJUMP {', '.join([back] + backs)}")
+    else:
+        emit(f"    JMP {back}")
     emit()
 
 
@@ -309,9 +329,15 @@ def sums(rows, acc, start, what):
     emit()
 
 
-sums(3, "xf_acc", "xf_start", "x', y', z' in world units")
+# The xform's sums are x', y' and z' in quarters of a world unit: x' and z'
+# are the projection's px and pz (render.6502), which vertex shifts in
+# place into world units.
+emit("ZA_AUTO2 xf_y                 ; y', in quarters (x' and z' are px and pz)")
+emit("ZA_AUTO 6, xf_start           ; their starting values")
+emit()
 setup_skipping("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start")
-vertex("xform", "xf", 3, "xf_acc", "xf_start", "vertex.back", skipping=True)
+vertex("xform", "xf", 3, ["px", "xf_y", "pz"], "xf_start", "vertex.back", skipping=True,
+       backs=["vertex.folded"])
 sums(2, "sc_acc", "sc_start", "the screen's x and y")
 setup_choosing("screen", "sc", "s8", 2, "sc_bmag", "sc_bsign", "sc_start", ["sc_x0q", "sc_y0q"],
                "vertex_far.screen")

@@ -57,7 +57,10 @@ ang_p = ang
 ang_h = ang + 2
 ang_r = ang + 4
 ZA_AUTO1 slot, otype
-ZA_AUTO2 tx, ty, tz         ; the object's camera-space position
+ZA_AUTO 6, tpos             ; the object's camera-space position, x y z words
+tx = tpos
+ty = tpos + 2
+tz = tpos + 4
 \ the shape's header, as it lies: HDR_BYTES, then HDR_WORDS pointers
 HDR_BYTES = 10
 HDR_WORDS = 12

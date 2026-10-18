@@ -597,7 +597,53 @@ NEXT
     JMP edges_far
 .near
     JSR xform_setup
+    JSR fold
     JMP edges
+}
+
+\ fold: the object's position t into the vertex transform's starting
+\ values, in quarters, where no sum can then pass a word: when on every
+\ axis |t| + the radius + FOLD_SLACK <= FOLD_MAX. A vertex is within the
+\ radius of the centre (mkshapes.py), and the transform's sums within
+\ FOLD_SLACK of the exact rotation's. Then vertex's sums need only the
+\ shift (xform_back to vertex.folded); otherwise they add t (vertex.back).
+FOLD_MAX = &7FFF DIV 4
+FOLD_SLACK = 16
+.fold
+{
+    ZA_AUTO1 lim, q
+    \ |t| < 256 (h + 1), h its high byte if it's positive and that EORed
+    \ with &FF if not, so h < HI(FOLD_MAX - FOLD_SLACK - the radius) will do
+    LDA #LO(FOLD_MAX - FOLD_SLACK) : SEC : SBC sh_radius
+    LDA #HI(FOLD_MAX - FOLD_SLACK) : SBC sh_radius+1 : BMI unfolded
+    STA lim
+    LDX #4
+.fits
+    LDA tpos+1,X : ZA_INDEXEDBY {0, 2, 4}
+    BPL positive
+    EOR #&FF
+.positive
+    CMP lim : BCS unfolded
+    DEX : DEX : BPL fits
+    LDX #4
+.into
+    \ the start += 4 t
+    LDA tpos,X : ZA_INDEXEDBY {0, 2, 4}
+    ASL A : STA q
+    LDA tpos+1,X : ZA_INDEXEDBY {0, 2, 4}
+    ROL A : ASL q : ROL A : TAY
+    LDA q : CLC : ADC xf_start,X : ZA_INDEXEDBY {0, 2, 4}
+    STA xf_start,X : ZA_INDEXEDBY {0, 2, 4}
+    TYA : ADC xf_start+1,X : ZA_INDEXEDBY {0, 2, 4}
+    STA xf_start+1,X : ZA_INDEXEDBY {0, 2, 4}
+    DEX : DEX : BPL into
+    LDA #LO(vertex.folded) : STA xform_back+1
+    LDA #HI(vertex.folded) : STA xform_back+2
+    RTS
+.unfolded
+    LDA #LO(vertex.back) : STA xform_back+1
+    LDA #HI(vertex.back) : STA xform_back+2
+    RTS
 }
 
 \ far_setup: the object's centre on the screen (sc_x0, sc_y0, from the
@@ -1021,7 +1067,6 @@ ENDMACRO
 .vertex
 {
     ZA_AUTO1 vtx
-    ZA_AUTO2 cvy
     LDA stamp : STA vert_mark,Y
     STY vtx
     CPY sh_nstill : BCS moving
@@ -1034,12 +1079,22 @@ ENDMACRO
     LDA (fr_vy),Y : EOR #&80 : STA xf_u+1
     LDA (fr_vz),Y : EOR #&80 : STA xf_u+2
 .got
-    JMP xform_vertex                        ; which comes back to back
+    JMP xform_vertex                        ; which comes back to back or folded (fold's)
 .back
+    \ the sums px, xf_y, pz into world units, the object's position added
     LDY vtx
-    WORLD xf_acc, tx, px, v_xlo, v_xhi
-    WORLD xf_acc+2, ty, cvy, v_ylo, v_yhi
-    WORLD xf_acc+4, tz, pz, v_zlo, v_zhi
+    WORLD px, tx, v_xlo, v_xhi
+    WORLD xf_y, ty, v_ylo, v_yhi
+    WORLD pz, tz, v_zlo, v_zhi
+    BRA tested
+.folded
+    \ the same, the object's position in them from the start
+    LDY vtx
+    WORLD_FOLDED px, v_xlo, v_xhi
+    WORLD_FOLDED xf_y, v_ylo, v_yhi
+    WORLD_FOLDED pz, v_zlo, v_zhi
+    LDA pz+1
+.tested
     \ behind the near plane if z < NEAR_Z (a byte), from z's high byte
     ASSERT NEAR_Z < 256
     BMI behind
@@ -1051,7 +1106,7 @@ ENDMACRO
     LDY vtx
     LDA pq : CLC : ADC #LO(VIEW_CX) : STA v_sxlo,Y
     LDA pq+1 : ADC #HI(VIEW_CX) : STA v_sxhi,Y
-    MOVW px, cvy : JSR proj_x
+    MOVW px, xf_y : JSR proj_x
     LDY vtx
     LDA pq : CLC : ADC #LO(VIEW_CY) : STA v_sylo,Y
     LDA pq+1 : ADC #HI(VIEW_CY) : STA v_syhi,Y
