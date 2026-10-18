@@ -950,3 +950,8 @@ and the camera and the rotations took 54,000 cycles of world_lists'
   conditional branches too), and baron warned that the level's set-up
   read init_objects' `record` unset.
 
+Matt can't judge calls like these until the game can be played, so until
+then they're Claude's to make (Matt, 2026-10-18), recorded as decisions
+like any other, for Matt to revisit. Decisions 31 to 33 are the first:
+the rotations' near box and slack, and carrying relevance over.
+
