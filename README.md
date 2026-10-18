@@ -72,5 +72,10 @@ make scenes     # capture the scenes from the ST (needs Hatari built in ../hatar
   say), published by Rainbird in 1986.
 - **David Lowe**: the music. **Clare Edgeley**: the speech. **James
   Follett**: the novella that came in the box.
-- The port's tools stand on Rich Talbot-Watkins's baron, Kieran Connell's
-  beeb-port-kit and jsbeeb-mcp, Hatari, SkoolKit and Caprice32.
+- The port's tools stand on
+  [Rich Talbot-Watkins](https://github.com/waitingforvsync)'s
+  [baron](https://github.com/waitingforvsync/baron),
+  [Kieran Connell](https://github.com/kieranhj)'s
+  [beeb-port-kit](https://github.com/kieranhj/beeb-port-kit) and
+  [jsbeeb-mcp](https://github.com/kieranhj/jsbeeb-mcp), Hatari, SkoolKit and
+  Caprice32.
