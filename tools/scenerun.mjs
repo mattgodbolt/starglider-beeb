@@ -223,6 +223,7 @@ if (profileEvery) {
     const rows = [...profile.entries()].sort((a, b) => b[1] - a[1]);
     for (const [name, n] of rows) console.log(`${((100 * n) / samples).toFixed(1).padStart(5)}%  ${name}`);
 }
-fs.writeFileSync(outPath, JSON.stringify({ frames: out, first: lo }));
+// (with the build's bounds on the approximated objects, for scenecheck.py)
+fs.writeFileSync(outPath, JSON.stringify({ frames: out, first: lo, rot_bound: need("ROT_BOUND"), near_box: need("NEAR_BOX") }));
 console.log(`${outPath}: ${out.length} frames`);
 process.exit(0);

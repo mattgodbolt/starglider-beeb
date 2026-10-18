@@ -6,7 +6,9 @@
 // Each matrix is set up after the last, so only what changed is patched and
 // links are remade when an entry's kind or sign changes, as in a turn; each
 // offset is rotated both ways and compared, bit for bit, with the ST's exact
-// rotation and the model of the approximation.
+// rotation and the model of the approximation; and for the ST's own
+// matrices, the approximation's x' and z' must be within ROT_BOUND of the
+// exact (tools/mkrotate.py's bound, which the relevance test's slack covers).
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -45,7 +47,9 @@ await call(need("spike_init"), STUB + 9);
 const pokew = (a, v) => { cpu.writemem(a, v & 0xff); cpu.writemem(a + 1, (v >> 8) & 0xff); };
 const peekw = (a) => { const v = cpu.readmem(a) | (cpu.readmem(a + 1) << 8); return v & 0x8000 ? v - 0x10000 : v; };
 const cases = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-let bad = 0, n = 0;
+const ROT_BOUND = need("ROT_BOUND");
+const apart = (a, b) => Math.min((a - b) & 0xffff, (b - a) & 0xffff);    // words wrap
+let bad = 0, n = 0, worst = 0;
 for (const [ci, c] of cases.entries()) {
     for (let i = 0; i < 9; i++) pokew(need("cam") + 2 * i, c.cam[i]);
     await call(need("rotate_setup"), STUB + 9);
@@ -57,10 +61,12 @@ for (const [ci, c] of cases.entries()) {
         await call(need("rotate_approx"), need("rotate_lists.relevance"), true);
         const ap = [peekw(need("rot_acc")), peekw(need("rot_acc") + 4)];
         n++;
-        if (ex.join() !== t.exact.join() || ap.join() !== t.approx.join()) {
+        const off = c.st ? Math.max(apart(ap[0], ex[0]), apart(ap[1], ex[2])) : 0;
+        worst = Math.max(worst, off);
+        if (ex.join() !== t.exact.join() || ap.join() !== t.approx.join() || off > ROT_BOUND) {
             if (bad++ < 8) console.log(`matrix ${ci} ${c.cam} d ${t.d}: exact ${ex} want ${t.exact}; approx ${ap} want ${t.approx}`);
         }
     }
 }
-console.log(`rotcheck: ${cases.length} matrices, ${n} offsets, ${bad} differ`);
+console.log(`rotcheck: ${cases.length} matrices, ${n} offsets, ${bad} differ; the ST's off by at most ${worst}`);
 process.exit(bad ? 1 : 0);

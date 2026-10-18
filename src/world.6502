@@ -223,23 +223,25 @@ ENDMACRO
 \ RELEVANT yes (decision 11): on to yes if an object at rot_acc, rotated
 \ approximately (within ROT_SLACK), could be drawn or meet the player:
 \ in front, short of &2000 and within the view's pyramid across, or within
-\ NEAR_BOX in x and z (the largest collision box is 2000). Only those
-\ need the exact rotation: nothing else the game decides reads the rest.
-\ The checks take an object as near when the ST's own x' and z' are within
-\ NEAR_BOX, so the approximation's are tested ROT_SLACK wider (NEAR_TEST)
-\ to be sure of every one. The approximation has no y' (decision 21), so
-\ neither test has it: the collisions test y only once x and z are in the
-\ box. (rotate_lists' z2 and t16 are its workings.)
-ROT_SLACK = 512
-NEAR_BOX = 2000 + ROT_SLACK
+\ NEAR_BOX in x and z (the largest collision box). Only those need the
+\ exact rotation: nothing else the game decides reads the rest. The checks
+\ take an object as near when the ST's own x' and z' are within NEAR_BOX
+\ (decision 31), so the approximation's are tested ROT_SLACK wider
+\ (NEAR_TEST) to be sure of every one. The approximation has no y'
+\ (decision 21), so neither test has it: the collisions test y only once x
+\ and z are in the box. (rotate_lists' z2 and t16 are its workings.)
+ROT_SLACK = 444                         ; decision 32
+ASSERT ROT_SLACK >= ROT_BOUND           ; (rotate.6502's, the approximation's)
+NEAR_BOX = SIZE_Z_MAX
 NEAR_TEST = NEAR_BOX + ROT_SLACK
 MACRO RELEVANT yes
     LDA rot_acc+5 : BPL ahead
     \ behind the player: below -3 slack / 2 the pyramid is empty, and only
-    \ NEAR_TEST can catch it; above, so it is if it's wholly behind the view,
-    \ z <= -(size + slack)
+    \ NEAR_TEST can catch it (tested by the high byte, which rounds that
+    \ down: the pyramid's own test takes the few between); above, so it is
+    \ if it's wholly behind the view, z <= -(size + slack)
     CMP #HI(-3 * ROT_SLACK / 2) : BCS just_behind
-    ASSERT LO(-3 * ROT_SLACK / 2) = 0 AND -3 * ROT_SLACK / 2 > -NEAR_TEST
+    ASSERT -3 * ROT_SLACK / 2 > -NEAR_TEST
     JMP near_test
 .just_behind
     LDX slot : LDY ob_type,X
@@ -253,8 +255,8 @@ MACRO RELEVANT yes
     \ ahead of &2000 (with the slack), it's neither drawn nor near
     CMP #HI(&2000 + ROT_SLACK) : BCC pyramid
     BNE not
-    LDA rot_acc+4 : BNE not
-    ASSERT LO(&2000 + ROT_SLACK) = 0 AND &2000 + ROT_SLACK > NEAR_TEST
+    LDA rot_acc+4 : CMP #LO(&2000 + ROT_SLACK) + 1 : BCS not
+    ASSERT LO(&2000 + ROT_SLACK) < &FF AND &2000 + ROT_SLACK > NEAR_TEST
 .pyramid
     \ in the view's pyramid across, with the slack: |x| <= 2z + 3 slack,
     \ which is no pyramid if that's negative
