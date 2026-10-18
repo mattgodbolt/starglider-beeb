@@ -94,6 +94,13 @@ ENDIF
     LDA erase_i : STA erase_stop,X
     RTS
 
+\ TRIG_BY b: FMUL_BY b by fmul_trig (world.6502), for build_matrix's
+\ products, once it has paged the world's bank.
+MACRO TRIG_BY b
+    LDA b : STA mul_y : LDA b+1 : STA mul_y+1
+    JSR fmul_trig
+ENDMACRO
+
 \ build_matrix (&04114): mat from ang_p, ang_h, ang_r (pitch, heading,
 \ roll), as rows x', y', z' of coefficients on x, y, z. The ST keeps the
 \ last object's matrix when the angles haven't changed, and so does this.
@@ -125,29 +132,33 @@ ENDIF
     ASL m_idx : ROL m_idx+1 : ASL m_idx : ROL m_idx+1 : ASL m_idx : ROL m_idx+1
     JSR sincos : MOVW m_s3, m_sin : MOVW m_c3, m_cos
     \ The ST's products and sums (&04190), taken by the factor they share,
-    \ each sum built in its entry: the same values in any order.
+    \ each sum built in its entry: the same values in any order. First
+    \ those of the pitch and roll alone, which the camera keeps while only
+    \ its heading turns, calling heading with mul_x c1 (world.6502).
     MOVW mul_x, m_s3
-    FMUL_BY m_s1 : MOVW m_d6, mul_r
-    FMUL_BY m_c2 : LDA #0 : SEC : SBC mul_r : STA mat+6 : LDA #0 : SBC mul_r+1 : STA mat+7
-    FMUL_BY m_s2 : MOVW mat+10, mul_r
-    FMUL_BY m_c1 : MOVW mat+2, mul_r                                ; x' on y
+    TRIG_BY m_s1 : MOVW m_d6, mul_r
+    TRIG_BY m_c1 : MOVW mat+2, mul_r                                ; x' on y
     MOVW mul_x, m_c1
-    FMUL_BY m_c3 : MOVW mat+8, mul_r                                ; y' on y
-    FMUL_BY m_c2 : MOVW mat+16, mul_r                               ; z' on z
-    FMUL_BY m_s2 : MOVW mat+12, mul_r                               ; z' on x
-    MOVW mul_x, m_s2
-    FMUL_BY m_d6 : MOVW mat+0, mul_r
-    FMUL_BY m_s1 : MOVW m_t, mul_r
-    FMUL_BY m_c3 : LDA #0 : SEC : SBC mul_r : STA mat+4 : LDA #0 : SBC mul_r+1 : STA mat+5
-    MOVW mul_x, m_c2
-    FMUL_BY m_c3 : MOVW m_d7, mul_r : ADDW mat+0, mul_r             ; x' on x
-    FMUL_BY m_d6 : ADDW mat+4, mul_r                                ; x' on z
-    MOVW mul_x, m_c3
-    FMUL_BY m_t : ADDW mat+6, mul_r                                 ; y' on x
-    MOVW mul_x, m_s1
-    FMUL_BY m_d7 : ADDW mat+10, mul_r                               ; y' on z
+    TRIG_BY m_c3 : MOVW mat+8, mul_r                                ; y' on y
     LDA #0 : SEC : SBC m_s1 : STA mat+14
     LDA #0 : SBC m_s1+1 : STA mat+15                                ; z' on y
+.heading
+    TRIG_BY m_c2 : MOVW mat+16, mul_r                               ; z' on z
+    TRIG_BY m_s2 : MOVW mat+12, mul_r                               ; z' on x
+    MOVW mul_x, m_s3
+    TRIG_BY m_c2 : LDA #0 : SEC : SBC mul_r : STA mat+6 : LDA #0 : SBC mul_r+1 : STA mat+7
+    TRIG_BY m_s2 : MOVW mat+10, mul_r
+    MOVW mul_x, m_s2
+    TRIG_BY m_d6 : MOVW mat+0, mul_r
+    TRIG_BY m_s1 : MOVW m_t, mul_r
+    TRIG_BY m_c3 : LDA #0 : SEC : SBC mul_r : STA mat+4 : LDA #0 : SBC mul_r+1 : STA mat+5
+    MOVW mul_x, m_c2
+    TRIG_BY m_c3 : MOVW m_d7, mul_r : ADDW mat+0, mul_r             ; x' on x
+    TRIG_BY m_d6 : ADDW mat+4, mul_r                                ; x' on z
+    MOVW mul_x, m_c3
+    TRIG_BY m_t : ADDW mat+6, mul_r                                 ; y' on x
+    MOVW mul_x, m_s1
+    TRIG_BY m_d7 : ADDW mat+10, mul_r                               ; y' on z
     RTS
 }
 

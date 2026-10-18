@@ -904,3 +904,49 @@ steps the waveforms and the energy bar's dimming once for each frame
 count since its last draw (`panel_steps`), the ST's per-frame rule run
 for every step, and `make panel`'s model does the same.
 
+### The camera and the rotations in a turn
+
+Holding a hard turn, the camera's matrix is full and changes every step,
+and the camera and the rotations took 54,000 cycles of world_lists'
+105,000 (measured in jsbeeb on main, 2026-10-18). Now they take 41,000.
+
+- **The approximation on bytes.** Decision 11's approximate rotation makes
+  each term from one byte product: the matrix entry to 8 bits (|m| / 64,
+  rounded) by the offset's high byte, taken as the middle of the 256
+  offsets it stands for. Taking the middle halves the error the high byte
+  alone made, which leaves room for the 8-bit entry: within 418 of the
+  ST's, where decision 11 allows 444 (`tools/mkrotate.py` derives it). On
+  the captures the worst is 238, where it was 408. An object's
+  approximation takes 259 cycles, not 395. Column y's offset is mostly
+  within 256 of 0 (the ground is flat and the player near it), and then
+  its products are the same for every object, so the rows' constants take
+  them: one set for a high byte of 0 and one for -1.
+- **Only what changed.** In a steady turn the pitch and roll stay. So the
+  camera keeps their sines, the products of them alone and the ground
+  objects' constants, and makes only the heading's sines and the eleven
+  products they're in, through a new entry into build_matrix. A product by
+  a sine of 0 or a cosine of 16384, as a level pitch makes most of them, is
+  taken as it is (`fmul_trig`). rotate_setup patches only the entries that
+  changed (six of nine in a steady turn), and links the chains again only
+  when an entry's kind or sign changes. The camera falls from 12,300
+  cycles to 6,300.
+- **The exact rotation** keeps its four byte products a term, with one
+  SEC where there were four (a byte product never borrows) and a carry
+  added straight into the next sum: 1,370 cycles, not 1,460.
+- **The near box.** The checks call an approximated object near when the
+  ST's own x' and z' are within NEAR_BOX, and the port tested its
+  approximation against the same box, so any error at that edge could
+  fail them. The old approximation's errors fell inward on the captures by
+  luck; the new one's didn't, on three flight frames. The near test now
+  allows another ROT_SLACK (NEAR_TEST), which rotates 0.3 to 0.4 more
+  objects a step exactly.
+- **The cost.** Holding a hard turn, world_lists takes 91,500 cycles a
+  step (the camera 6,300, the rotations 34,800, the dots 43,300
+  untouched): 3.2 frames a second at 11.7 steps. Flying straight, 8.4 at
+  12.6 (measured 2026-10-18, before the view's drawing was merged).
+- **Baron.** With the logic bank three bytes further on, its `JMP
+  (set_ups,X)` sat at the address of a `BMI climbed` in player_flight in
+  the world bank. The branch took on the jump's targets (baron#29 reaches
+  conditional branches too), and baron warned that the level's set-up
+  read init_objects' `record` unset.
+
