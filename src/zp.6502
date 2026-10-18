@@ -1,0 +1,203 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - zero page and workspace
+\
+\ Zero page holds the pointers (every (zp),Y and (zp)) and what the inner
+\ loops use most; the rest is in the workspace, which the OS's pages give
+\ once the game owns the machine.
+\ ***************************************************************************
+
+SECTION ZeroPage, org = &00, guard = &100, virtual = TRUE
+    \ the products' pointers (maths.6502)
+.m_sqlo     SKIP 2
+.m_sqhi     SKIP 2
+.m_nglo     SKIP 2
+.m_nghi     SKIP 2
+.mul_x      SKIP 2
+.mul_y      SKIP 2
+.mul_p      SKIP 4
+.mul_t      SKIP 2
+.mul_r      SKIP 2
+.mul_sign   SKIP 1
+.div_d      SKIP 2
+.div_u      SKIP 2
+.div_n      SKIP 4
+.div_q      SKIP 2
+    \ the renderer (render.6502)
+.rec        SKIP 2          ; the object's record
+.hdr        SKIP 2          ; its shape's header
+.fr         SKIP 2          ; the shape's frame
+.m_ptr      SKIP 2          ; into the sine table
+.log_ptr    SKIP 2          ; the next line in line_log
+    \ the shape's header, as it lies (HDR_BYTES, then HDR_WORDS pointers)
+.sh_nverts  SKIP 1
+.sh_nedges  SKIP 1
+.sh_nfaces  SKIP 1
+.sh_colour  SKIP 1
+.sh_scale   SKIP 1
+.sh_nframes SKIP 1
+.sh_nstill  SKIP 1
+.sh_nrigid  SKIP 1
+.sh_frames  SKIP 2
+.sh_ev0     SKIP 2
+.sh_ev1     SKIP 2
+.sh_fflags  SKIP 2
+.sh_fedges  SKIP 2
+.sh_elists  SKIP 2
+.sh_vx      SKIP 2
+.sh_vy      SKIP 2
+.sh_vz      SKIP 2
+.sh_nx      SKIP 2
+.sh_ny      SKIP 2
+.sh_nz      SKIP 2
+    \ the frame's arrays, each set back so it's indexed by vertex or face
+.fr_vx      SKIP 2
+.fr_vy      SKIP 2
+.fr_vz      SKIP 2
+.fr_nx      SKIP 2
+.fr_ny      SKIP 2
+.fr_nz      SKIP 2
+.fr_klo     SKIP 2
+.fr_khi     SKIP 2
+.fr_k       SKIP 2
+    \ the window clip's points: four consecutive words, swapped as two pairs
+.cx0        SKIP 2
+.cy0        SKIP 2
+.cx1        SKIP 2
+.cy1        SKIP 2
+    \ the line drawer (line.6502)
+.line_x0    SKIP 2
+.line_y0    SKIP 1
+.line_x1    SKIP 2
+.line_y1    SKIP 1
+.line_mx    SKIP 2
+.line_my    SKIP 1
+.line_scr   SKIP 2
+.line_dx    SKIP 1
+.line_dy    SKIP 1
+.line_cnt   SKIP 1
+.line_ls    SKIP 1
+.line_errs  SKIP 1
+.line_err   SKIP 1
+    \ the frame's inputs, which the game (for now the scene harness) sets
+.pl_x       SKIP 2          ; the player ($12E-$132(a6))
+.pl_y       SKIP 2
+.pl_z       SKIP 2
+.pl_pitch   SKIP 2          ; ($13A-$13E)
+.pl_heading SKIP 2
+.pl_roll    SKIP 2
+.n_slots    SKIP 1          ; the slots the coarse list looks at ($1D8)
+.docked     SKIP 1          ; non-zero in the silo ($2CA)
+.silo_missile SKIP 1        ; non-zero while the silo's missile is there
+.all_faces  SKIP 1          ; &80: every face visible (the Interrogate screen's H, $2BD)
+.beam_colour SKIP 1         ; the beam's colour, which animate_shapes cycles
+ENDSECTION
+
+HDR_BYTES = 8
+HDR_WORDS = 12
+ASSERT sh_nz - sh_nverts = HDR_BYTES + (HDR_WORDS - 1) * 2
+
+WORK = &0400
+SECTION Work, org = WORK, guard = &0E00, virtual = TRUE
+    \ the lists: slot numbers, in the order pushed (render.6502)
+.coarse_slots SKIP SLOTS + 2
+.near_slots SKIP SLOTS + 2
+.draw_slots SKIP SLOTS + 2
+.coarse_n   SKIP 1
+.near_n     SKIP 1
+.draw_n     SKIP 1
+.log_n      SKIP 2          ; lines in line_log
+    \ the matrices: rows x', y', z' of words on x, y, z
+.mat        SKIP 18
+.cam        SKIP 18
+.mat_valid  SKIP 1          ; non-zero: mat is for mat_angles
+.mat_angles SKIP 6
+.ang_p      SKIP 2          ; pitch, heading, roll: consecutive
+.ang_h      SKIP 2
+.ang_r      SKIP 2
+.m_idx      SKIP 2
+.m_sin      SKIP 2
+.m_cos      SKIP 2
+.m_s1       SKIP 2
+.m_c1       SKIP 2
+.m_s2       SKIP 2
+.m_c2       SKIP 2
+.m_s3       SKIP 2
+.m_c3       SKIP 2
+.m_d6       SKIP 2
+.m_d7       SKIP 2
+.m_t        SKIP 2
+    \ an object
+.list_i     SKIP 1
+.slot       SKIP 1
+.otype      SKIP 1
+.shape      SKIP 1
+.ocolour    SKIP 1
+.row_i      SKIP 1
+.dx         SKIP 2
+.dy         SKIP 2
+.dz         SKIP 2
+.acc        SKIP 2
+.rx         SKIP 18         ; x', y', z' at +0, +6, +12
+.cx         SKIP 2
+.cy         SKIP 2
+.cz         SKIP 2
+.z2         SKIP 2
+.nz2        SKIP 2
+.t16        SKIP 2
+.tx         SKIP 2          ; its camera-space position
+.ty         SKIP 2
+.tz         SKIP 2
+.objc       SKIP 6          ; the camera in its space
+.nmove      SKIP 1
+.nturn      SKIP 1
+.stamp      SKIP 1
+.face_i     SKIP 1
+.nx         SKIP 1          ; a face's normal: consecutive
+.ny         SKIP 1
+.nz         SKIP 1
+.dot        SKIP 4
+.kk         SKIP 4
+.count      SKIP 1
+.edge_i     SKIP 1
+.va         SKIP 1
+.vb         SKIP 1
+.vtx        SKIP 1
+.kv         SKIP 3
+.vw         SKIP 6
+.cvx        SKIP 2
+.cvy        SKIP 2
+.cvz        SKIP 2
+.px         SKIP 2
+.pz         SKIP 2
+.pq         SKIP 2
+.ep         SKIP 6
+.eq         SKIP 6
+.code0      SKIP 1
+.code1      SKIP 1
+.code       SKIP 1
+    \ by shape and colour
+.anim_frame SKIP 32         ; each shape's animation frame, as its list numbers them
+.colour_map SKIP 16         ; the ST's colours to the screen's bytes (&00, &0F, &F0, &FF)
+    \ the vertices and marks, by vertex and edge number
+.edge_mark  SKIP 256
+.vert_mark  SKIP 256
+.v_xlo      SKIP 128
+.v_xhi      SKIP 128
+.v_ylo      SKIP 128
+.v_yhi      SKIP 128
+.v_zlo      SKIP 128
+.v_zhi      SKIP 128
+.v_sxlo     SKIP 128
+.v_sxhi     SKIP 128
+.v_sylo     SKIP 128
+.v_syhi     SKIP 128
+ENDSECTION
+
+\ Every line drawn, for the harness: slot, edge, x0 (word), y0, x1 (word),
+\ y1, colour.
+LOG = &3800
+LOG_ENTRY = 9
+LOG_LINES = 200
+SECTION Log, org = LOG, guard = SCREEN, virtual = TRUE
+.line_log   SKIP LOG_ENTRY * LOG_LINES
+ENDSECTION

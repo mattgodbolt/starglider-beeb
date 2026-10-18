@@ -1,0 +1,30 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - shared constants
+\ ***************************************************************************
+
+\ --- Hardware ------------------------------------------------------------
+
+crtc_reg   = &FE00
+crtc_data  = &FE01
+romsel     = &FE30          ; the sideways bank at &8000
+acccon     = &FE34          ; the Master's: X (bit 2) draws in shadow RAM, D (bit 0) shows it
+
+\ --- The screen -----------------------------------------------------------
+\ MODE 1 at the ST's 320 x 200 (decision 3): MODE 1's 80 columns and 25 of
+\ its character rows, at the top of RAM. A character row is 640 bytes.
+SCREEN_ROWS = 25
+SCREEN_ROW  = 640
+SCREEN      = &8000 - SCREEN_ROWS * SCREEN_ROW
+
+\ --- Sideways RAM ---------------------------------------------------------
+BANK_SHAPES  = 4
+BANK_SINE    = 5
+BANK_OBJECTS = 6
+
+\ --- Objects --------------------------------------------------------------
+\ The ST's 140 slots, then the silo's tunnel (the ST's &1218) and its
+\ missile (&1258), each 64 bytes, in the objects' bank.
+SLOTS        = 140
+SLOT_TUNNEL  = SLOTS
+SLOT_MISSILE = SLOTS + 1
+OBJECTS      = &8000

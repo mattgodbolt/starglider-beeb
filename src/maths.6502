@@ -1,0 +1,145 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - arithmetic
+\
+\ Products are quarter-squares (a * b = f(a + b) - f(a - b), f(n) = n*n/4),
+\ read through zero-page pointers that one operand sets (mul_set), so a
+\ run of products by the same byte costs only the reads.
+\
+\ The 68000's arithmetic the game's logic uses is here exactly: muls
+\ (smul16), the fixed-point product the matrices use (fmul16: muls, asl.l
+\ #2, swap) and divs with its overflow (sdiv32).
+\ ***************************************************************************
+
+
+\ mul_init: the pointers' high bytes, once.
+.mul_init
+    LDA #HI(sqr_lo) : STA m_sqlo+1
+    LDA #HI(sqr_hi) : STA m_sqhi+1
+    LDA #HI(neg_lo) : STA m_nglo+1
+    LDA #HI(neg_hi) : STA m_nghi+1
+    RTS
+
+\ MUL_SET: A is the multiplicand for the MUL8s that follow.
+MACRO MUL_SET
+    STA m_sqlo : STA m_sqhi
+    EOR #&FF
+    STA m_nglo : STA m_nghi
+ENDMACRO
+
+\ MUL8 lo: the product of the multiplicand and Y, unsigned: its low byte
+\ into lo, its high byte in A.
+MACRO MUL8 lo
+    SEC
+    LDA (m_sqlo),Y : SBC (m_nglo),Y : STA lo
+    LDA (m_sqhi),Y : SBC (m_nghi),Y
+ENDMACRO
+
+\ umul16: mul_p (4 bytes) = mul_x * mul_y, both unsigned 16-bit.
+.umul16
+{
+    LDA mul_x : MUL_SET
+    LDY mul_y : MUL8 mul_p : STA mul_p+1
+    LDY mul_y+1 : MUL8 mul_t : STA mul_p+2
+    LDA mul_t : CLC : ADC mul_p+1 : STA mul_p+1
+    BCC no1
+    INC mul_p+2
+.no1
+    LDA mul_x+1 : MUL_SET
+    LDY mul_y : MUL8 mul_t : STA mul_t+1
+    LDY mul_y+1 : MUL8 mul_p+3 : TAX
+    LDA mul_t : CLC : ADC mul_p+1 : STA mul_p+1
+    LDA mul_t+1 : ADC mul_p+2 : STA mul_p+2
+    BCC no2
+    INX
+.no2
+    LDA mul_p+3 : CLC : ADC mul_p+2 : STA mul_p+2
+    TXA : ADC #0 : STA mul_p+3
+    RTS
+}
+
+\ smul16: mul_p = mul_x * mul_y, signed 16-bit to 32 (the 68000's muls).
+.smul16
+{
+    LDA mul_x+1 : EOR mul_y+1 : STA mul_sign
+    LDA mul_x+1 : BPL xpos
+    LDA #0 : SEC : SBC mul_x : STA mul_x
+    LDA #0 : SBC mul_x+1 : STA mul_x+1
+.xpos
+    LDA mul_y+1 : BPL ypos
+    LDA #0 : SEC : SBC mul_y : STA mul_y
+    LDA #0 : SBC mul_y+1 : STA mul_y+1
+.ypos
+    JSR umul16
+    BIT mul_sign : BPL done
+    LDA #0 : SEC : SBC mul_p : STA mul_p
+    LDA #0 : SBC mul_p+1 : STA mul_p+1
+    LDA #0 : SBC mul_p+2 : STA mul_p+2
+    LDA #0 : SBC mul_p+3 : STA mul_p+3
+.done
+    RTS
+}
+
+\ fmul16: mul_r = the 68000's `muls; asl.l #2; swap` of mul_x and mul_y:
+\ floor(x * y / 16384), wrapped to 16 bits. Two's complement shifts round
+\ down, so the floor comes free.
+.fmul16
+    JSR smul16
+    ASL mul_p+1 : ROL mul_p+2 : ROL mul_p+3
+    ASL mul_p+1 : ROL mul_p+2 : ROL mul_p+3
+    LDA mul_p+2 : STA mul_r
+    LDA mul_p+3 : STA mul_r+1
+    RTS
+
+\ sdiv32: the 68000's divs. mul_p (32-bit signed) / div_d (16-bit signed):
+\ C = 0 and the quotient, truncated towards zero, in div_q; or C = 1 if it
+\ doesn't fit 16 bits, when divs leaves its operand alone. div_d is not 0.
+.sdiv32
+{
+    LDA mul_p+3 : EOR div_d+1 : STA mul_sign
+    LDA div_d : STA div_u : LDA div_d+1 : STA div_u+1
+    BPL dpos
+    LDA #0 : SEC : SBC div_u : STA div_u
+    LDA #0 : SBC div_u+1 : STA div_u+1
+.dpos
+    LDA mul_p : STA div_n : LDA mul_p+1 : STA div_n+1
+    LDA mul_p+2 : STA div_n+2 : LDA mul_p+3 : STA div_n+3
+    BPL npos
+    LDA #0 : SEC : SBC div_n : STA div_n
+    LDA #0 : SBC div_n+1 : STA div_n+1
+    LDA #0 : SBC div_n+2 : STA div_n+2
+    LDA #0 : SBC div_n+3 : STA div_n+3
+.npos
+    \ An unsigned quotient of 17 bits or more never fits: the high half
+    \ must be below the divisor.
+    LDA div_n+2 : CMP div_u : LDA div_n+3 : SBC div_u+1
+    BCS overflow
+    \ 16 steps of shift and subtract: the remainder in div_n+2..3, the
+    \ quotient shifting into div_n..1.
+    LDX #16
+.step
+    ASL div_n : ROL div_n+1 : ROL div_n+2 : ROL div_n+3
+    BCS sub                             ; the remainder passed 16 bits
+    LDA div_n+2 : CMP div_u : LDA div_n+3 : SBC div_u+1
+    BCC next
+.sub
+    LDA div_n+2 : SBC div_u : STA div_n+2
+    LDA div_n+3 : SBC div_u+1 : STA div_n+3
+    INC div_n                           ; the quotient's bit
+.next
+    DEX : BNE step
+    \ It fits a signed word: up to 32767, or 32768 if negative.
+    BIT mul_sign : BMI negative
+    LDA div_n+1 : BMI overflow
+    LDA div_n : STA div_q : LDA div_n+1 : STA div_q+1
+    CLC : RTS
+.negative
+    LDA div_n+1 : BPL fits
+    CMP #&80 : BNE overflow
+    LDA div_n : BNE overflow
+.fits
+    LDA #0 : SEC : SBC div_n : STA div_q
+    LDA #0 : SBC div_n+1 : STA div_q+1
+    CLC : RTS
+.overflow
+    SEC : RTS
+}

@@ -1,0 +1,840 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the renderer
+\
+\ The ST's world_render (&04FE8) from the camera to the lines: the camera
+\ matrix, the coarse, near and draw lists with each object rotated into
+\ camera space, then each drawn object's matrix, faces, vertices, edges,
+\ near-plane clip, projection and window clip.
+\
+\ The camera and the lists are the game's logic as well as its drawing
+\ (the collisions, the scanner and the laser read them), so they follow
+\ the ST's arithmetic exactly (decision 1). For now so does the drawing,
+\ apart from the faces, which are tested in object space (decision 9):
+\ tools/scenecheck.py compares every list and line with tools/st_render.py.
+\ ***************************************************************************
+
+\ An object's record: the ST's 64 bytes at its own offsets, its words
+\ little-endian.
+OB_TYPE     = &00
+OB_X        = &04
+OB_Y        = &06
+OB_Z        = &08
+OB_PITCH    = &0A
+OB_HEADING  = &0C
+OB_DRAWN    = &22               ; byte: &FF while in the draw list
+OB_NEAR     = &23               ; byte: &FF while in the near list
+OB_EXPLODING = &24              ; byte
+OB_CX       = &28               ; camera space
+OB_CY       = &2A
+OB_CZ       = &2C
+OB_SIZE     = &40
+
+\ The window, the projection's centre and its shift: the ST's colour-mode
+\ values ($146-$14C, $1FC, $1FE, $212; &08CA0).
+VIEW_XMIN = 16
+VIEW_XMAX = 303
+VIEW_YMIN = 10
+VIEW_YMAX = 128
+VIEW_CX   = 143
+VIEW_CY   = 68
+NEAR_Z    = 2
+
+\ CMPS16 a, b: compare two signed words (zero page), a with b or the
+\ constant #b: N set if a < b.
+MACRO CMPS16 a, b
+    SEC
+    LDA a : SBC b
+    LDA a+1 : SBC b+1
+    BVC ok
+    EOR #&80
+.ok
+ENDMACRO
+MACRO CMPS16 a, "#" b
+    SEC
+    LDA a : SBC #LO(b)
+    LDA a+1 : SBC #HI(b)
+    BVC ok
+    EOR #&80
+.ok
+ENDMACRO
+
+\ FMUL a, b: mul_r = fmul16(a, b), words in zero page.
+MACRO FMUL a, b
+    LDA a : STA mul_x : LDA a+1 : STA mul_x+1
+    LDA b : STA mul_y : LDA b+1 : STA mul_y+1
+    JSR fmul16
+ENDMACRO
+
+\ ADDW r, a / SUBW r, a: r = r + a, r - a (words).
+MACRO ADDW r, a
+    CLC
+    LDA r : ADC a : STA r
+    LDA r+1 : ADC a+1 : STA r+1
+ENDMACRO
+MACRO SUBW r, a
+    SEC
+    LDA r : SBC a : STA r
+    LDA r+1 : SBC a+1 : STA r+1
+ENDMACRO
+MACRO MOVW r, a
+    LDA a : STA r : LDA a+1 : STA r+1
+ENDMACRO
+
+\ VROW r, t, out: out = (the sum of mat's row r times vw) asr 4, plus t.
+MACRO VROW r, t, out
+    LDA mat+r : STA mul_x : LDA mat+r+1 : STA mul_x+1
+    MOVW mul_y, vw : JSR fmul16 : MOVW acc, mul_r
+    LDA mat+r+2 : STA mul_x : LDA mat+r+3 : STA mul_x+1
+    MOVW mul_y, vw+2 : JSR fmul16 : ADDW acc, mul_r
+    LDA mat+r+4 : STA mul_x : LDA mat+r+5 : STA mul_x+1
+    MOVW mul_y, vw+4 : JSR fmul16 : ADDW acc, mul_r
+    LDA acc+1
+    CMP #&80 : ROR A : ROR acc
+    CMP #&80 : ROR A : ROR acc
+    CMP #&80 : ROR A : ROR acc
+    CMP #&80 : ROR A : ROR acc
+    STA acc+1
+    LDA acc : CLC : ADC t : STA out
+    LDA acc+1 : ADC t+1 : STA out+1
+ENDMACRO
+
+MACRO BANK n
+    LDA #n : STA romsel
+ENDMACRO
+
+\ ---------------------------------------------------------------------------
+\ render: the frame's lists and every drawn object's lines.
+.render
+    STZ log_n : STZ log_n+1
+    LDA #LO(line_log) : STA log_ptr : LDA #HI(line_log) : STA log_ptr+1
+    JSR camera
+.render_lists
+    BANK BANK_OBJECTS
+    JSR coarse_list
+    JSR rotate_lists
+.render_objects
+    JSR draw_objects
+.render_done
+    RTS
+
+\ ---------------------------------------------------------------------------
+\ camera (&050A2, &04258): the matrix from the player's angles, the roll
+\ negated.
+.camera
+    MOVW ang_p, pl_pitch
+    MOVW ang_h, pl_heading
+    LDA #0 : SEC : SBC pl_roll : STA ang_r
+    LDA #0 : SBC pl_roll+1 : STA ang_r+1
+    JSR build_matrix
+    LDX #17
+.camera_copy
+    LDA mat,X : STA cam,X
+    DEX : BPL camera_copy
+    STZ mat_valid                       ; mat no longer holds an object's
+    RTS
+
+\ sincos: m_sin, m_cos = the sine table at m_idx (0-4095) and 1024 on.
+\ The sine bank must be paged.
+.sincos
+    LDA m_idx : STA m_ptr
+    LDA m_idx+1 : CLC : ADC #HI(sine_lo) : STA m_ptr+1
+    LDA (m_ptr) : STA m_sin
+    LDA m_ptr+1 : ADC #HI(SINE_ENTRIES) : STA m_ptr+1   ; C = 0
+    LDA (m_ptr) : STA m_sin+1
+    LDA m_ptr+1 : SBC #HI(SINE_ENTRIES) - 4 - 1 : STA m_ptr+1   ; C = 0: 1024 on, low bytes
+    LDA (m_ptr) : STA m_cos
+    LDA m_ptr+1 : CLC : ADC #HI(SINE_ENTRIES) : STA m_ptr+1
+    LDA (m_ptr) : STA m_cos+1
+    RTS
+
+\ build_matrix (&04114): mat from ang_p, ang_h, ang_r (pitch, heading,
+\ roll), as rows x', y', z' of coefficients on x, y, z. The ST keeps the
+\ last object's matrix when the angles haven't changed, and so does this.
+.build_matrix
+{
+    LDA mat_valid : BEQ build
+    LDX #5
+.same
+    LDA ang_p,X : CMP mat_angles,X : BNE build
+    DEX : BPL same
+    RTS
+.build
+    LDX #5
+.keep
+    LDA ang_p,X : STA mat_angles,X
+    DEX : BPL keep
+    LDA #&FF : STA mat_valid
+    BANK BANK_SINE
+    LDA ang_p : STA m_idx : LDA ang_p+1 : AND #&0F : STA m_idx+1
+    JSR sincos : MOVW m_s1, m_sin : MOVW m_c1, m_cos
+    LDA ang_h : STA m_idx : LDA ang_h+1 : AND #&0F : STA m_idx+1
+    JSR sincos : MOVW m_s2, m_sin : MOVW m_c2, m_cos
+    \ the roll: 9 bits, times 8
+    LDA ang_r : STA m_idx : LDA ang_r+1 : AND #1 : STA m_idx+1
+    ASL m_idx : ROL m_idx+1 : ASL m_idx : ROL m_idx+1 : ASL m_idx : ROL m_idx+1
+    JSR sincos : MOVW m_s3, m_sin : MOVW m_c3, m_cos
+    \ The products, in the ST's order (&04190).
+    FMUL m_s3, m_s1 : MOVW m_d6, mul_r
+    FMUL m_c2, m_c3 : MOVW m_d7, mul_r
+    FMUL m_s2, m_d6 : MOVW mat+0, m_d7 : ADDW mat+0, mul_r          ; x' on x
+    FMUL m_s1, m_s2 : MOVW m_t, mul_r
+    FMUL m_t, m_c3 : MOVW mat+6, mul_r
+    FMUL m_s3, m_c2 : SUBW mat+6, mul_r                             ; y' on x
+    FMUL m_s2, m_c1 : MOVW mat+12, mul_r                            ; z' on x
+    FMUL m_c1, m_s3 : MOVW mat+2, mul_r                             ; x' on y
+    FMUL m_c1, m_c3 : MOVW mat+8, mul_r                             ; y' on y
+    LDA #0 : SEC : SBC m_s1 : STA mat+14
+    LDA #0 : SBC m_s1+1 : STA mat+15                                ; z' on y
+    FMUL m_d6, m_c2 : MOVW mat+4, mul_r
+    FMUL m_s2, m_c3 : SUBW mat+4, mul_r                             ; x' on z
+    FMUL m_s3, m_s2 : MOVW mat+10, mul_r
+    FMUL m_d7, m_s1 : ADDW mat+10, mul_r                            ; y' on z
+    FMUL m_c1, m_c2 : MOVW mat+16, mul_r                            ; z' on z
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ coarse_list (&05750): every object within &2020 of the player in z, or
+\ further behind and within &2020 in x (the test as the ST has it, which
+\ keeps the whole band in z). Docked, the tunnel and the silo's missile.
+\ Each slot's list flags are cleared, as the ST clears them.
+.coarse_list
+{
+    STZ coarse_n
+    LDA docked : BEQ open
+    LDA #SLOT_TUNNEL : STA coarse_slots
+    INC coarse_n
+    LDA silo_missile : BEQ done
+    LDA #SLOT_MISSILE : STA coarse_slots+1
+    INC coarse_n
+.done
+    RTS
+.open
+    LDX #0
+.slot
+    LDA obj_lo,X : STA rec : LDA obj_hi,X : STA rec+1
+    LDA #0
+    LDY #OB_NEAR : STA (rec),Y
+    LDY #OB_DRAWN : STA (rec),Y
+    LDY #OB_TYPE : LDA (rec),Y : INY : ORA (rec),Y : BEQ next
+    LDY #OB_Z : LDA (rec),Y : SEC : SBC pl_z : STA dz
+    INY : LDA (rec),Y : SBC pl_z+1 : STA dz+1
+    CMPS16 dz, #&2021 : BPL next        ; more than &2020 ahead
+    CMPS16 dz, #-&201F : BPL keep       ; within &2020 behind
+    LDY #OB_X : LDA (rec),Y : SEC : SBC pl_x : STA dx
+    INY : LDA (rec),Y : SBC pl_x+1 : STA dx+1
+    CMPS16 dx, #&2021 : BPL next
+    CMPS16 dx, #-&2020 : BMI next
+.keep
+    TXA : LDY coarse_n : STA coarse_slots,Y
+    INC coarse_n
+.next
+    INX : CPX n_slots : BEQ done2
+    JMP slot
+.done2
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ rotate_lists (&057B8): the coarse list read from its top, each object
+\ rotated into camera space (&04092) and stored; the near list (all but
+\ the exploding) and the draw list (in front, within the view's pyramid),
+\ pushed in that order.
+.rotate_lists
+{
+    STZ near_n : STZ draw_n
+    LDX coarse_n : BNE each
+    RTS
+.each
+    DEX : STX list_i
+    LDA coarse_slots,X : STA slot : TAX
+    LDA obj_lo,X : STA rec : LDA obj_hi,X : STA rec+1
+    LDY #OB_TYPE : LDA (rec),Y : STA otype : INY : ORA (rec),Y : BNE live
+    JMP next
+.live
+    LDY #OB_X : LDA (rec),Y : SEC : SBC pl_x : STA dx
+    INY : LDA (rec),Y : SBC pl_x+1 : STA dx+1
+    LDY #OB_Y : LDA (rec),Y : SEC : SBC pl_y : STA dy
+    INY : LDA (rec),Y : SBC pl_y+1 : STA dy+1
+    LDY #OB_Z : LDA (rec),Y : SEC : SBC pl_z : STA dz
+    INY : LDA (rec),Y : SBC pl_z+1 : STA dz+1
+    \ x' = cam_xx dx + cam_xy dy + cam_xz dz, and so on
+    LDX #0
+.row
+    STX row_i
+    LDA cam,X : STA mul_x : LDA cam+1,X : STA mul_x+1
+    MOVW mul_y, dx : JSR fmul16 : MOVW acc, mul_r
+    LDX row_i
+    LDA cam+2,X : STA mul_x : LDA cam+3,X : STA mul_x+1
+    MOVW mul_y, dy : JSR fmul16 : ADDW acc, mul_r
+    LDX row_i
+    LDA cam+4,X : STA mul_x : LDA cam+5,X : STA mul_x+1
+    MOVW mul_y, dz : JSR fmul16 : ADDW acc, mul_r
+    LDX row_i
+    LDA acc : STA rx,X : LDA acc+1 : STA rx+1,X     ; rx, ry, rz: a word each, 6 apart
+    TXA : CLC : ADC #6 : TAX
+    CPX #18 : BEQ rows_done
+    JMP row
+.rows_done
+    \ rx at +0, ry at +6, rz at +12 of rx's block
+    LDY #OB_CX : LDA rx : STA (rec),Y : INY : LDA rx+1 : STA (rec),Y
+    LDY #OB_CY : LDA rx+6 : STA (rec),Y : INY : LDA rx+7 : STA (rec),Y
+    LDY #OB_CZ : LDA rx+12 : STA (rec),Y : INY : LDA rx+13 : STA (rec),Y
+    LDY #OB_EXPLODING : LDA (rec),Y : BNE not_near
+    LDA #&FF : LDY #OB_NEAR : STA (rec),Y
+    LDA slot : LDY near_n : STA near_slots,Y
+    INC near_n
+.not_near
+    MOVW cz, rx+12
+    MOVW cx, rx
+    MOVW cy, rx+6
+    CMPS16 cz, #&2001 : BMI ahead       ; more than &2000 away: not drawn
+    JMP next
+.ahead
+    LDX otype
+    LDA #0 : SEC : SBC size_z_lo,X : STA t16
+    LDA #0 : SBC size_z_hi,X : STA t16+1
+    CMPS16 t16, cz : BPL next           ; wholly behind: z <= -size
+    LDA cz : ASL A : STA z2 : LDA cz+1 : ROL A : STA z2+1
+    LDA #0 : SEC : SBC z2 : STA nz2 : LDA #0 : SBC z2+1 : STA nz2+1
+    CMPS16 cx, nz2 : BMI next
+    CMPS16 z2, cx : BMI next
+    CMPS16 cy, nz2 : BMI next
+    CMPS16 z2, cy : BMI next
+    LDA #&FF : LDY #OB_DRAWN : STA (rec),Y
+    LDA slot : LDY draw_n : STA draw_slots,Y
+    INC draw_n
+.next
+    LDX list_i : BEQ done
+    JMP each
+.done
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ draw_objects (&05108): the draw list read from its top. Each object's
+\ matrix takes the player's pitch and heading added to its own, and the
+\ player's roll negated (the ST's sum of angles, not a product of
+\ matrices).
+.draw_objects
+{
+    LDX draw_n : BNE each
+    RTS
+.each
+    DEX : STX list_i
+    LDA draw_slots,X : STA slot : TAX
+    LDA obj_lo,X : STA rec : LDA obj_hi,X : STA rec+1
+    LDY #OB_TYPE : LDA (rec),Y : STA otype : INY : ORA (rec),Y : BEQ next
+    LDY #OB_EXPLODING : LDA (rec),Y : BNE next      ; draw_shape_exploding: later
+    LDY #OB_CX : LDA (rec),Y : STA tx : INY : LDA (rec),Y : STA tx+1
+    LDY #OB_CY : LDA (rec),Y : STA ty : INY : LDA (rec),Y : STA ty+1
+    LDY #OB_CZ : LDA (rec),Y : STA tz : INY : LDA (rec),Y : STA tz+1
+    LDY #OB_PITCH : LDA (rec),Y : CLC : ADC pl_pitch : STA ang_p
+    INY : LDA (rec),Y : ADC pl_pitch+1 : STA ang_p+1
+    LDY #OB_HEADING : LDA (rec),Y : CLC : ADC pl_heading : STA ang_h
+    INY : LDA (rec),Y : ADC pl_heading+1 : STA ang_h+1
+    LDA #0 : SEC : SBC pl_roll : STA ang_r
+    LDA #0 : SBC pl_roll+1 : STA ang_r+1
+    JSR draw_shape
+    BANK BANK_OBJECTS
+.next
+    LDX list_i : BEQ done
+    JMP each
+.done
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ draw_shape (&04B1C): the object in `slot`, at (tx, ty, tz) in camera
+\ space, its angles in ang_p, ang_h, ang_r.
+.draw_shape
+{
+    LDX otype
+    LDA type_shape,X : CMP #SHAPES : BCC known
+    RTS
+.known
+    STA shape
+    JSR build_matrix
+    BANK BANK_SHAPES
+    LDX shape
+    LDA shape_lo,X : STA hdr : LDA shape_hi,X : STA hdr+1
+    LDY #HDR_BYTES + HDR_WORDS * 2 - 1
+.header
+    LDA (hdr),Y : STA sh_nverts,Y
+    DEY : BPL header
+    \ The frame: the animation's, by shape.
+    LDX shape : LDA anim_frame,X : ASL A : TAY
+    LDA (sh_frames),Y : STA fr : INY : LDA (sh_frames),Y : STA fr+1
+    \ Its arrays follow each other: the moving vertices' x, y, z, the
+    \ changing faces' normals, then every face's K. Each pointer is set
+    \ back by the count of still vertices or rigid faces, so it's indexed
+    \ by vertex or face number.
+    LDA sh_nverts : SEC : SBC sh_nstill : STA nmove
+    LDA sh_nfaces : SEC : SBC sh_nrigid : STA nturn
+    LDA fr : SEC : SBC sh_nstill : STA fr_vx : LDA fr+1 : SBC #0 : STA fr_vx+1
+    LDA fr_vx : CLC : ADC nmove : STA fr_vy : LDA fr_vx+1 : ADC #0 : STA fr_vy+1
+    LDA fr_vy : CLC : ADC nmove : STA fr_vz : LDA fr_vy+1 : ADC #0 : STA fr_vz+1
+    \ fr_nx = fr + 3 nmove - nrigid
+    LDA nmove : ASL A : ADC nmove : STA t16 : LDA #0 : ROL A : STA t16+1   ; 3 nmove (C = 0 after ASL of < 128)
+    LDA fr : CLC : ADC t16 : STA fr_k : LDA fr+1 : ADC t16+1 : STA fr_k+1  ; past the vertices
+    LDA fr_k : SEC : SBC sh_nrigid : STA fr_nx : LDA fr_k+1 : SBC #0 : STA fr_nx+1
+    LDA fr_nx : CLC : ADC nturn : STA fr_ny : LDA fr_nx+1 : ADC #0 : STA fr_ny+1
+    LDA fr_ny : CLC : ADC nturn : STA fr_nz : LDA fr_ny+1 : ADC #0 : STA fr_nz+1
+    LDA nturn : ASL A : ADC nturn : STA t16 : LDA #0 : ROL A : STA t16+1
+    LDA fr_k : CLC : ADC t16 : STA fr_klo : LDA fr_k+1 : ADC t16+1 : STA fr_klo+1
+    LDA fr_klo : CLC : ADC sh_nfaces : STA fr_khi : LDA fr_klo+1 : ADC #0 : STA fr_khi+1
+    \ The colour: the shape's, or the beam's, which animate_shapes cycles.
+    LDA sh_colour : CMP #&FF : BNE colour_ok
+    LDA beam_colour
+.colour_ok
+    AND #15 : STA ocolour : TAX
+    LDA colour_map,X : JSR set_colour
+    \ The camera in object space, in world units: c = -(mat transposed) t.
+    LDX #0
+.cam_axis
+    STX row_i
+    LDA mat,X : STA mul_x : LDA mat+1,X : STA mul_x+1
+    MOVW mul_y, tx : JSR fmul16 : MOVW acc, mul_r
+    LDX row_i
+    LDA mat+6,X : STA mul_x : LDA mat+7,X : STA mul_x+1
+    MOVW mul_y, ty : JSR fmul16 : ADDW acc, mul_r
+    LDX row_i
+    LDA mat+12,X : STA mul_x : LDA mat+13,X : STA mul_x+1
+    MOVW mul_y, tz : JSR fmul16 : ADDW acc, mul_r
+    LDX row_i
+    LDA #0 : SEC : SBC acc : STA objc,X
+    LDA #0 : SBC acc+1 : STA objc+1,X
+    INX : INX : CPX #6 : BEQ axes_done
+    JMP cam_axis
+.axes_done
+    \ A new stamp marks this object's edges and vertices.
+    INC stamp : BNE stamped
+    LDX #0
+.wipe
+    STZ edge_mark,X : STZ vert_mark,X
+    INX : BNE wipe
+    INC stamp
+.stamped
+    JSR faces
+    JMP edges
+}
+
+\ faces: each face's edges marked if it's visible: always-visible, or the
+\ camera on its outer side, n.c > 4K.
+.faces
+{
+    STZ face_i
+.each
+    LDY face_i : CPY sh_nfaces : BCC test
+    RTS
+.test
+    LDA (sh_fflags),Y : ORA all_faces : BPL tested
+    JMP visible
+.tested
+    CPY sh_nrigid : BCS turning
+    LDA (sh_nx),Y : STA nx : LDA (sh_ny),Y : STA ny : LDA (sh_nz),Y : STA nz
+    BRA normal
+.turning
+    LDA (fr_nx),Y : STA nx : LDA (fr_ny),Y : STA ny : LDA (fr_nz),Y : STA nz
+.normal
+    \ dot = n.c, 32 bits
+    STZ dot : STZ dot+1 : STZ dot+2 : STZ dot+3
+    LDX #0
+.axis
+    STX row_i
+    LDA nx,X : STA mul_x : LDA #0 : BIT mul_x : BPL npos
+    LDA #&FF
+.npos
+    STA mul_x+1
+    TXA : ASL A : TAX
+    LDA objc,X : STA mul_y : LDA objc+1,X : STA mul_y+1
+    JSR smul16
+    CLC
+    LDA dot : ADC mul_p : STA dot
+    LDA dot+1 : ADC mul_p+1 : STA dot+1
+    LDA dot+2 : ADC mul_p+2 : STA dot+2
+    LDA dot+3 : ADC mul_p+3 : STA dot+3
+    LDX row_i : INX : CPX #3 : BNE axis
+    \ visible if dot - 4K > 0
+    LDY face_i
+    LDA (fr_klo),Y : STA kk : LDA (fr_khi),Y : STA kk+1
+    LDA #0 : BIT kk+1 : BPL kpos
+    LDA #&FF
+.kpos
+    STA kk+2 : STA kk+3
+    ASL kk : ROL kk+1 : ROL kk+2 : ROL kk+3
+    ASL kk : ROL kk+1 : ROL kk+2 : ROL kk+3
+    SEC
+    LDA dot : SBC kk : STA dot
+    LDA dot+1 : SBC kk+1 : STA dot+1
+    LDA dot+2 : SBC kk+2 : STA dot+2
+    LDA dot+3 : SBC kk+3 : STA dot+3
+    BMI next
+    ORA dot : ORA dot+1 : ORA dot+2 : BEQ next      ; zero: on the plane
+.visible
+    LDY face_i
+    LDA (sh_fedges),Y : TAY
+    LDA (sh_elists),Y : STA count
+.mark
+    INY : LDA (sh_elists),Y : TAX
+    LDA stamp : STA edge_mark,X
+    DEC count : BNE mark
+.next
+    INC face_i
+    JMP each
+}
+
+\ edges (&04D16): each marked edge, its vertices transformed as needed.
+.edges
+{
+    STZ edge_i
+.each
+    LDY edge_i : CPY sh_nedges : BCC test
+    RTS
+.test
+    LDA edge_mark,Y : CMP stamp : BNE next
+    LDA (sh_ev0),Y : STA va
+    LDA (sh_ev1),Y : STA vb
+    LDA va : JSR vertex
+    LDA vb : JSR vertex
+    JSR edge
+.next
+    INC edge_i
+    BRA each
+}
+
+\ vertex: vertex A of the shape into camera space (&03FFE) and, in front
+\ of the near plane, projected; once an object.
+.vertex
+{
+    TAX
+    LDA vert_mark,X : CMP stamp : BNE new
+    RTS
+.new
+    LDA stamp : STA vert_mark,X
+    STX vtx
+    TXA : TAY
+    CPY sh_nstill : BCS moving
+    LDA (sh_vx),Y : STA kv : LDA (sh_vy),Y : STA kv+1 : LDA (sh_vz),Y : STA kv+2
+    BRA got
+.moving
+    LDA (fr_vx),Y : STA kv : LDA (fr_vy),Y : STA kv+1 : LDA (fr_vz),Y : STA kv+2
+.got
+    \ The ST's coordinate: k times the shape's g (32 x scale).
+    LDX #2
+.coord
+    STX row_i
+    LDA kv,X : BPL kpos
+    EOR #&FF : CLC : ADC #1
+.kpos
+    TAY : LDA sh_scale : MUL_SET : MUL8 t16 : STA t16+1
+    \ x 32
+    LDA t16 : LDX #5
+.shift
+    ASL A : ROL t16+1 : DEX : BNE shift
+    STA t16
+    LDX row_i
+    LDA kv,X : BPL vpos
+    LDA #0 : SEC : SBC t16 : STA t16 : LDA #0 : SBC t16+1 : STA t16+1
+.vpos
+    TXA : ASL A : TAX
+    LDA t16 : STA vw,X : LDA t16+1 : STA vw+1,X
+    LDX row_i : DEX : BPL coord
+    \ each axis: the matrix's row by the coordinate, asr 4, plus the position
+    VROW 0, tx, cvx
+    VROW 6, ty, cvy
+    VROW 12, tz, cvz
+    LDY vtx
+    LDA cvx : STA v_xlo,Y : LDA cvx+1 : STA v_xhi,Y
+    LDA cvy : STA v_ylo,Y : LDA cvy+1 : STA v_yhi,Y
+    LDA cvz : STA v_zlo,Y : LDA cvz+1 : STA v_zhi,Y
+    CMPS16 cvz, #NEAR_Z : BMI behind
+    MOVW px, cvx : MOVW pz, cvz : JSR project
+    LDY vtx
+    LDA pq : CLC : ADC #LO(VIEW_CX) : STA v_sxlo,Y
+    LDA pq+1 : ADC #HI(VIEW_CX) : STA v_sxhi,Y
+    MOVW px, cvy : JSR project
+    LDY vtx
+    LDA pq : CLC : ADC #LO(VIEW_CY) : STA v_sylo,Y
+    LDA pq+1 : ADC #HI(VIEW_CY) : STA v_syhi,Y
+.behind
+    RTS
+}
+
+
+\ project (&04D66): pq = (px << 7) / pz as divs does it: truncated, or on
+\ overflow the shifted value's low word, which the ST then uses.
+.project
+{
+    STZ mul_p
+    LDA px : STA mul_p+1
+    LDA px+1 : STA mul_p+2
+    LDA #0 : BIT px+1 : BPL pos
+    LDA #&FF
+.pos
+    STA mul_p+3
+    CMP #&80 : ROR mul_p+3 : ROR mul_p+2 : ROR mul_p+1 : ROR mul_p
+    MOVW div_d, pz
+    JSR sdiv32
+    BCS overflow
+    MOVW pq, div_q
+    RTS
+.overflow
+    MOVW pq, mul_p
+    RTS
+}
+
+\ edge (&04D66): the edge from vertex va to vb, clipped at z = 2 if it
+\ crosses the plane, projected and clipped to the window.
+.edge
+{
+    LDX va : LDY vb
+    LDA v_zlo,X : STA ep+4 : LDA v_zhi,X : STA ep+5
+    LDA v_zlo,Y : STA eq+4 : LDA v_zhi,Y : STA eq+5
+    STZ code                            ; bit 1: p in front, bit 0: q
+    CMPS16 ep+4, #NEAR_Z : BMI p_behind
+    LDA #2 : TSB code
+.p_behind
+    CMPS16 eq+4, #NEAR_Z : BMI q_behind
+    LDA #1 : TSB code
+.q_behind
+    LDA code : CMP #3 : BEQ in_front
+    CMP #0 : BNE crosses
+    RTS                                 ; both behind
+.in_front
+    LDX va : LDY vb
+    LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
+    LDA v_sylo,X : STA cy0 : LDA v_syhi,X : STA cy0+1
+    LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
+    LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
+    JMP clip_line
+.crosses
+    LDX va : LDY vb
+    LDA v_xlo,X : STA ep : LDA v_xhi,X : STA ep+1
+    LDA v_ylo,X : STA ep+2 : LDA v_yhi,X : STA ep+3
+    LDA v_xlo,Y : STA eq : LDA v_xhi,Y : STA eq+1
+    LDA v_ylo,Y : STA eq+2 : LDA v_yhi,Y : STA eq+3
+    JSR clip_near
+    MOVW px, ep : MOVW pz, ep+4 : JSR project
+    LDA pq : CLC : ADC #LO(VIEW_CX) : STA cx0 : LDA pq+1 : ADC #HI(VIEW_CX) : STA cx0+1
+    MOVW px, ep+2 : JSR project
+    LDA pq : CLC : ADC #LO(VIEW_CY) : STA cy0 : LDA pq+1 : ADC #HI(VIEW_CY) : STA cy0+1
+    MOVW px, eq : MOVW pz, eq+4 : JSR project
+    LDA pq : CLC : ADC #LO(VIEW_CX) : STA cx1 : LDA pq+1 : ADC #HI(VIEW_CX) : STA cx1+1
+    MOVW px, eq+2 : JSR project
+    LDA pq : CLC : ADC #LO(VIEW_CY) : STA cy1 : LDA pq+1 : ADC #HI(VIEW_CY) : STA cy1+1
+    JMP clip_line
+}
+
+\ clip_near (&0A374): ep and eq (x, y, z words), one behind z = 2. The
+\ ST's arithmetic exactly: when eq is the one behind they're swapped, and
+\ stay so; the fraction is (2 - z) << 16 over the edge's dz, a 16-bit
+\ quotient used as if it had 15 bits, and 0 when divs overflows.
+.clip_near
+{
+.again
+    CMPS16 ep+4, #NEAR_Z : BMI clip
+    CMPS16 eq+4, #NEAR_Z : BMI swap
+    RTS
+.swap
+    LDX #5
+.swap1
+    LDA ep,X : PHA : LDA eq,X : STA ep,X : PLA : STA eq,X
+    DEX : BPL swap1
+    BRA again
+.clip
+    STZ mul_p : STZ mul_p+1
+    LDA #LO(NEAR_Z) : SEC : SBC ep+4 : STA mul_p+2
+    LDA #HI(NEAR_Z) : SBC ep+5 : STA mul_p+3
+    LDA eq+4 : SEC : SBC ep+4 : STA div_d
+    LDA eq+5 : SBC ep+5 : STA div_d+1
+    JSR sdiv32
+    BCC fits
+    STZ div_q : STZ div_q+1
+.fits
+    LDX #0
+    JSR cut_axis
+    LDX #2
+    JSR cut_axis
+    LDA #LO(NEAR_Z) : STA ep+4 : LDA #HI(NEAR_Z) : STA ep+5
+    BRA again
+.cut_axis
+    STX row_i
+    LDA eq,X : SEC : SBC ep,X : STA mul_x
+    LDA eq+1,X : SBC ep+1,X : STA mul_x+1
+    MOVW mul_y, div_q
+    JSR smul16
+    ASL mul_p+1 : ROL mul_p+2 : ROL mul_p+3
+    LDX row_i
+    LDA ep,X : CLC : ADC mul_p+2 : STA ep,X
+    LDA ep+1,X : ADC mul_p+3 : STA ep+1,X
+    RTS
+}
+
+\ clip_line (&0A170): Cohen-Sutherland to the window, as the ST clips: a
+\ vertical or horizontal line is clamped; otherwise point 0 is cut, the
+\ points swapped first (and left so) when point 0 is inside. Then the line
+\ is logged and drawn. cx0, cy0, cx1, cy1 are consecutive words.
+.clip_line
+{
+.again
+    MOVW px, cx0 : MOVW pz, cy0 : JSR outcode : STA code0
+    MOVW px, cx1 : MOVW pz, cy1 : JSR outcode : STA code1
+    ORA code0 : BNE outside
+    JMP accept
+.outside
+    LDA code0 : AND code1 : BEQ crossing
+    RTS
+.crossing
+    LDA cx1 : CMP cx0 : BNE not_vertical
+    LDA cx1+1 : CMP cx0+1 : BNE not_vertical
+    LDX #cy0 : JSR clamp_y
+    LDX #cy1 : JSR clamp_y
+    BRA again
+.not_vertical
+    LDA cy1 : CMP cy0 : BNE slanted
+    LDA cy1+1 : CMP cy0+1 : BNE slanted
+    LDX #cx0 : JSR clamp_x
+    LDX #cx1 : JSR clamp_x
+    BRA again
+.slanted
+    LDA code0 : BNE cut
+    LDX #3
+.swap
+    LDA cx0,X : LDY cx1,X : STA cx1,X : STY cx0,X
+    DEX : BPL swap
+    LDA code1 : STA code0
+.cut
+    LSR code0 : BCC not_top
+    \ above: x0 += (ymin - y0)(x1 - x0) / (y1 - y0), y0 = ymin
+    LDA #LO(VIEW_YMIN) : SEC : SBC cy0 : STA mul_x : LDA #HI(VIEW_YMIN) : SBC cy0+1 : STA mul_x+1
+    JSR dx_dy
+    ADDW cx0, pq
+    LDA #LO(VIEW_YMIN) : STA cy0 : LDA #HI(VIEW_YMIN) : STA cy0+1
+    JMP again
+.not_top
+    LSR code0 : BCC not_left
+    \ left: y0 += (xmin - x0)(y1 - y0) / (x1 - x0), x0 = xmin
+    LDA #LO(VIEW_XMIN) : SEC : SBC cx0 : STA mul_x : LDA #HI(VIEW_XMIN) : SBC cx0+1 : STA mul_x+1
+    JSR dy_dx
+    ADDW cy0, pq
+    LDA #LO(VIEW_XMIN) : STA cx0 : LDA #HI(VIEW_XMIN) : STA cx0+1
+    JMP again
+.not_left
+    LSR code0 : BCC not_bottom
+    LDA #LO(VIEW_YMAX) : SEC : SBC cy0 : STA mul_x : LDA #HI(VIEW_YMAX) : SBC cy0+1 : STA mul_x+1
+    JSR dx_dy
+    ADDW cx0, pq
+    LDA #LO(VIEW_YMAX) : STA cy0 : LDA #HI(VIEW_YMAX) : STA cy0+1
+    JMP again
+.not_bottom
+    LDA #LO(VIEW_XMAX) : SEC : SBC cx0 : STA mul_x : LDA #HI(VIEW_XMAX) : SBC cx0+1 : STA mul_x+1
+    JSR dy_dx
+    ADDW cy0, pq
+    LDA #LO(VIEW_XMAX) : STA cx0 : LDA #HI(VIEW_XMAX) : STA cx0+1
+    JMP again
+\ dx_dy, dy_dx: pq = mul_x (x1 - x0) / (y1 - y0), or with x and y the
+\ other way: muls then divs, and on overflow the product's low word.
+.dx_dy
+    LDA cx1 : SEC : SBC cx0 : STA mul_y : LDA cx1+1 : SBC cx0+1 : STA mul_y+1
+    LDA cy1 : SEC : SBC cy0 : STA div_d : LDA cy1+1 : SBC cy0+1 : STA div_d+1
+    BRA muldiv
+.dy_dx
+    LDA cy1 : SEC : SBC cy0 : STA mul_y : LDA cy1+1 : SBC cy0+1 : STA mul_y+1
+    LDA cx1 : SEC : SBC cx0 : STA div_d : LDA cx1+1 : SBC cx0+1 : STA div_d+1
+.muldiv
+    JSR smul16
+    JSR sdiv32
+    BCS overflow
+    MOVW pq, div_q
+    RTS
+.overflow
+    MOVW pq, mul_p
+    RTS
+.accept
+    \ the log: slot, edge, x0, y0, x1, y1, colour
+    LDA log_n+1 : BNE full
+    LDA log_n : CMP #LOG_LINES : BCC room
+.full
+    JMP draw
+.room
+    LDY #0
+    LDA slot : STA (log_ptr),Y : INY
+    LDA edge_i : STA (log_ptr),Y : INY
+    LDA cx0 : STA (log_ptr),Y : INY
+    LDA cx0+1 : STA (log_ptr),Y : INY
+    LDA cy0 : STA (log_ptr),Y : INY
+    LDA cx1 : STA (log_ptr),Y : INY
+    LDA cx1+1 : STA (log_ptr),Y : INY
+    LDA cy1 : STA (log_ptr),Y : INY
+    LDA ocolour : STA (log_ptr),Y : INY
+    TYA : CLC : ADC log_ptr : STA log_ptr
+    BCC logged
+    INC log_ptr+1
+.logged
+    INC log_n : BNE counted
+    INC log_n+1
+.counted
+.draw
+    MOVW line_x0, cx0 : LDA cy0 : STA line_y0
+    MOVW line_x1, cx1 : LDA cy1 : STA line_y1
+    JMP line
+}
+
+\ outcode: A = the window's outcode of (px, pz): 8 right, 4 below, 2 left,
+\ 1 above (&0A174).
+.outcode
+{
+    STZ code
+    CMPS16 px, #VIEW_XMAX + 1 : BMI c1
+    LDA #8 : TSB code
+.c1
+    CMPS16 pz, #VIEW_YMAX + 1 : BMI c2
+    LDA #4 : TSB code
+.c2
+    CMPS16 px, #VIEW_XMIN : BPL c3
+    LDA #2 : TSB code
+.c3
+    CMPS16 pz, #VIEW_YMIN : BPL c4
+    LDA #1 : TSB code
+.c4
+    LDA code
+    RTS
+}
+
+\ clamp_y, clamp_x: the word at zero page X into the window's rows or
+\ columns (&0A2F8, &0A330).
+.clamp_y
+{
+    SEC : LDA 0,X : SBC #LO(VIEW_YMIN) : LDA 1,X : SBC #HI(VIEW_YMIN)
+    BVC v1 : EOR #&80
+.v1
+    BPL not_low
+    LDA #LO(VIEW_YMIN) : STA 0,X : LDA #HI(VIEW_YMIN) : STA 1,X
+    RTS
+.not_low
+    SEC : LDA #LO(VIEW_YMAX) : SBC 0,X : LDA #HI(VIEW_YMAX) : SBC 1,X
+    BVC v2 : EOR #&80
+.v2
+    BPL done
+    LDA #LO(VIEW_YMAX) : STA 0,X : LDA #HI(VIEW_YMAX) : STA 1,X
+.done
+    RTS
+}
+.clamp_x
+{
+    SEC : LDA 0,X : SBC #LO(VIEW_XMIN) : LDA 1,X : SBC #HI(VIEW_XMIN)
+    BVC v1 : EOR #&80
+.v1
+    BPL not_low
+    LDA #LO(VIEW_XMIN) : STA 0,X : LDA #HI(VIEW_XMIN) : STA 1,X
+    RTS
+.not_low
+    SEC : LDA #LO(VIEW_XMAX) : SBC 0,X : LDA #HI(VIEW_XMAX) : SBC 1,X
+    BVC v2 : EOR #&80
+.v2
+    BPL done
+    LDA #LO(VIEW_XMAX) : STA 0,X : LDA #HI(VIEW_XMAX) : STA 1,X
+.done
+    RTS
+}

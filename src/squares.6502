@@ -1,0 +1,24 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the quarter-squares tables (maths.6502)
+\ ***************************************************************************
+
+\ The tables: f(x) for x in 0..510, and f(x - 255), each split into low and
+\ high bytes; mul_set points m_sqlo/m_sqhi at f(a + Y) and m_nglo/m_nghi
+\ at f(Y - a).
+ALIGN 256
+.sqr_lo
+FOR x = 0..511
+    EQUB LO(x * x DIV 4)
+NEXT
+.sqr_hi
+FOR x = 0..511
+    EQUB HI(x * x DIV 4)
+NEXT
+.neg_lo
+FOR x = 0..511
+    EQUB LO((x - 255) * (x - 255) DIV 4)
+NEXT
+.neg_hi
+FOR x = 0..511
+    EQUB HI((x - 255) * (x - 255) DIV 4)
+NEXT

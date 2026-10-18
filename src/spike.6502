@@ -1,0 +1,52 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the speed spike (layer 0)
+\
+\ The renderer alone, driven by tools/scenerun.mjs: it writes a scene
+\ captured from the ST (tools/st_scenes.py) into the objects' bank and the
+\ frame's inputs, calls spike_frame and reads the lists, the camera-space
+\ positions and line_log back. The banks are loaded by the harness: the
+\ shapes into BANK_SHAPES, the sine table into BANK_SINE.
+\ ***************************************************************************
+
+INCLUDE "defs.6502"
+INCLUDE "zp.6502"
+
+SECTION Spike, org = &0E00, filename = "SPIKE", guard = LOG, cmos = TRUE
+.spike_init
+    JSR mul_init
+    JSR line_draw
+    JSR screen_mode
+    RTS
+
+.spike_frame
+    JSR render
+.spike_done
+    RTS
+
+INCLUDE "maths.6502"
+INCLUDE "render.6502"
+INCLUDE "screen.6502"
+INCLUDE "../build/gen/line.6502"
+INCLUDE "../build/gen/types.6502"
+
+\ each object's record's address, by slot
+.obj_lo
+FOR i = 0..<SLOTS + 2
+    EQUB LO(OBJECTS + i * OB_SIZE)
+NEXT
+.obj_hi
+FOR i = 0..<SLOTS + 2
+    EQUB HI(OBJECTS + i * OB_SIZE)
+NEXT
+
+INCLUDE "squares.6502"
+.spike_end
+ENDSECTION
+
+SECTION Shapes, org = &8000, filename = "SHAPES", guard = &C000
+INCLUDE "../build/gen/shapes.6502"
+ENDSECTION
+
+SECTION Sine, org = &8000, filename = "SINE", guard = &C000
+INCLUDE "sine.6502"
+ENDSECTION

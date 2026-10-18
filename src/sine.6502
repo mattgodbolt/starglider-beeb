@@ -1,0 +1,21 @@
+; The ST's sine table (&13D6C): 16384 sin(2 pi i / 4096), 4096 steps a
+; turn, with entries to 5119 because the cosine is read 1024 on. Made as
+; the ST's was: pi as 3.14159, and rounded by truncating x + 0.5, which
+; gives every entry but twelve. Those twelve lie within 0.005 of a tie,
+; which the ST's own arithmetic rounded the other way; SINE_UP and
+; SINE_DOWN put them back. The table isn't quite periodic or symmetric
+; (pi is short), so the whole of it is kept. tools/sinecheck.py checks it
+; against the ST's.
+SINE_ENTRIES = 5120
+SINE_UP = {342, 445, 1003, 1736, 2535}
+SINE_DOWN = {2140, 3722, 3798, 4059, 4195, 4341, 4497}
+FUNCTION st_sine(i) = TRUNC(16384 * SIN(i * 2 * 3.14159 / 4096) + 0.5) + SUM(SINE_UP = i) - SUM(SINE_DOWN = i)
+
+.sine_lo
+FOR i = 0..<SINE_ENTRIES
+    EQUB LO(st_sine(i) AND &FFFF)
+NEXT
+.sine_hi
+FOR i = 0..<SINE_ENTRIES
+    EQUB HI(st_sine(i) AND &FFFF)
+NEXT

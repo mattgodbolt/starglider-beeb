@@ -162,8 +162,9 @@ class Renderer:
             if mem.s16(a) == 0:
                 continue
             exploding = mem.u8(a + 0x24) != 0
+            self.line_edges = []
             lines = [] if exploding else self.draw_shape(a, rel[a], pitch, heading, roll)
-            objects.append({"object": a, "exploding": exploding, "lines": lines})
+            objects.append({"object": a, "exploding": exploding, "lines": lines, "edges": self.line_edges})
         return {"coarse": coarse, "near": near, "draw": drawlist, "rel": rel, "objects": objects}
 
     def coarse_list(self, player):
@@ -279,6 +280,7 @@ class Renderer:
                 self.table[i] = self.transform(*vert(i))
                 vmark[i] = 1
         lines = []
+        self.line_edges = []                            # each line's edge number
         for i in range(ne):                             # &04D16
             if emark[i]:
                 p = self.table.get(prg.u16(edges + 4 * i) // 8, (0, 0, 0))
@@ -286,6 +288,7 @@ class Renderer:
                 line = self.edge(p, q)
                 if line:
                     lines.append(line + [colour])
+                    self.line_edges.append(i)
         return lines
 
     def edge(self, p, q):
