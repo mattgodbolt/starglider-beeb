@@ -17,18 +17,24 @@ FOR r = 0..<SCREEN_ROWS
 NEXT
 
 \ screen_clear: the screen draw_bank names (0 main, ACCCON_X shadow),
-\ from SCREEN to the top of RAM.
+\ from SCREEN to the top of RAM: the rest of SCREEN's page, then two
+\ pages a pass, their addresses patched in.
 .screen_clear
 {
-    ZA_AUTO2 p
     LDA draw_bank : TSB acccon
-    STZ p : LDA #HI(SCREEN) : STA p+1
     LDY #LO(SCREEN) : LDA #0
-    ASSERT LO(SCREEN) MOD 4 = 0
-.clear
-    STA (p),Y : INY : STA (p),Y : INY : STA (p),Y : INY : STA (p),Y : INY
-    BNE clear
-    INC p+1 : BPL clear                 ; to &7FFF
+.part
+    STA SCREEN AND &FF00,Y : INY : BNE part
+    ASSERT (&80 - HI(SCREEN) - 1) MOD 2 = 0
+    LDX #HI(SCREEN) + 1
+.pages
+    STX page0+2 : INX : STX page1+2 : INX
+.page0
+    STA &FF00,Y                         ; patched
+.page1
+    STA &FF00,Y                         ; patched
+    INY : BNE page0
+    CPX #&80 : BNE pages                ; to &7FFF
     LDA draw_bank : TRB acccon
     RTS
 }
