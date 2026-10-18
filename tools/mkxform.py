@@ -39,27 +39,44 @@ ZA_AUTO1 xf_plo
 
 CLC_OP = &18
 SEC_OP = &38
+CARRY_BIT = CLC_OP EOR SEC_OP   ; a sign's mask AND this, OR CLC_OP: CLC or SEC
 """)
 
 
-def transform(name, prefix, rows, mag, sign, acc, start, what, origin=None):
-    emit(f"""ZA_AUTO {2 * rows}, {acc}             ; {what}, in quarters
-ZA_AUTO {2 * rows}, {start}           ; their starting values, {name}_setup's
+def row_start(i, start, origin):
+    """The row's starting value from its sum (sum, 24 bits)."""
+    emit("    LDA sum+2 : CMP #&80 : ROR A : ROR sum+1 : ROR sum")
+    if origin:
+        emit(f"    \\ row {i} starts at {origin[i]} - (the row's sum) / 2")
+        emit(f"    LDA {origin[i]} : SEC : SBC sum : STA {start}+{2 * i}")
+        emit(f"    LDA {origin[i]}+1 : SBC sum+1 : STA {start}+{2 * i + 1}")
+    else:
+        emit(f"    \\ row {i} starts at -(the row's sum) / 2")
+        emit(f"    LDA #0 : SEC : SBC sum : STA {start}+{2 * i}")
+        emit(f"    LDA #0 : SBC sum+1 : STA {start}+{2 * i + 1}")
 
-\\ {name}_setup: specialise {name}_vertex to the object's {mag} and
+
+def lookups(prefix, e, mag):
+    """Patch term e's quarter-square reads with its magnitude's bytes."""
+    t = f"{prefix}{e}"
+    emit(f"    LDA {mag}+{2 * e} : STA {t}_a+1 : EOR #&FF : STA {t}_b+1")
+    emit(f"    LDA {mag}+{2 * e + 1} : STA {t}_c+1 : STA {t}_e+1 : EOR #&FF : STA {t}_d+1 : STA {t}_f+1")
+
+
+def setup(name, prefix, rows, mag, sign, start, origin):
+    """name_setup, unrolled: each term patched, each row's sum made as it goes."""
+    emit(f"""\\ {name}_setup: specialise {name}_vertex to the object's {mag} and
 \\ {sign} (by term: {rows} rows of x, y, z).
 .{name}_setup
 {{
-    ZA_AUTO 3, sum
-""")
+    ZA_AUTO 3, sum""")
     for i in range(rows):
         emit("    STZ sum : STZ sum+1 : STZ sum+2")
         for j in range(3):
             e = 3 * i + j
             t = f"{prefix}{e}"
             emit(f"    \\ term {e}")
-            emit(f"    LDA {mag}+{2 * e} : STA {t}_a+1 : EOR #&FF : STA {t}_b+1")
-            emit(f"    LDA {mag}+{2 * e + 1} : STA {t}_c+1 : STA {t}_e+1 : EOR #&FF : STA {t}_d+1 : STA {t}_f+1")
+            lookups(prefix, e, mag)
             emit(f"    LDA {sign}+{e} : BMI neg{e}")
             emit(f"    LDA #CLC_OP : STA {t}_c0 : LDA #0 : STA {t}_m0+1 : STA {t}_m1+1")
             emit(f"    CLC : LDA sum : ADC {mag}+{2 * e} : STA sum")
@@ -72,18 +89,67 @@ ZA_AUTO {2 * rows}, {start}           ; their starting values, {name}_setup's
             emit(f"    LDA sum+1 : SBC {mag}+{2 * e + 1} : STA sum+1")
             emit("    LDA sum+2 : SBC #0 : STA sum+2")
             emit(f".done{e}")
-        emit("    LDA sum+2 : CMP #&80 : ROR A : ROR sum+1 : ROR sum")
-        if origin:
-            emit(f"    \\ row {i} starts at {origin[i]} - (the row's sum) / 2")
-            emit(f"    LDA {origin[i]} : SEC : SBC sum : STA {start}+{2 * i}")
-            emit(f"    LDA {origin[i]}+1 : SBC sum+1 : STA {start}+{2 * i + 1}")
-        else:
-            emit(f"    \\ row {i} starts at -(the row's sum) / 2")
-            emit(f"    LDA #0 : SEC : SBC sum : STA {start}+{2 * i}")
-            emit(f"    LDA #0 : SBC sum+1 : STA {start}+{2 * i + 1}")
+        row_start(i, start, origin)
     emit("    RTS")
     emit("}")
     emit()
+
+
+def setup_choosing(name, prefix, prefix8, rows, mag, sign, start, origin, call):
+    """name_setup, compact: the rows' sums in a loop, each term's sign kept as
+    a mask; then the terms patched into name_vertex, or into name8_vertex
+    if every magnitude's high byte is zero, and the call site set to it."""
+    n = 3 * rows
+    emit(f"""\\ {name}_setup: specialise {name}_vertex to the object's {mag} and
+\\ {sign} (by term: {rows} rows of x, y, z), or {name}8_vertex if every
+\\ term's high byte is zero; {call} calls whichever.
+.{name}_setup
+{{
+    ZA_AUTO 3, sum
+    ZA_AUTO {n}, mask                   ; each term's sign, &00 or &FF""")
+    for i in range(rows):
+        es = range(3 * i, 3 * i + 3)
+        emit("    STZ sum : STZ sum+1 : STZ sum+2")
+        emit(f"    LDX #{6 * i} : LDY #{3 * i}")
+        emit(f".sum{i}")
+        emit(f"    LDA {sign},Y : ZA_INDEXEDBY {3 * i}..{3 * i + 2}")
+        emit(f"    BMI neg{i}")
+        emit(f"    LDA #0 : STA mask,Y : ZA_INDEXEDBY {3 * i}..{3 * i + 2}")
+        emit(f"    CLC : LDA sum : ADC {mag},X : ZA_INDEXEDBY {{{', '.join(str(2 * e) for e in es)}}}")
+        emit(f"    STA sum : LDA sum+1 : ADC {mag}+1,X : ZA_INDEXEDBY {{{', '.join(str(2 * e) for e in es)}}}")
+        emit("    STA sum+1 : LDA sum+2 : ADC #0 : STA sum+2")
+        emit(f"    BRA next{i}")
+        emit(f".neg{i}")
+        emit(f"    LDA #&FF : STA mask,Y : ZA_INDEXEDBY {3 * i}..{3 * i + 2}")
+        emit(f"    SEC : LDA sum : SBC {mag},X : ZA_INDEXEDBY {{{', '.join(str(2 * e) for e in es)}}}")
+        emit(f"    STA sum : LDA sum+1 : SBC {mag}+1,X : ZA_INDEXEDBY {{{', '.join(str(2 * e) for e in es)}}}")
+        emit("    STA sum+1 : LDA sum+2 : SBC #0 : STA sum+2")
+        emit(f".next{i}")
+        emit(f"    INX : INX : INY : CPY #{3 * i + 3} : BNE sum{i}")
+        row_start(i, start, origin)
+    emit("    LDA " + " : ORA ".join(f"{mag}+{2 * e + 1}" for e in range(n)) + " : BEQ bytes")
+    emit("    JMP words")
+    emit(".bytes")
+    emit(f"    LDA #LO({name}8_vertex) : STA {call}+1 : LDA #HI({name}8_vertex) : STA {call}+2")
+    for e in range(n):
+        t = f"{prefix8}{e}"
+        emit(f"    \\ term {e}")
+        emit(f"    LDA {mag}+{2 * e} : STA {t}_a+1 : EOR #&FF : STA {t}_b+1")
+        emit(f"    LDA mask+{e} : STA {t}_m0+1 : STA {t}_m1+1 : AND #CARRY_BIT : ORA #CLC_OP : STA {t}_c0")
+    emit("    RTS")
+    emit(".words")
+    emit(f"    LDA #LO({name}_vertex) : STA {call}+1 : LDA #HI({name}_vertex) : STA {call}+2")
+    for e in range(n):
+        t = f"{prefix}{e}"
+        emit(f"    \\ term {e}")
+        lookups(prefix, e, mag)
+        emit(f"    LDA mask+{e} : STA {t}_m0+1 : STA {t}_m1+1 : AND #CARRY_BIT : ORA #CLC_OP : STA {t}_c0")
+    emit("    RTS")
+    emit("}")
+    emit()
+
+
+def vertex(name, prefix, rows, acc, start):
     emit(f"\\ {name}_vertex: {acc} = the matrix by (xf_u - 128), / 256. A term is the")
     emit("\\ high byte by u (X:xf_plo) and the low byte by u, its high byte, added in")
     emit("\\ A; the first column's terms add to the starting values.")
@@ -104,8 +170,7 @@ ZA_AUTO {2 * rows}, {start}           ; their starting values, {name}_setup's
             emit(f".{t}_e")
             emit("    LDA sqr_hi,Y")
             emit(f".{t}_f")
-            emit("    SBC neg_hi,Y : TAX")
-            emit("    SEC")
+            emit("    SBC neg_hi,Y : TAX                     ; (C = 1: a product isn't negative)")
             emit(f".{t}_a")
             emit("    LDA sqr_hi,Y")
             emit(f".{t}_b")
@@ -127,7 +192,48 @@ ZA_AUTO {2 * rows}, {start}           ; their starting values, {name}_setup's
     emit()
 
 
-transform("xform", "xf", 3, "xf_amag", "xf_asign", "xf_acc", "xf_start", "x', y', z' in world units")
-transform("screen", "sc", 2, "sc_bmag", "sc_bsign", "sc_acc", "sc_start", "the screen's x and y",
-          ["sc_x0q", "sc_y0q"])
+def vertex8(name, prefix, rows, acc, start):
+    emit(f"\\ {name}8_vertex: {name}_vertex for a matrix whose high bytes are zero, so")
+    emit("\\ a term is the low byte by u, its high byte, alone.")
+    emit(f".{name}8_vertex")
+    for j in range(3):
+        emit(f"    LDY xf_u+{j}")
+        for i in range(rows):
+            e = 3 * i + j
+            t = f"{prefix}{e}"
+            a = f"{acc}+{2 * i}"
+            src = f"{start}+{2 * i}" if j == 0 else a
+            emit(f"    \\ term {e}: row {i} on {'xyz'[j]}")
+            emit("    SEC")
+            emit(f".{t}_a")
+            emit("    LDA sqr_hi,Y")
+            emit(f".{t}_b")
+            emit("    SBC neg_hi,Y")
+            emit(f".{t}_m0")
+            emit("    EOR #0                                ; patched: the sign, &00 or &FF ...")
+            emit(f".{t}_c0")
+            emit("    CLC                                   ; ... and the carry in, CLC or SEC")
+            emit(f"    ADC {src} : STA {a}")
+            emit(f"    LDA {src}+1")
+            emit(f".{t}_m1")
+            emit("    ADC #0                                ; patched: the sign")
+            emit(f"    STA {a}+1")
+    emit("    RTS")
+    emit()
+
+
+def sums(rows, acc, start, what):
+    emit(f"ZA_AUTO {2 * rows}, {acc}             ; {what}, in quarters")
+    emit(f"ZA_AUTO {2 * rows}, {start}           ; their starting values")
+    emit()
+
+
+sums(3, "xf_acc", "xf_start", "x', y', z' in world units")
+setup("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start", None)
+vertex("xform", "xf", 3, "xf_acc", "xf_start")
+sums(2, "sc_acc", "sc_start", "the screen's x and y")
+setup_choosing("screen", "sc", "s8", 2, "sc_bmag", "sc_bsign", "sc_start", ["sc_x0q", "sc_y0q"],
+               "vertex_far.screen")
+vertex("screen", "sc", 2, "sc_acc", "sc_start")
+vertex8("screen", "s8", 2, "sc_acc", "sc_start")
 print("\n".join(out))
