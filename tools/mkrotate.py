@@ -129,12 +129,36 @@ def patch(var, prefix, name, complement):
 emit("""\\ rotate_setup: specialise rotate_exact and rotate_approx to cam, once a
 \\ camera: each term's sites patched, and its links made, in the chains'
 \\ order (term; column y's units first, then its products and their
-\\ constants), then each row's constant and the flags.
+\\ constants), then each row's constant and the flags. The links depend
+\\ only on each entry's kind and sign (rot_shape), which a turn rarely
+\\ changes: they're made again only when it does.
 .rotate_setup
 {
     ZA_AUTO2 m, mag, t, lnk, asite, esite, askip
     ZA_AUTO 6, ka, ke, ky       ; the rows' constants, and column y's
-    ZA_AUTO1 seen, prods, msign, mode, skipping
+    ZA_AUTO1 seen, prods, msign, mode, skipping, relink, kind
+    STZ relink
+    LDX #8
+.shape
+    TXA : ASL A : TAY
+    LDA cam+1,Y : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    AND #&80 : STA kind
+    LDA cam,Y : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    BNE shape_product
+    LDA cam+1,Y : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
+    BEQ shape_got                       ; 0
+    AND #&7F : CMP #&40 : BNE shape_product
+    LDA #1 : BRA shape_kind             ; +-16384
+.shape_product
+    LDA #2
+.shape_kind
+    ORA kind
+.shape_got
+    CMP rot_shape,X : BEQ shape_same
+    STA rot_shape,X
+    LDA #&80 : STA relink
+.shape_same
+    DEX : BPL shape
     LDX #5
     ZA_DISCARD ka, ke, ky
 .clear
@@ -295,8 +319,9 @@ emit("""    LDA #RAP_NEG : LDY #RAP_NEG_GO
 
 \\\\ alink, elink: the approximate or the exact chain on to the code at t + A,
 \\\\ whose own jump is at t + Y; the approximation's skip, while one waits,
-\\\\ to the same.
+\\\\ to the same. Nothing while the links stand.
 .alink
+    BIT relink : BPL linked_already
     CLC : ADC t : STA lnk : STA (asite)
     LDA t+1 : ADC #0 : STA lnk+1
     PHY : LDY #1 : STA (asite),Y
@@ -307,8 +332,10 @@ emit("""    LDA #RAP_NEG : LDY #RAP_NEG_GO
     PLY
     TYA : CLC : ADC t : STA asite
     LDA t+1 : ADC #0 : STA asite+1
+.linked_already
     RTS
 .elink
+    BIT relink : BPL linked_already
     CLC : ADC t : STA (esite)
     LDA t+1 : ADC #0 : PHY : LDY #1 : STA (esite),Y : PLY
     TYA : CLC : ADC t : STA esite
@@ -324,6 +351,10 @@ emit("""    LDA #RAP_NEG : LDY #RAP_NEG_GO
     EQUB 0
 .rot_unit
     EQUW 16384, 0, 0, 0, 16384, 0, 0, 0, 16384
+\\ each entry's kind as the links stand: 0, 1 a unit, 2 a product, its sign
+\\ in bit 7 (none yet)
+.rot_shape
+    EQUB &FF, &FF, &FF, &FF, &FF, &FF, &FF, &FF, &FF
 """)
 
 
