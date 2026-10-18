@@ -43,6 +43,7 @@ const checks = [
     ["CODE2", hazel(sym.CODE2), snapshot],
     ["SHAPES", bank(sym.BANK_SHAPES), snapshot],
     ["WORLD", bank(sym.BANK_WORLD), snapshot],
+    ["LOGIC", bank(sym.BANK_LOGIC), snapshot],
     ["COCKPIT", sym.SCREEN, snapshot],
     ["SHAPES", bank(sym.BANK_SPARE), ram],              // the background read
 ];

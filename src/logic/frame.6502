@@ -7,8 +7,8 @@
 \ Exactly the ST's (docs/research/st-logic.md, "The main loop, the
 \ post-frame tests, game over, the level change and init_objects" and
 \ "The frame's end, the score, the interrupts and world_render's logic").
-\ What the ST prints, the port's screen layer is to draw: level_text,
-\ dock_text and collide.6502's mine_text say when.
+\ What the ST prints, the panel draws (panel.6502): level_text, dock_text
+\ and collide.6502's mine_text say when, to the next frame drawn.
 \ ***************************************************************************
 
 \ level_message (&0260C): 'LEVEL n' and 'YOU NOW HAVE MANUAL CONTROL!' on
@@ -29,7 +29,8 @@
 }
 
 \ frame_end_logic (&08EC2): the frame counted, and the flash taken for
-\ colour 0 from this frame's end, as the ST writes it to the palette.
+\ colour 0 from this frame's end, as the ST writes it to the palette
+\ (panel.6502's flash_show).
 .frame_end_logic
 {
     INC frame_count : BNE counted
@@ -37,7 +38,7 @@
 .counted
     MOVW flash_shown, flash0
     STZ flash0 : STZ flash0+1
-    RTS
+    JMP flash_show
 }
 
 \ post_frame (&01F30-&0215F): after the frame's end, in the ST's order.
@@ -48,7 +49,7 @@
 \ world_render sets its own before its first.
 .post_frame
 {
-    STZ dock_text : STZ mine_text
+    STZ dock_text
     LDA level_changed : BEQ steady
     RTS
 .steady

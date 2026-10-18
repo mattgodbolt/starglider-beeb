@@ -1,0 +1,941 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the panel: what the ST draws from the
+\ game's state besides the 3D, the gunsight and the missile view's window
+\ (docs/research/st-panel.md): the top bar, the gauges and bank ticks, the
+\ scanner, the bottom numbers, the waveforms, the messages in the view,
+\ and colour 0's flash
+\
+\ The ST redraws all of it every frame (waveforms &05872, and its prints).
+\ Here each screen remembers what it shows (ps_*, by draw_buffer), and
+\ only what differs is drawn into the screen being drawn (decision 14), by
+\ the ST's formulas on the state its frame draws from: panel_frame runs
+\ after the frame's 3D, between the step's lists and its logic, where the
+\ ST's waveforms runs in world_render. What world_render's logic printed,
+\ world_lists records in world_text; what the logic after it prints, it
+\ records as it goes (level_text, mine_text, dock_text), and the next frame
+\ drawn shows it. Texts the ST prints before its 3D are ORed in here, as
+\ its lines are ORed over them; those it prints after are opaque, so lines
+\ don't show through them, and each frame they show they're drawn again,
+\ over what the frame's lines did to them. A text gone has its glyphs'
+\ pixels cleared, with those of the frame's lines they cover.
+\
+\ panel_draw (cockpit.6502) calls it with the logic's bank and ANDY paged,
+\ so it reads the logic's variables where they lie, and keeps its own in
+\ ANDY. It writes the shadow screen with ACCCON's X set, which moves only
+\ &3000-&7FFF: nothing it runs or reads lies there (ASSERTed) but the
+\ objects and the lists, which the scanner reads with X clear.
+\ ***************************************************************************
+
+ASSERT P% >= &8000                          ; (X moves no fetch of the panel's)
+ASSERT work_end <= &3000 AND logic_work_end <= &3000   ; nor what it reads with X set
+
+\ What crosses the panel's routines.
+ZA_AUTO1 pb                 ; the screen being drawn, 0 or 1 (draw_buffer)
+ZA_AUTO2 pp, pr             ; a screen pointer, and pp + SCREEN_ROW - 8
+ZA_AUTO2 pg                 ; a glyph's (or a waveform frame's) bytes
+ZA_AUTO2 pstr               ; a string
+ZA_AUTO1 psplit             ; the line, 0-8, from which pp's cell lies in the next character row
+ZA_AUTO1 pcol               ; the colour: a MODE 1 byte's bits of it
+ZA_AUTO1 pmode              ; 0: opaque; 1: ORed; 2: the glyph's pixels cleared
+ZA_AUTO1 ncols              ; columns a blit copies
+ZA_AUTO1 erasing            ; non-zero while texts_do clears
+ZA_AUTO1 cur_colour         ; the colour the ST's last print left
+ZA_AUTO1 box_keep0, box_keep1   ; box_clear's edges' kept pixels
+ZA_AUTO1 col_mask0, col_mask1   ; a column gauge's pixels in its two bytes
+ZA_AUTO1 pt, pv             ; scratch
+
+\ ---------------------------------------------------------------------------
+\ panel_init: both screens' panels to be drawn whole (the cockpit's just
+\ been copied to them), and the ST's own panel state as a new game sets it.
+.panel_init
+    STZ ps_valid : STZ ps_valid+1
+    LDA #&FF : STA head_for+1               ; (no angle's)
+    \ (on into panel_new_game)
+
+\ panel_new_game (&03ABE, &03ACA): the waveforms from their first step, and
+\ the energy bar's dimming on.
+.panel_new_game
+    STZ wave_left_n : STZ wave_right_n
+    LDA #2 : STA energy_dim
+    RTS
+
+\ panel_frame: the panel drawn into the screen draw_buffer names, what this
+\ screen shows of it changed to what this frame's state shows.
+.panel_frame
+{
+    LDA draw_buffer : STA pb
+    LDA draw_bank : TSB acccon
+    LDX pb : LDA ps_valid,X : BNE known
+    JSR panel_fresh
+.known
+    JSR waves
+    JSR gauges
+    JSR scanner
+    JSR numbers
+    JSR messages
+    LDA draw_bank : TRB acccon
+    RTS
+}
+
+\ panel_fresh: this screen's panel as the first frame's clears leave the
+\ picture, and every element unknown (&FF shows nothing), so the next draw
+\ of each is whole.
+.panel_fresh
+{
+    LDX pb
+    LDA #1 : STA ps_valid,X
+    LDA #&FF
+    FOR i = 0..<CELLS
+        STA ps_cells + 2 * i,X
+    NEXT
+    STA ps_bar,X : STA ps_bar+2,X : STA ps_bar+4,X
+    STA ps_alt,X : STA ps_speed,X : STA ps_tick,X
+    STA ps_dots_n,X
+    STZ ps_texts,X
+    \ the bank ticks' boxes (&05C66: planes 0 and 2 of x 80-113 and 206-239,
+    \ which leaves the green borders' plane 1): the picture's ticks gone
+    ASSERT (P_TICK_X0 AND 3) = (P_TICK_X1 AND 3) AND P_TICK_Y MOD 8 <= 4
+    LDA #pixels_before(P_TICK_X0 AND 3) : STA box_keep0
+    LDA #(pixels_to(P_TICK_X0 + 31) EOR &FF) : STA box_keep1
+    LDA #LO(scr(P_TICK_X0, P_TICK_Y) - P_TICK_Y MOD 8) : STA pp
+    LDA #HI(scr(P_TICK_X0, P_TICK_Y) - P_TICK_Y MOD 8) : STA pp+1
+    JSR tick_box
+    LDA #LO(scr(P_TICK_X1, P_TICK_Y) - P_TICK_Y MOD 8) : STA pp
+    LDA #HI(scr(P_TICK_X1, P_TICK_Y) - P_TICK_Y MOD 8) : STA pp+1
+.tick_box
+    LDA #((P_TICK_X0 + 31) DIV 4 - P_TICK_X0 DIV 4 + 1) : STA ncols
+    LDX #4
+    LDY #P_TICK_Y MOD 8
+    JMP box_clear
+}
+
+\ box_clear: ncols bytes on X rows from line Y of pp's character row (pp
+\ its first column's line 0) down, ANDed with box_keep0 (the first column),
+\ 0 and box_keep1 (the last): a box cleared, but the pixels its edges keep.
+.box_clear
+{
+    ZA_AUTO1 line, cols
+.row
+    STY line
+    LDA (pp),Y : AND box_keep0 : STA (pp),Y
+    LDA ncols : STA cols
+.middle
+    TYA : CLC : ADC #8 : TAY
+    DEC cols : LDA cols : CMP #1 : BEQ last
+    LDA #0 : STA (pp),Y
+    BRA middle
+.last
+    LDA (pp),Y : AND box_keep1 : STA (pp),Y
+    LDY line : INY : CPY #8 : BNE same
+    LDA pp : CLC : ADC #LO(SCREEN_ROW) : STA pp
+    LDA pp+1 : ADC #HI(SCREEN_ROW) : STA pp+1
+    LDY #0
+.same
+    DEX : BNE row
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ blit: ncols columns of eight bytes from pg, ANDed with pcol, to the cell
+\ at pp, its lines from psplit on in the next character row; by pmode,
+\ opaque, ORed, or (erasing) the source's pixels cleared. Column c's bytes
+\ are at Y = 8c on in both, so one index serves.
+MACRO BLIT_BYTE mode, ptr
+    IF mode = 0
+        LDA (pg),Y : AND pcol : STA (ptr),Y
+    ELSE
+        IF mode = 1
+            LDA (pg),Y : AND pcol : ORA (ptr),Y : STA (ptr),Y
+        ELSE
+            LDA (pg),Y : EOR #&FF : AND (ptr),Y : STA (ptr),Y
+        ENDIF
+    ENDIF
+ENDMACRO
+MACRO BLIT_COLUMNS mode
+    LDX ncols
+    LDY #0
+.column
+    TYA : CLC : ADC psplit : STA blit_mid
+    TYA : ADC #8 : STA blit_next
+    CPY blit_mid : BEQ lower
+.upper
+    BLIT_BYTE mode, pp
+    INY : CPY blit_mid : BNE upper
+    CPY blit_next : BEQ next
+.lower
+    BLIT_BYTE mode, pr
+    INY : CPY blit_next : BNE lower
+.next
+    DEX : BNE column
+    RTS
+ENDMACRO
+ZA_AUTO1 blit_mid, blit_next
+.blit
+{
+    LDA pp : CLC : ADC #LO(SCREEN_ROW - 8) : STA pr
+    LDA pp+1 : ADC #HI(SCREEN_ROW - 8) : STA pr+1
+    LDA pmode : BEQ opaque
+    LSR A : BCC erase
+    BLIT_COLUMNS 1
+.opaque
+    BLIT_COLUMNS 0
+.erase
+    BLIT_COLUMNS 2
+}
+
+\ print_cell: glyph A (preserving X) in the cell at pp, by pmode, in pcol.
+.print_cell
+{
+    PHX
+    STZ pg+1
+    ASL A : ROL pg+1 : ASL A : ROL pg+1 : ASL A : ROL pg+1 : ASL A : ROL pg+1
+    CLC : ADC #LO(panel_font) : STA pg
+    LDA pg+1 : ADC #HI(panel_font) : STA pg+1
+    LDA #2 : STA ncols
+    JSR blit
+    PLX
+    RTS
+}
+
+\ print_string: the string at pstr (glyph numbers; &80 + an ST colour, the
+\ view's, sets pcol; &FF ends it), cell after cell from pp on, by pmode.
+.print_string
+{
+    ZA_AUTO1 i
+    LDY #0
+.char
+    LDA (pstr),Y
+    CMP #&FF : BEQ done
+    INY : STY i
+    CMP #&80 : BCC glyph
+    AND #15 : TAX : LDA PC_VIEW,X : STA pcol
+    BRA next
+.glyph
+    JSR print_cell
+    LDA pp : CLC : ADC #16 : STA pp
+    BCC next
+    INC pp+1
+.next
+    LDY i
+    BRA char
+.done
+    RTS
+}
+
+\ decimal (&04598): the word (lo A, hi X) in decimal without leading zeros
+\ (0 is "0"), as glyph numbers in num_text, ended. (The ST's prints "M "
+\ first for a negative word; the level and the countdown never are.)
+.decimal
+{
+    ZA_AUTO2 v
+    ZA_AUTO1 out, digit
+    STA v : STX v+1
+    STZ out
+    LDX #3                                  ; 10000, 1000, 100, 10
+.power
+    STZ digit
+.subtract
+    LDA v : SEC : SBC dec_lo,X : TAY
+    LDA v+1 : SBC dec_hi,X : BCC place
+    STA v+1 : STY v
+    INC digit
+    BRA subtract
+.place
+    LDA digit : BNE put
+    LDY out : BEQ skip                      ; a leading zero
+.put
+    LDY out : STA num_text,Y
+    INC out
+.skip
+    DEX : BPL power
+    LDA v                                   ; the units, always
+    LDY out : STA num_text,Y
+    LDA #&FF : STA num_text+1,Y
+    RTS
+.dec_lo
+    EQUB LO(10), LO(100), LO(1000), LO(10000)
+.dec_hi
+    EQUB HI(10), HI(100), HI(1000), HI(10000)
+}
+
+\ ---------------------------------------------------------------------------
+\ waves (&05872): each waveform one step on (15, then 0) and its frame
+\ drawn, 16 x 8 over all it covers, every frame.
+.waves
+{
+    LDA PC_WAVE : STA pcol
+    STZ pmode
+    LDA #4 : STA ncols
+    ASSERT P_WAVE_LEFT_Y = P_WAVE_RIGHT_Y AND (P_WAVE_LEFT_X OR P_WAVE_RIGHT_X) MOD 4 = 0
+    LDA #(8 - P_WAVE_LEFT_Y MOD 8) : STA psplit
+    LDA wave_left_n : INC A : AND #15 : STA wave_left_n
+    TAX : LDA wave_left,X
+    LDX #LO(scr(P_WAVE_LEFT_X, P_WAVE_LEFT_Y)) : LDY #HI(scr(P_WAVE_LEFT_X, P_WAVE_LEFT_Y))
+    JSR one
+    LDA wave_right_n : INC A : AND #15 : STA wave_right_n
+    TAX : LDA wave_right,X
+    LDX #LO(scr(P_WAVE_RIGHT_X, P_WAVE_RIGHT_Y)) : LDY #HI(scr(P_WAVE_RIGHT_X, P_WAVE_RIGHT_Y))
+.one
+    \ frame A to (X, Y)
+    STX pp : STY pp+1
+    STZ pg+1
+    ASL A : ASL A : ASL A : ASL A : ROL pg+1 : ASL A : ROL pg+1
+    CLC : ADC #LO(wave_frames) : STA pg
+    LDA pg+1 : ADC #HI(wave_frames) : STA pg+1
+    JMP blit
+}
+
+\ ---------------------------------------------------------------------------
+\ gauges: the energy bar's dimming toggled on frames with bit 1 of the frame
+\ count clear (&0597E), then the altitude, the speed, the bars and the bank
+\ ticks.
+.gauges
+    LDA frame_count : AND #2 : BNE gauges_toggled
+    LDA energy_dim : EOR #2 : STA energy_dim
+.gauges_toggled
+    JSR altitude
+    JSR speedo
+    JSR bars
+    JMP ticks
+
+\ column_row: a row of a four-pixel column gauge in the colour A: its pixels
+\ (col_mask0, col_mask1) in pp's line Y and in the next byte's.
+.column_row
+{
+    STA pv
+    AND col_mask0 : STA pt
+    LDA col_mask0 : EOR #&FF : AND (pp),Y : ORA pt : STA (pp),Y
+    TYA : ORA #8 : TAY
+    LDA pv : AND col_mask1 : STA pt
+    LDA col_mask1 : EOR #&FF : AND (pp),Y : ORA pt : STA (pp),Y
+    TYA : AND #7 : TAY
+    RTS
+}
+
+\ row_up: pp and Y a row up (Y the line in pp's character row).
+.row_up
+{
+    DEY : BPL same
+    LDA pp : SEC : SBC #LO(SCREEN_ROW) : STA pp
+    LDA pp+1 : SBC #HI(SCREEN_ROW) : STA pp+1
+    LDY #7
+.same
+    RTS
+}
+
+\ altitude (&05994): d = (-y asr 6) and 31 (0-28, the logic keeping y in
+\ -1800..-20): d rows of colour 1 up from row 198, the rest up to row 171
+\ colour 2, or colour 6 while d < 8 on frames with bit 2 of the frame count
+\ clear; row 170 cleared.
+.altitude
+{
+    ZA_AUTO1 d, lows
+    LDA #0 : SEC : SBC pl_y : STA pt
+    LDA #0 : SBC pl_y+1
+    ASL pt : ROL A : ASL pt : ROL A         ; bits 6-13 of -y
+    AND #31 : STA d
+    CMP #8 : BCS steady
+    LDA frame_count : AND #4 : BNE steady
+    LDA #&80 : TSB d                        ; the warning's colour above
+.steady
+    LDX pb : LDA d : CMP ps_alt,X : BEQ done
+    STA ps_alt,X
+    AND #31 : STA lows
+    LDA #pixels_from(P_ALT_X0) : STA col_mask0
+    LDA #pixels_to(P_ALT_X1) : STA col_mask1
+    LDA #LO(scr(P_ALT_X0, 198) - 198 MOD 8) : STA pp
+    LDA #HI(scr(P_ALT_X0, 198) - 198 MOD 8) : STA pp+1
+    LDY #198 MOD 8
+    LDX #198 - 170 + 1
+.row
+    LDA lows : BEQ upper
+    DEC lows
+    LDA PC_ALT_LOW
+    BRA put
+.upper
+    CPX #1 : BEQ notch
+    BIT d : BMI warn
+    LDA PC_ALT_HIGH
+    BRA put
+.warn
+    LDA PC_ALT_WARN
+    BRA put
+.notch
+    LDA #0
+.put
+    JSR column_row
+    JSR row_up
+    DEX : BNE row
+.done
+    RTS
+}
+ASSERT P_ALT_X1 DIV 4 = P_ALT_X0 DIV 4 + 1 AND P_SPEED_X1 DIV 4 = P_SPEED_X0 DIV 4 + 1
+
+\ speedo (&05A14): d = (speed asr 4) and 31 (0-29, the logic keeping the
+\ speed to 479), plane 1 lit on d rows up from row 198 and cleared on the 31
+\ - d above, to row 168: rows 171-198 colour 2 or black; rows 168-170 the
+\ picture's colours with plane 1 changed, row 170's lit only at d = 29,
+\ row 169's always cleared, row 168's never lit.
+.speedo
+{
+    ZA_AUTO1 d, lits
+    LDA speed+1 : ASL A : ASL A : ASL A : ASL A : STA d
+    LDA speed : LSR A : LSR A : LSR A : LSR A : ORA d
+    AND #31 : STA d
+    LDX pb : CMP ps_speed,X : BEQ done
+    STA ps_speed,X : STA lits
+    ASSERT SPEED_MASK0 = pixels_from(P_SPEED_X0) AND SPEED_MASK1 = pixels_to(P_SPEED_X1)
+    LDA #SPEED_MASK0 : STA col_mask0
+    LDA #SPEED_MASK1 : STA col_mask1
+    LDA #LO(scr(P_SPEED_X0, 198) - 198 MOD 8) : STA pp
+    LDA #HI(scr(P_SPEED_X0, 198) - 198 MOD 8) : STA pp+1
+    LDY #198 MOD 8
+    LDX #198 - 171 + 1
+.row
+    LDA #0
+    DEC lits : BMI put
+    LDA PC_SPEED
+.put
+    JSR column_row
+    JSR row_up
+    DEX : BNE row
+    \ row 170 (where pp and Y are), then 169
+    LDA d : CMP #29 : BCS lit
+    LDA #SPEED_170_UNLIT_0 : LDX #SPEED_170_UNLIT_1
+    BRA row_170
+.lit
+    LDA #SPEED_170_LIT_0 : LDX #SPEED_170_LIT_1
+.row_170
+    JSR picture_row
+    JSR row_up
+    LDA #SPEED_169_UNLIT_0 : LDX #SPEED_169_UNLIT_1
+.picture_row
+    \ the column's pixels in pp's line Y from A, and in the next byte's from X
+    STA pv
+    LDA (pp),Y : AND #(SPEED_MASK0 EOR &FF) : ORA pv : STA (pp),Y
+    TYA : ORA #8 : TAY
+    STX pv
+    LDA (pp),Y : AND #(SPEED_MASK1 EOR &FF) : ORA pv : STA (pp),Y
+    TYA : AND #7 : TAY
+.done
+    RTS
+}
+
+\ bars (&05A4A): shields, energy and laser energy, each i + 1 pixels of
+\ colour 5 from the left of its 32 for v >> 11 = i, or none for 0; energy's
+\ colour 10 while below 6 << 11 and energy_dim is 2.
+.bars
+{
+    LDA shields : LDX shields+1 : JSR length
+    LDY #0
+    LDX #LO(scr(P_SHIELDS_X, P_SHIELDS_Y)) : STX pp : LDX #HI(scr(P_SHIELDS_X, P_SHIELDS_Y)) : STX pp+1
+    JSR bar
+    LDA energy : LDX energy+1 : JSR length
+    BEQ full
+    CMP #6 + 1 : BCS full
+    LDX energy_dim : BEQ full
+    ORA #&80                                    ; dimmed
+.full
+    LDY #2
+    LDX #LO(scr(P_ENERGY_X, P_ENERGY_Y)) : STX pp : LDX #HI(scr(P_ENERGY_X, P_ENERGY_Y)) : STX pp+1
+    JSR bar
+    LDA laser_energy : LDX laser_energy+1 : JSR length
+    LDY #4
+    LDX #LO(scr(P_LASER_X, P_LASER_Y)) : STX pp : LDX #HI(scr(P_LASER_X, P_LASER_Y)) : STX pp+1
+\ bar: the bar A (its length, | &80 dimmed) at pp, its rows the line there
+\ and the three below, if this screen's (ps_bar + Y) shows another
+.bar
+    STA pv
+    TYA : ORA pb : TAY
+    LDA pv : CMP ps_bar,Y : BEQ done
+    STA ps_bar,Y
+    LDX PC_BAR
+    ASL A : BCC coloured
+    LDX PC_BAR_DIM
+.coloured
+    STX pcol
+    LSR A : STA pv                              ; the pixels still to draw
+    LDY #0
+.byte
+    LDA pv : BEQ blank
+    CMP #4 : BCC part
+    SBC #4 : STA pv                             ; (C set)
+    LDA #&FF
+    BRA put
+.part
+    TAX : LDA pixels_left,X
+    STZ pv
+    BRA put
+.blank
+    LDA #0
+.put
+    AND pcol
+    STA (pp),Y : INY : STA (pp),Y : INY : STA (pp),Y : INY : STA (pp),Y
+    TYA : CLC : ADC #8 - 3 : TAY
+    CPY #8 * 8 : BNE byte
+.done
+    RTS
+\ length: the bar's length for the word (lo A, hi X)
+.length
+    STX pt
+    ORA pt : BEQ zero
+    TXA : LSR A : LSR A : LSR A : INC A
+.zero
+    RTS
+.pixels_left
+    EQUB pixels_before(0), pixels_before(1), pixels_before(2), pixels_before(3)
+}
+ASSERT P_SHIELDS_Y MOD 8 <= 4 AND P_ENERGY_Y MOD 8 <= 4 AND P_LASER_Y MOD 8 <= 4
+ASSERT (P_SHIELDS_X OR P_ENERGY_X OR P_LASER_X) MOD 4 = 0
+
+\ ticks (&05C46): d = ((roll asr 1) + 16) and 31, ticks of colour 1, 1 x 4,
+\ at x 82 + d and 206 + d, rows 170-173.
+.ticks
+{
+    ZA_AUTO1 d, c, m
+    LDA pl_roll : LSR A : CLC : ADC #16 : AND #31 : STA d
+    LDX pb : CMP ps_tick,X : BEQ done
+    LDY ps_tick,X : STA ps_tick,X
+    CPY #&FF : BEQ drawn                        ; (panel_fresh cleared the boxes)
+    TYA : LDY #0
+    JSR pair                                    ; the old ticks cleared
+.drawn
+    LDA d : LDY PC_TICK
+.pair
+    \ the ticks at d = A, the colour Y
+    STY c
+    PHA
+    CLC : ADC #P_TICK_X0 : JSR one
+    PLA : CLC : ADC #P_TICK_X1
+.one
+    \ x = A
+    TAX : AND #3 : TAY : LDA tick_pixel,Y : STA m
+    TXA : LSR A : LSR A                         ; the column
+    STZ pp+1
+    ASL A : ROL pp+1 : ASL A : ROL pp+1 : ASL A : ROL pp+1
+    CLC : ADC #LO(scr(0, P_TICK_Y) - P_TICK_Y MOD 8) : STA pp
+    LDA pp+1 : ADC #HI(scr(0, P_TICK_Y) - P_TICK_Y MOD 8) : STA pp+1
+    LDY #P_TICK_Y MOD 8
+.row
+    LDA c : AND m : STA pt
+    LDA m : EOR #&FF : AND (pp),Y : ORA pt : STA (pp),Y
+    INY : CPY #P_TICK_Y MOD 8 + 4 : BNE row
+.done
+    RTS
+.tick_pixel
+    EQUB &88, &44, &22, &11
+}
+ASSERT P_TICK_X1 + 31 < 256
+
+\ ---------------------------------------------------------------------------
+\ scanner (&05DB2): its box (x 144-175, y 148-180) black but for the player
+\ at (160,164), colour 15; then each near-list object within &2000 of the
+\ player on camera space's x and z (strictly) at (160 + x asr 9, 164 +
+\ (-z) asr 9), ORed in its type's colour (&06006; 11's the beam's). The ST
+\ clears the box each frame; here each screen clears the dots it drew.
+SCAN_PLAYER = scr(P_SCANNER_X + 16, P_SCANNER_Y + 16)
+ASSERT P_SCANNER_X MOD 4 = 0
+.scanner
+{
+    ZA_AUTO1 i, n, dy, c
+    ZA_AUTO2 at
+    LDX pb
+    LDA ps_dots_n,X : CMP #&FF : BNE dots
+    \ the whole box (&05DBC)
+    LDA #LO(scr(P_SCANNER_X, P_SCANNER_Y) - P_SCANNER_Y MOD 8) : STA pp
+    LDA #HI(scr(P_SCANNER_X, P_SCANNER_Y) - P_SCANNER_Y MOD 8) : STA pp+1
+    STZ box_keep0 : STZ box_keep1
+    LDA #8 : STA ncols
+    LDY #P_SCANNER_Y MOD 8
+    LDX #33
+    JSR box_clear
+    BRA cleared
+.dots
+    \ the dots this screen shows
+    STA n
+    TXA : BEQ first
+    LDA #SCAN_DOTS
+.first
+    STA i                                       ; this screen's first
+    CLC : ADC n : STA n                         ; and its end
+.dot
+    LDX i : CPX n : BEQ cleared
+    LDA ps_dot_lo,X : STA at : LDA ps_dot_hi,X : STA at+1
+    LDA #0 : STA (at)
+    INC i
+    BRA dot
+.cleared
+    LDA SCAN_PLAYER : AND #&77 : STA pt
+    LDA PC_PLAYER : AND #&88 : ORA pt : STA SCAN_PLAYER
+    \ this frame's dots
+    LDX pb : STZ ps_dots_n,X
+    LDA near_n : STA i
+.each
+    LDA draw_bank : TRB acccon                  ; the lists and objects lie where X moves
+    LDA i : BNE more
+    JMP done
+.more
+    DEC i
+    LDX i : LDY near_slots,X
+    \ -&2000 < x < &2000: x's high byte -&20..&1F, but not -&2000 itself
+    LDA ob_cx_hi,Y : CLC : ADC #&20 : CMP #&40 : BCS each
+    TAX : BNE x_in
+    LDA ob_cx_lo,Y : BEQ each
+.x_in
+    TXA : LSR A : STA c                         ; 16 + x asr 9
+    \ the same of -z
+    LDA #0 : SEC : SBC ob_cz_lo,Y : TAX
+    LDA #0 : SBC ob_cz_hi,Y
+    CLC : ADC #&20 : CMP #&40 : BCS each
+    STA dy : BNE z_in
+    CPX #0 : BEQ each
+.z_in
+    LSR dy                                      ; 16 + (-z) asr 9
+    \ the colour by type
+    LDX ob_type,Y : LDA scan_type_colour,X
+    CPX #11 : BNE coloured
+    LDA beam_colour
+.coloured
+    TAX
+    LDA draw_bank : TSB acccon
+    \ the dot
+    LDY dy
+    LDA c : AND #&1C : ASL A                    ; its column's offset
+    CLC : ADC scan_row_lo,Y : STA at
+    LDA scan_row_hi,Y : ADC #0 : STA at+1
+    LDA c : AND #3 : TAY
+    LDA PC_SCAN,X : AND scan_pixel,Y
+    ORA (at) : STA (at)
+    \ remembered
+    LDX pb : LDA ps_dots_n,X
+    CMP #SCAN_DOTS : BCS overflow
+    INC ps_dots_n,X
+    CPX #0 : BEQ index
+    CLC : ADC #SCAN_DOTS
+.index
+    TAX
+    LDA at : STA ps_dot_lo,X : LDA at+1 : STA ps_dot_hi,X
+    JMP each
+.overflow
+    LDA #&FF : STA ps_dots_n,X                  ; the box cleared next time
+    JMP each
+.done
+    LDA draw_bank : TSB acccon
+    RTS
+.scan_pixel
+    EQUB &88, &44, &22, &11
+}
+
+\ ---------------------------------------------------------------------------
+\ numbers: the cells of digits and letters. The ST prints the score and
+\ the last kill only in normal-view frames, the kill before this frame's
+\ is taken (kill_shown), the score after it's added; and the heading, the
+\ sectors and the missiles only when the near list isn't empty (&05E08).
+.numbers
+{
+    LDA mv_render : BNE near
+    LDX #3 : LDY #CELL_SCORE
+.score_byte
+    LDA score,X : LSR A : LSR A : LSR A : LSR A : STA want,Y : INY
+    LDA score,X : AND #15 : STA want,Y : INY
+    DEX : BPL score_byte
+    ASSERT CELL_KILL = CELL_SCORE + 8
+    LDX #1
+.kill_byte
+    LDA kill_shown,X : LSR A : LSR A : LSR A : LSR A : STA want,Y : INY
+    LDA kill_shown,X : AND #15 : STA want,Y : INY
+    DEX : BPL kill_byte
+    LDX #CELL_SCORE : LDY #CELL_KILL + 4
+    JSR cells_show
+.near
+    LDA near_n : BEQ done
+    JSR heading
+    \ the sectors (&05EA8): x and z (unsigned) / &290, two digits each
+    LDA pl_x : LDX pl_x+1 : JSR sector
+    STX want + CELL_SECTOR : STA want + CELL_SECTOR + 1
+    LDA pl_z : LDX pl_z+1 : JSR sector
+    STX want + CELL_SECTOR + 2 : STA want + CELL_SECTOR + 3
+    \ the missiles (&05FC8): $278 and 15, one digit (the logic keeps it to 2)
+    LDA missiles : AND #15 : STA want + CELL_MISSILES
+    ASSERT CELL_SECTOR = CELL_HEADING + 5 AND CELL_MISSILES = CELL_SECTOR + 4 AND CELLS = CELL_MISSILES + 1
+    LDX #CELL_HEADING : LDY #CELLS
+    JMP cells_show
+.done
+    RTS
+}
+
+\ cells_show: cells X to Y - 1 each drawn where this screen's shows other
+\ than want's glyph.
+.cells_show
+{
+    ZA_AUTO1 last
+    STY last
+    STZ pmode
+.each
+    TXA : ASL A : ORA pb : TAY
+    LDA want,X : CMP ps_cells,Y : BEQ next
+    STA ps_cells,Y
+    LDA cell_lo,X : STA pp : LDA cell_hi,X : STA pp+1
+    LDA cell_split,X : STA psplit
+    LDY cell_colour,X : LDA panel_colours,Y : STA pcol
+    LDA want,X
+    JSR print_cell
+.next
+    INX : CPX last : BNE each
+    RTS
+}
+
+\ sector: the word (lo A, hi X) / &290 (0-99) as its tens (X) and units (A).
+.sector
+{
+    ZA_AUTO2 v
+    ZA_AUTO1 q
+    STA v : STX v+1
+    STZ q
+    LDX #6
+.bit
+    LDA v : SEC : SBC sixes_lo,X : TAY
+    LDA v+1 : SBC sixes_hi,X : BCC shift
+    STA v+1 : STY v
+.shift
+    ROL q
+    DEX : BPL bit
+    LDA q : LDX #0
+.tens
+    CMP #10 : BCC done
+    SBC #10 : INX
+    BRA tens
+.done
+    RTS
+.sixes_lo
+FOR k = 0..6
+    EQUB LO(&290 << k)
+NEXT
+.sixes_hi
+FOR k = 0..6
+    EQUB HI(&290 << k)
+NEXT
+}
+
+\ heading (&05F38): deg = ((h and &FFF) << 5) divs 365, 0-359, left in four
+\ cells without leading zeros, then the compass point's letter: N from 315
+\ and below 45, E below 135, S below 225, W from 225.
+.heading
+{
+    ZA_AUTO1 r0, r1, d0, d1, d2
+    LDA pl_heading+1 : AND #&0F : STA d1
+    LDA pl_heading : CMP head_for : BNE work
+    LDA d1 : CMP head_for+1 : BEQ known
+.work
+    LDA pl_heading : STA head_for : STA d0
+    LDA d1 : STA head_for+1
+    STZ d2
+    LDX #5
+.times32
+    ASL d0 : ROL d1 : ROL d2
+    DEX : BNE times32
+    STZ r0 : STZ r1
+    LDX #24
+.divide
+    ASL d0 : ROL d1 : ROL d2 : ROL r0 : ROL r1
+    LDA r0 : SEC : SBC #LO(365) : TAY
+    LDA r1 : SBC #HI(365) : BCC next
+    STA r1 : STY r0
+    INC d0
+.next
+    DEX : BNE divide
+    LDA d0 : STA head_deg : LDA d1 : STA head_deg+1
+.known
+    LDA head_deg : LDX head_deg+1 : JSR decimal
+    LDX #0
+.digits
+    LDA num_text,X : BMI pad
+    STA want + CELL_HEADING,X
+    INX
+    BRA digits
+.pad
+    LDA #GLYPH_SPACE : STA want + CELL_HEADING,X
+    INX : CPX #4 : BNE pad
+    LDA head_deg+1 : BNE high
+    LDX #GLYPH_N
+    LDA head_deg : CMP #45 : BCC letter
+    LDX #GLYPH_E
+    CMP #135 : BCC letter
+    LDX #GLYPH_S
+    CMP #225 : BCC letter
+.west
+    LDX #GLYPH_W
+    BRA letter
+.high
+    LDA head_deg : CMP #LO(315) : BCC west
+    LDX #GLYPH_N
+.letter
+    STX want + CELL_HEADING + 4
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ messages: the texts this frame shows (now) against those this screen
+\ shows: each gone, or showing other words, has its glyphs' pixels cleared;
+\ then each shown is drawn, in the order the ST prints them.
+.messages
+{
+    ZA_AUTO1 now, old, gone
+    \ the colour the ST's last print leaves (docs/research/st-panel.md,
+    \ section 7): the refuelling's white; else, the near list not being
+    \ empty, the missile count's orange; else the launch's white, or the
+    \ score's yellow
+    LDA refuelling : BNE white
+    LDA near_n : BNE orange
+    LDA world_text : AND #TX_LAUNCH : BNE white
+    LDA PC_TEXT_3
+    BRA current
+.orange
+    LDA PC_TEXT_4
+    BRA current
+.white
+    LDA PC_TEXT_15
+.current
+    STA cur_colour
+    \ what world_render printed (world_lists' world_text), the countdown
+    \ only on frames with bit 2 of the frame count clear once below &38
+    LDA world_text : AND #TX_DOCKING OR TX_LAUNCH OR TX_COUNT : STA now
+    LDA m_life : CMP #&38 : LDA m_life+1 : SBC #0 : BPL counting
+    LDA frame_count : AND #4 : BEQ counting
+    LDA #TX_COUNT : TRB now
+.counting
+    \ MISSILE VIEW (&05266): the window opening or closing, its step still
+    \ at least &11
+    LDA mv_render : BEQ normal
+    LDA m_life : CMP #&0F : LDA m_life+1 : SBC #0 : BMI texts
+    LDA m_iris : CMP #&11 : LDA m_iris+1 : SBC #0 : BMI texts
+    LDA #TX_MVIEW : TSB now
+    BRA texts
+.normal
+    \ refuelling (&05188, the normal view's only)
+    LDA refuelling : BEQ texts
+    LDA #TX_REFUEL : TSB now
+.texts
+    \ the logic's, from the last step's
+    LDA mine_text : BEQ no_mine
+    LDA #TX_MINE : TSB now
+.no_mine
+    LDA level_text : BEQ no_level
+    LDA #TX_LEVEL : TSB now
+.no_level
+    LDA dock_text : BEQ no_dock
+    LDA #TX_DOCKED : TSB now
+.no_dock
+    \ gone, or other words: the mine's, the level's, the countdown's
+    LDX pb : LDA ps_texts,X : STA old
+    LDA now : EOR #&FF : AND old : STA gone
+    LDA mine_text : CMP ps_mine,X : BEQ same_mine
+    LDA #TX_MINE : TSB gone
+.same_mine
+    LDA level : CMP ps_level,X : BEQ same_level
+    LDA #TX_LEVEL : TSB gone
+.same_level
+    LDA m_life : SEC : SBC #&0F : STA pt
+    LDA m_life+1 : SBC #0
+    CMP ps_count_hi,X : BNE other_count
+    LDA pt : CMP ps_count_lo,X : BEQ same_count
+.other_count
+    LDA #TX_COUNT : TSB gone
+.same_count
+    LDA gone : AND old : BEQ cleared
+    STA gone
+    LDA ps_mine,X : STA tx_mine_v
+    LDA ps_level,X : STA tx_level
+    LDA ps_count_lo,X : STA tx_count : LDA ps_count_hi,X : STA tx_count+1
+    LDA #2 : STA pmode : STA erasing
+    LDA gone
+    JSR texts_do
+.cleared
+    \ this frame's
+    LDX pb
+    LDA now : STA ps_texts,X : BEQ done
+    LDA mine_text : STA ps_mine,X : STA tx_mine_v
+    LDA level : STA ps_level,X : STA tx_level
+    LDA m_life : SEC : SBC #&0F : STA ps_count_lo,X : STA tx_count
+    LDA m_life+1 : SBC #0 : STA ps_count_hi,X : STA tx_count+1
+    STZ erasing
+    LDA now
+    JSR texts_do
+.done
+    RTS
+}
+
+\ texts_do: the texts of A's bits, in order, drawn (erasing 0) or their
+\ glyphs' pixels cleared, with tx_mine_v, tx_level and tx_count their words.
+.texts_do
+{
+    ZA_AUTO1 bits, bit, id, last
+    STA bits
+    STZ bit
+.each
+    LSR bits : BCC next
+    LDX bit
+    LDA tx_first,X : STA id
+    CLC : ADC tx_n,X : STA last
+    CPX #5 : BNE text                           ; TX_MINE's: which
+    ASSERT TX_MINE = 1 << 5
+    LDA tx_mine_v : CMP #MINE_EXPLODED : BNE text
+    INC id : INC last
+.text
+    JSR text_one
+    INC id : LDA id : CMP last : BNE text
+.next
+    INC bit
+    LDA bits : BNE each
+    RTS
+.tx_first
+    EQUB TXT_DOCKING, TXT_LAUNCHING, TXT_MISSILE_VIEW, TXT_COUNTDOWN, TXT_REFUELLING, TXT_MINE, TXT_LEVEL, TXT_DOCKED
+.tx_n
+    EQUB 1, 1, 1, 1, 1, 1, 3, 3
+    ASSERT TXT_MINE_EXPLODED = TXT_MINE + 1 AND TXT_LEVEL_N = TXT_LEVEL + 1 AND TXT_MANUAL = TXT_LEVEL + 2
+    ASSERT TXT_PRESS_SPACE = TXT_DOCKED + 1 AND TXT_OR_INTERROGATE = TXT_DOCKED + 2
+
+\ text_one: text id, its words made first if they're a number's
+.text_one
+    LDX id
+    CPX #TXT_COUNTDOWN : BNE not_count
+    LDA tx_count : LDX tx_count+1 : JSR decimal
+    LDX id
+.not_count
+    CPX #TXT_LEVEL_N : BNE not_level
+    LDA tx_level : LDX #0 : JSR decimal
+    LDX id
+.not_level
+    LDA txt_str_lo,X : STA pstr : LDA txt_str_hi,X : STA pstr+1
+    LDA txt_lo,X : STA pp : LDA txt_hi,X : STA pp+1
+    LDA txt_split,X : STA psplit
+    LDA erasing : BNE go
+    LDA txt_mode,X : STA pmode
+    LDA cur_colour
+    LDY txt_colour,X : BMI coloured
+    LDA panel_colours,Y
+.coloured
+    STA pcol
+.go
+    JMP print_string
+}
+
+\ ---------------------------------------------------------------------------
+\ flash_show (frame_end's &08ECA): colour 0, the whole screen's, from
+\ flash_shown, as the nearest of the BBC's eight to the ST's colour (by the
+\ top two bits of its red, green and blue: tools/mkpanel.py); 0, none, is
+\ black. The ST writes the palette as its frame ends, and so does this,
+\ each step. (Only frame_end_logic calls it, so only with the logic.)
+IF DEFINED(frame_end_logic)
+.flash_show
+{
+    LDA flash_shown+1 : ASL A : ASL A : ASL A : AND #&30 : STA pt
+    LDA flash_shown : LSR A : LSR A : LSR A : AND #&0C : ORA pt : STA pt
+    LDA flash_shown : LSR A : AND #3 : ORA pt : TAX
+    LDA flash_colour,X : EOR #7 : STA pt    ; the ULA takes the colour EORed with 7
+    FOR e = {0, 1, 4, 5}                    ; logical 0's entries (engine.6502)
+        LDA pt : ORA #e * 16 : STA ula_pal
+    NEXT
+    RTS
+}
+ENDIF

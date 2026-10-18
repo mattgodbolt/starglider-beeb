@@ -62,10 +62,11 @@ SECTION Main, org = &0E00, filename = "SG", guard = MAIN_TOP, cmos = TRUE
     JSR mul_init
     JSR line_draw
     JSR screen_mode
-    \ the cockpit on both screens, their windows empty
+    \ the cockpit on both screens, their windows empty, their panels to draw
     JSR screen_copy
     STZ draw_bank : JSR window_clear
     LDA #ACCCON_X : STA draw_bank : JSR window_clear
+    JSR panel_reset
 IF DEFINED(SPLIT_SWEEP)
     JSR split_test
 ENDIF
@@ -110,13 +111,13 @@ INCLUDE "disc.6502"
 \ The files start loads (disc_load: the file, where, its bank), the last
 \ first.
 .disc_load_file
-    EQUB DF_COCKPIT, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
+    EQUB DF_COCKPIT, DF_LOGIC, DF_WORLD, DF_SHAPES, DF_CODE2, DF_TABLES
 .disc_load_lo
-    EQUB LO(SCREEN), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
+    EQUB LO(SCREEN), LO(&8000), LO(&8000), LO(&8000), LO(CODE2), LO(TABLES)
 .disc_load_hi
-    EQUB HI(SCREEN), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
+    EQUB HI(SCREEN), HI(&8000), HI(&8000), HI(&8000), HI(CODE2), HI(TABLES)
 .disc_load_bank
-    EQUB BANK_SHAPES, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
+    EQUB BANK_SHAPES, BANK_LOGIC, BANK_WORLD, BANK_SHAPES, BANK_SHAPES, BANK_SHAPES
 DISC_LOADS = P% - disc_load_bank
 
 \ ---------------------------------------------------------------------------
@@ -146,6 +147,18 @@ MODELS = P% - model_types
     DEX : BPL colours
     STZ model_i
     JSR set_model
+    \ The logic's state the panel draws, as a new game leaves it (until the
+    \ logic is on the disc): what it reads cleared, the gauges full, one
+    \ missile; the scanner shows the model.
+    LDX #logic_work_end - work_end - 1
+.clear_work
+    STZ work_end,X
+    DEX : BPL clear_work
+    LDA #&FF
+    STA energy : STA energy+1 : STA shields : STA shields+1 : STA laser_energy : STA laser_energy+1
+    LDA #1 : STA missiles : STA level
+    LDA #BANK_LOGIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    STZ speed : STZ speed+1 : STZ mv_render : STZ m_life : STZ m_life+1
     \ Main RAM's screen shown, and both cleared before they're drawn.
     JSR erase_init
     STZ draw_buffer : STZ frame_ready

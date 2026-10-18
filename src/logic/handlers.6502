@@ -41,6 +41,7 @@ ENDMACRO
 
 .object_handlers
 {
+    STZ mine_text                       ; (the port's: a mine's handler sets it)
     LDX #0
     LDA n_slots : BEQ done
 .each

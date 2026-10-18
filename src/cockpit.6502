@@ -4,11 +4,14 @@
 \ The cockpit (tools/mkcockpit.py, decision 3) is on both screens, around
 \ the view's window, which is all that's ever cleared (screen.6502's
 \ window_clear). screen_copy sets ACCCON's X to reach the shadow screen,
-\ so it must lie below &3000, where X changes nothing.
+\ so it must lie below &3000, where X changes nothing. The panel drawn on
+\ it is panel.6502's, in the logic's bank: panel_draw and panel_reset call
+\ it.
 \ ***************************************************************************
 
 \ screen_copy: main RAM's screen into shadow RAM's, a page at a time
-\ through edge_mark (free outside the draw phase).
+\ through edge_mark (free outside the draw phase). panel_reset should
+\ follow it.
 .screen_copy
 {
     ZA_AUTO2 p
@@ -26,5 +29,26 @@
     INC p+1 : BPL page                          ; up to &7FFF
     RTS
 }
+
+\ panel_draw: the panel drawn into the screen being drawn (draw_buffer,
+\ draw_bank), after its 3D. panel_reset: both screens' panels to be drawn
+\ whole, as the cockpit's copy leaves them. Each pages the logic's bank
+\ with ANDY, as the logic runs, and puts back the bank it found.
+ZA_AUTO2 panel_vec
+.panel_draw
+    LDA #LO(panel_frame) : LDX #HI(panel_frame)
+    BRA panel_call
+.panel_reset
+    LDA #LO(panel_init) : LDX #HI(panel_init)
+.panel_call
+    STA panel_vec : STX panel_vec+1
+    LDA bank_now : PHA
+    LDA #BANK_LOGIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    JSR panel_jump
+    PLA : STA bank_now : STA romsel
+    RTS
+.panel_jump
+    JMP (panel_vec)
+    ZA_CANJUMP panel_frame, panel_init
 
 ASSERT P% <= &3000

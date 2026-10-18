@@ -140,6 +140,7 @@ ASSERT irq_handler < &3000
     JSR erase_screen
 .erased
     JSR draw_phase
+    JSR panel_draw                              ; (cockpit.6502)
     LDA #1 : STA frame_ready
     INC frames : BNE counted
     INC frames+1

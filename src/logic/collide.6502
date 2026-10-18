@@ -234,9 +234,6 @@ INCLUDE "../../build/gen/collide.6502"
     LDX slot
     RTS
 }
-MINE_DETECTED = 1                   ; mine_text: 'WARNING:  MINE DETECTED'
-MINE_EXPLODED = 2                   ; 'MINE HAS JUST EXPLODED!'
-
 \ box: C set if the rest of slot Y's box, by its type X, holds the player:
 \ (-cz - s) negative, then x within size_z, then y within size_y.
 .box

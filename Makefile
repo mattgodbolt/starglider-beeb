@@ -12,6 +12,8 @@
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
 #   make logic    the port's game logic against the ST's, routine by
 #                 routine, on every capture in build/steps (tools/logicrun.mjs)
+#   make panel    the panel drawn from every capture's frames, pixel for
+#                 pixel against the ST's formulas (tools/panelcheck.mjs)
 #   make steps    capture the ST's logic in Hatari (tests/st/steps_*.txt;
 #                 slow, needs Hatari)
 #   make memory   what each region of the memory map holds (tools/memmap.py)
@@ -35,7 +37,7 @@ ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
 SCENES   = flight towers docked
 SOURCES  = $(wildcard src/*.6502 src/logic/*.6502)
-GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502
+GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/panel.6502
 
 # A failed step leaves no half-made target behind (asm.sh fails on a
 # warning after baron has written its output).
@@ -47,7 +49,7 @@ BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short 
 TARGET   = build/starglider.ssd
 DISC     = starglider.ssd
 
-.PHONY: all run disc check spike logic steps memory fps scenes fetch venv clean
+.PHONY: all run disc check spike logic panel steps memory fps scenes fetch venv clean
 
 all: $(TARGET) build/spike/SPIKE
 
@@ -102,6 +104,11 @@ build/gen/collide.6502: $(PRG) tools/mkcollide.py | build/gen
 build/gen/levels.6502: $(PRG) tools/mklevels.py tools/st_prg.py | build/gen
 	$(PYTHON) -I tools/mklevels.py $(PRG) build/gen
 
+# The panel's font, strings, waveforms and colours, from STAR.PRG (and the
+# few pixels of RESULT.TRA it changes without covering).
+build/gen/panel.6502 build/gen/panel.json &: $(PRG) tools/mkpanel.py tools/mkcockpit.py tools/st_prg.py | build/gen
+	$(PYTHON) -I tools/mkpanel.py $(PRG) build/st/disc/RESULT.TRA build/gen/panel.6502 build/gen/panel.json
+
 # The cockpit, from the ST's RESULT.TRA (on its disc, beside STAR.PRG).
 build/gen/cockpit.bin: $(PRG) tools/mkcockpit.py | build/gen
 	$(PYTHON) -I tools/mkcockpit.py build/st/disc/RESULT.TRA --screen $@
@@ -137,6 +144,10 @@ logic: build/spike/SPIKE
 	    [ -f build/steps/$$s/steps.json ] || { echo "no build/steps/$$s: make steps"; exit 1; }; \
 	    node tools/logicrun.mjs build/steps/$$s/steps.json $$r || exit 1; \
 	done; done
+
+# The panel on every capture's frames (tools/panelcheck.mjs).
+panel: build/spike/SPIKE build/gen/panel.json
+	node tools/panelcheck.mjs --quiet $(STEPS:%=build/steps/%/steps.json)
 
 # The scripts time their keys in seconds, not the ST's frames, so a capture
 # slowed by others running beside it plays a different game: a few at once.
