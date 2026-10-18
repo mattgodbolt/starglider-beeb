@@ -40,16 +40,13 @@ ENDIF
 INCLUDE "sine.6502"
 ASSERT sine_qlo >= ANDY_TOP AND sincos >= ANDY_TOP  ; the logic reads them with ANDY paged
 INCLUDE "logic/animate.6502"
-IF DEFINED(SPIKE)                   ; (on the disc with the flight layer)
 INCLUDE "logic/flight.6502"
 INCLUDE "logic/worldlogic.6502"
 INCLUDE "logic/handlers.6502"
-ENDIF
 ENDSECTION
 
 \ The logic's bank: the rest of the game's logic, which needn't read the
 \ sine table, from where ANDY ends (the logic runs with ANDY paged).
-IF DEFINED(SPIKE)                   ; (on the disc with the flight layer)
 SECTION LogicBank, org = &8000, filename = "LOGIC", guard = &C000, cmos = TRUE
     EQUD 0, 0
     \ From where ANDY ends, and past the world bank's list phase too: Baron
@@ -65,4 +62,3 @@ INCLUDE "logic/frame.6502"
 INCLUDE "logic/level.6502"
 INCLUDE "view.6502"
 ENDSECTION
-ENDIF

@@ -1,0 +1,15 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - what the step's logic draws on its frame
+\
+\ The ST draws the enemies' laser lines, the mines' messages and the
+\ player's bolt as its logic runs, into the screen being drawn, before
+\ frame_end shows it. The port draws them after the step's logic, onto the
+\ frame that step drew, before it's shown (call 2, option B: in force
+\ until Matt says otherwise).
+\ ***************************************************************************
+
+\ view_overlays: frame_show's (engine.6502), with draw_buffer and draw_bank
+\ naming the screen drawn, from main RAM with the logic's bank and ANDY
+\ paged: the bolt and the shots (view.6502's over_draw).
+.view_overlays
+    JMP over_draw

@@ -6,11 +6,18 @@ isn't here yet.
 
 **[Run it in jsbeeb](https://bbc.xania.org/?autoboot&model=Master&disc1=github:mattgodbolt/starglider-beeb/starglider.ssd)**
 (a Master 128), or write `starglider.ssd` to a disc and SHIFT-BREAK a
-Master. For now the disc shows the engine the game will run on: the ST's
-own models turning one after another in the cockpit's window, as the
-ST's Interrogate screen shows them, drawn in MODE 1 at the ST's 320 x 200
-with the cockpit's own colours below the view, double-buffered at 12.5
-frames a second, and the disc read in the background as it goes.
+Master. For now the disc plays the game's world without its panel,
+messages or sound: after loading, a game starts at level 1, its logic
+the ST's transcribed exactly, drawn in MODE 1 at the ST's 320 x 200 with
+the cockpit's own colours below the view, double-buffered, the game
+stepping 12.5 times a second as the ST's does in flight.
+
+The keys are the ST's: the cursor keys, or X and C, bank; cursor up and
+`;` dive, cursor down and `.` climb; SPACE is faster and `/` slower;
+RETURN or COPY fires; L launches a missile and P picks one up in a silo;
+F fixes the sight. An analogue joystick steers as the ST's mouse does:
+its fire button fires, and with the second button held its climb sets
+the speed.
 
 ![A walker in the cockpit's window, on the disc](docs/images/disc_cockpit.png)
 

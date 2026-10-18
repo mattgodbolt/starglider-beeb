@@ -6,8 +6,10 @@ the ST's (tools/mkscene.py's expectations, from tools/st_render.py).
 
 The lists and the camera-space positions are the game's logic: they must
 match exactly, but for the objects the port rotated approximately
-(decision 11), which must be within the approximation's bound and
-neither drawn nor near the player on the ST. Lines are compared by object and edge: an edge drawn by one
+(decision 11), whose x' and z' must be within the approximation's bound
+(it makes no y': decision 21) and which must be neither drawn nor near
+the player in x and z on the ST. Lines are compared by object and edge:
+an edge drawn by one
 and not the other is a culling difference (decision 9 moves the test into
 object space); an edge both draw must lie within --tolerance pixels of the
 ST's: each end of either line within that distance of the other line,
@@ -92,12 +94,14 @@ def main():
                     st["rel_bad"] += 1
                     show(f"frame {n}: slot {slot} camera-space {g} on the port, {v} on the ST")
                 continue
-            # rotated approximately (decision 11): within the slack, and
-            # neither drawn by the ST nor near enough to meet the player
+            # rotated approximately (decision 11): x' and z' within the
+            # slack (there's no y': decision 21), and neither drawn by the ST
+            # nor near enough in x and z to meet the player
             st["rel_approx"] += 1
-            off = max(min(abs(a - b), 65536 - abs(a - b)) for a, b in zip(g, v))   # words wrap
+            xz = ((g[0], v[0]), (g[2], v[2]))
+            off = max(min(abs(a - b), 65536 - abs(a - b)) for a, b in xz)   # words wrap
             worst_approx = max(worst_approx, off)
-            if off > ROT_SLACK or int(slot) in drawn or all(abs(c) <= NEAR_BOX for c in v):
+            if off > ROT_SLACK or int(slot) in drawn or all(abs(v[i]) <= NEAR_BOX for i in (0, 2)):
                 st["rel_bad"] += 1
                 show(f"frame {n}: slot {slot} approximated as {g}, the ST's {v}")
         port = {}

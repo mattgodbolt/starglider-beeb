@@ -31,12 +31,14 @@ rotate_approx does the same from d's high bytes alone, each taken towards
 by m's sign (the constant is -2m again). That's within 444 units of the
 exact result (each row of the matrix is a unit vector, so its terms'
 errors, under 256 each, add to at most 256 times the square root of 3),
-for under half the work. A high byte of 0 makes its column's products 0,
-and column y's often is (the ground is flat and the player near it), so
-that column keeps its constants after its products, in links of their
-own, and skips them all while it is. A matrix of only 0s and units has no
-products, and then rotate_approx is exact: rot_exactly says so. The
-matrix is `cam`, rows x', y', z' of words on x, y, z (render.6502).
+for under half the work. It makes only x' and z' (decision 21): of what it
+leaves approximate only the scanner reads anything, and it reads no y'. A
+high byte of 0 makes its column's products 0, and column y's often is (the
+ground is flat and the player near it), so that column keeps its constants
+after its products, in links of their own, and skips them all while it
+is. A matrix of only 0s and units has no products, and then rotate_exact
+costs what rotate_approx would: rot_exactly says so. The matrix is `cam`,
+rows x', y', z' of words on x, y, z (render.6502).
 """
 
 out = []
@@ -58,6 +60,8 @@ EXACT_SITES = [("a", "ml"), ("b", "~ml"), ("c", "ml"), ("d", "~ml"),
 APPROX_SITES = [("a", "ml"), ("b", "~ml"), ("c", "mh"), ("d", "~mh"), ("e", "mh"), ("f", "~mh")]
 APPROX_NEG_SITES = [("na", "ml"), ("nb", "~ml"), ("nc", "~mh"), ("nd", "mh"), ("ne", "~mh"), ("nf", "mh")]
 SKIP_COLUMN = 1                 # column y: its products skipped while D_hi is 0
+APPROX_ROWS = (0, 2)            # rotate_approx's rows, x' and z' (decision 21)
+APPROX_TERMS = [e for e in range(9) if e // 3 in APPROX_ROWS]
 
 
 def term_name(e):
@@ -69,8 +73,8 @@ def term_name(e):
 EXACT_LINKS = ([f"rotc{j}" for j in range(3)] +
                [f"rot{e}{v}" for e in range(9) for v in ("", "_add", "_sub")] + ["rot_done"])
 APPROX_LINKS = ([f"rapc{j}" for j in range(3)] +
-                [f"rap{e}{v}" for e in range(9) for v in ("", "_n", "_add", "_sub")] +
-                [f"rapk{i}" for i in range(3)] + ["rap_done"])
+                [f"rap{e}{v}" for e in APPROX_TERMS for v in ("", "_n", "_add", "_sub")] +
+                [f"rapk{i}" for i in APPROX_ROWS] + ["rap_done"])
 
 
 def jump(prefix, what):
@@ -112,9 +116,10 @@ emit("RAPK_GO = rapk0_go + 1 - rapk0")
 for e in range(1, 9):
     for k in [k for k, _ in EXACT_SITES] + ["go", "add", "add_go", "sub", "sub_go"]:
         emit(f"ASSERT rot{e}_{k} - rot{e} = rot0_{k} - rot0")
+for e in APPROX_TERMS[1:]:
     for k in [k for k, _ in APPROX_SITES + APPROX_NEG_SITES] + ["n", "n_go", "go", "add", "add_go", "sub", "sub_go"]:
         emit(f"ASSERT rap{e}_{k} - rap{e} = rap0_{k} - rap0")
-for i in range(1, 3):
+for i in APPROX_ROWS[1:]:
     emit(f"ASSERT rapk{i}_go - rapk{i} = rapk0_go - rapk0")
 emit()
 
@@ -136,7 +141,7 @@ emit("""\\ rotate_setup: specialise rotate_exact and rotate_approx to cam, once 
 {
     ZA_AUTO2 m, mag, t, lnk, asite, esite, askip
     ZA_AUTO 6, ka, ke, ky       ; the rows' constants, and column y's
-    ZA_AUTO1 seen, prods, msign, mode, skipping, relink, kind
+    ZA_AUTO1 aseen, eseen, prods, msign, mode, skipping, relink, kind
     STZ relink
     LDX #8
 .shape
@@ -170,9 +175,10 @@ emit("""\\ rotate_setup: specialise rotate_exact and rotate_approx to cam, once 
     LDA #LO(rap_go + 1) : STA asite : STA askip
     LDA #HI(rap_go + 1) : STA asite+1 : STA askip+1
     LDA #LO(rot_go + 1) : STA esite : LDA #HI(rot_go + 1) : STA esite+1""")
+assert APPROX_ROWS == (0, 2)    # column y's constants: rows x and z, X = 0 and 4
 for j in range(3):
     emit(f"    \\ column {'xyz'[j]}")
-    emit("    STZ seen")
+    emit("    STZ aseen : STZ eseen")
     passes = [("&40", "its units"), ("&80", "its products")] if j == SKIP_COLUMN else [("0", None)]
     for mode, what in passes:
         if what:
@@ -181,23 +187,23 @@ for j in range(3):
         for i in range(3):
             emit(f"    LDX #{3 * i + j} : JSR term")
     if j == SKIP_COLUMN:
-        emit(f"""    \\ its constants, each row's that has a product, and the stub's skip
-    \\ on to the next link
-    LDA seen : BEQ no_skip
+        emit(f"""    \\ its constants, each row's that has a product (rows x and z), and the
+    \\ stub's skip on to the next link
+    LDA aseen : BEQ no_skip
     LDX #4
 .constants
-    LDA ky,X : ZA_INDEXEDBY {{0, 2, 4}}
-    ORA ky+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    LDA ky,X : ZA_INDEXEDBY {{0, 4}}
+    ORA ky+1,X : ZA_INDEXEDBY {{0, 4}}
     BEQ no_k
-    TXA : LSR A : TAY
+    TXA : LSR A : LSR A : TAY
     LDA rapk_lo,Y : STA t : LDA rapk_hi,Y : STA t+1
-    LDA ky,X : ZA_INDEXEDBY {{0, 2, 4}}
+    LDA ky,X : ZA_INDEXEDBY {{0, 4}}
     LDY #rapk0_lo + 1 - rapk0 : STA (t),Y
-    LDA ky+1,X : ZA_INDEXEDBY {{0, 2, 4}}
+    LDA ky+1,X : ZA_INDEXEDBY {{0, 4}}
     LDY #rapk0_hi + 1 - rapk0 : STA (t),Y
     LDA #0 : LDY #RAPK_GO : JSR alink
 .no_k
-    DEX : DEX : BPL constants
+    DEX : DEX : DEX : DEX : BPL constants
     LDA #LO(rapc{j}_skip + 1) : STA askip : LDA #HI(rapc{j}_skip + 1) : STA askip+1
     LDA #&80 : STA skipping
 .no_skip""")
@@ -208,8 +214,11 @@ emit("""    \\ the chains' ends
     LDA #0 : TAY : JSR elink
     \\ the constants, into the accumulators' first values""")
 for r in range(6):
-    emit(f"    LDA ka+{r} : STA rap_k{r}+1 : LDA ke+{r} : STA rot_k{r}+1")
-emit("""    \\ no products: the approximation is exact
+    if r // 2 in APPROX_ROWS:
+        emit(f"    LDA ka+{r} : STA rap_k{r}+1 : LDA ke+{r} : STA rot_k{r}+1")
+    else:
+        emit(f"    LDA ke+{r} : STA rot_k{r}+1")
+emit("""    \\ no products: rotate_exact costs what the approximation would
     LDA prods : EOR #&80 : STA rot_exactly
     \\ the identity: d needs no rotating at all
     STZ rot_identity
@@ -223,7 +232,8 @@ emit("""    \\ no products: the approximation is exact
     RTS
 
 \\ term: cam's entry X (row row / 2) patched into both routines, and linked;
-\\ only its units if mode is &40, its products if &80.
+\\ only its units if mode is &40, its products if &80. Row y's is only
+\\ rotate_exact's (decision 21).
 .term
     TXA : ASL A : TAY
     LDA cam,Y : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
@@ -243,20 +253,21 @@ emit("""    \\ no products: the approximation is exact
     LDA mag+1 : CMP #&40 : BNE product
     \\\\ +-16384: d added or subtracted, in both
     BIT mode : BMI none
-    LDA rap_base_lo,X : STA t : LDA rap_base_hi,X : STA t+1
+    LDA rot_base_lo,X : STA t : LDA rot_base_hi,X : STA t+1
     BIT msign : BMI unit_sub
-    LDA #RAP_ADD : LDY #RAP_ADD_GO : JSR alink
-    LDA rot_base_lo,X : STA t : LDA rot_base_hi,X : STA t+1
-    LDA #ROT_ADD : LDY #ROT_ADD_GO : JMP elink
+    LDA #ROT_ADD : LDY #ROT_ADD_GO : JSR elink
+    JSR rap_t : BEQ none
+    LDA #RAP_ADD : LDY #RAP_ADD_GO : JMP alink
 .unit_sub
-    LDA #RAP_SUB : LDY #RAP_SUB_GO : JSR alink
-    LDA rot_base_lo,X : STA t : LDA rot_base_hi,X : STA t+1
-    LDA #ROT_SUB : LDY #ROT_SUB_GO : JMP elink
+    LDA #ROT_SUB : LDY #ROT_SUB_GO : JSR elink
+    JSR rap_t : BEQ none
+    LDA #RAP_SUB : LDY #RAP_SUB_GO : JMP alink
 .product
     BIT mode : BVS none
     LDA #&80 : STA prods
     \\\\ the constants: -2m in both (the approximation's in column y's own
-    \\\\ while it's that column), and the exact's 32768 for m < 0
+    \\\\ while it's that column, and none in row y), and the exact's 32768
+    \\\\ for m < 0
     LDA m : ASL A : STA t : LDA m+1 : ROL A : STA t+1
     LDY rot_row,X
     LDA ke,Y : ZA_INDEXEDBY {0, 2, 4}
@@ -267,27 +278,25 @@ emit("""    \\ no products: the approximation is exact
     EOR #&80
 .no_half
     STA ke+1,Y : ZA_INDEXEDBY {0, 2, 4}
+    CPY #2 : BEQ exact_term
     BIT mode : BMI in_y
-    LDA ka,Y : ZA_INDEXEDBY {0, 2, 4}
-    SEC : SBC t : STA ka,Y : ZA_INDEXEDBY {0, 2, 4}
-    LDA ka+1,Y : ZA_INDEXEDBY {0, 2, 4}
-    SBC t+1 : STA ka+1,Y : ZA_INDEXEDBY {0, 2, 4}
-    BRA constant
+    LDA ka,Y : ZA_INDEXEDBY {0, 4}
+    SEC : SBC t : STA ka,Y : ZA_INDEXEDBY {0, 4}
+    LDA ka+1,Y : ZA_INDEXEDBY {0, 4}
+    SBC t+1 : STA ka+1,Y : ZA_INDEXEDBY {0, 4}
+    BRA exact_term
 .in_y
-    LDA #0 : SEC : SBC t : STA ky,Y : ZA_INDEXEDBY {0, 2, 4}
-    LDA #0 : SBC t+1 : STA ky+1,Y : ZA_INDEXEDBY {0, 2, 4}
-.constant
-    \\\\ a column's first product loads its D first
-    LDA seen : BNE stubbed
-    INC seen
-    LDY rot_col,X
-    LDA rapc_lo,Y : STA t : LDA rapc_hi,Y : STA t+1
-    LDA rapc_go,Y : TAY : LDA #0 : JSR alink
+    LDA #0 : SEC : SBC t : STA ky,Y : ZA_INDEXEDBY {0, 4}
+    LDA #0 : SBC t+1 : STA ky+1,Y : ZA_INDEXEDBY {0, 4}
+.exact_term
+    \\\\ the exact term, after its column's D if it's the column's first
+    \\\\ product: M = 4m, a word
+    LDA eseen : BNE e_stubbed
+    INC eseen
     LDY rot_col,X
     LDA rotc_lo,Y : STA t : LDA rotc_hi,Y : STA t+1
     LDA rotc_go,Y : TAY : LDA #0 : JSR elink
-.stubbed
-    \\\\ the exact term: M = 4m, a word
+.e_stubbed
     ASL m : ROL m+1 : ASL m : ROL m+1
     LDA rot_base_lo,X : STA t : LDA rot_base_hi,X : STA t+1
 """)
@@ -299,9 +308,19 @@ emit("""    LDA #0 : LDY #ROT_GO : JSR elink
     BIT msign : BPL exact_done
     LDA #ROT_SUB : LDY #ROT_SUB_GO : JSR elink
 .exact_done
-    \\\\ the approximate term: M = 4|m|, added or subtracted
+    \\\\ the approximate term but row y's, the same way: M = 4|m|, added or
+    \\\\ subtracted
+    JSR rap_t : BNE approx_term
+    RTS
+.approx_term
+    LDA aseen : BNE a_stubbed
+    INC aseen
+    LDY rot_col,X
+    LDA rapc_lo,Y : STA t : LDA rapc_hi,Y : STA t+1
+    LDA rapc_go,Y : TAY : LDA #0 : JSR alink
+    JSR rap_t
+.a_stubbed
     ASL mag : ROL mag+1 : ASL mag : ROL mag+1
-    LDA rap_base_lo,X : STA t : LDA rap_base_hi,X : STA t+1
     BIT msign : BMI approx_neg
 """)
 patch("mag", "RAP", "ML", False)
@@ -341,10 +360,16 @@ emit("""    LDA #RAP_NEG : LDY #RAP_NEG_GO
     TYA : CLC : ADC t : STA esite
     LDA t+1 : ADC #0 : STA esite+1
     RTS
+
+\\\\ rap_t: t at rotate_approx's term X, and Z set if it hasn't one (row y)
+.rap_t
+    LDA rap_base_lo,X : STA t
+    LDA rap_base_hi,X : STA t+1
+    RTS
 }
 
-\\ &80 while cam has no products, when rotate_approx is exact, and while it's
-\\ the identity
+\\ &80 while cam has no products, when rotate_exact costs no more than
+\\ rotate_approx, and while it's the identity
 .rot_exactly
     EQUB 0
 .rot_identity
@@ -365,9 +390,10 @@ def table(name, labels):
     emit("    EQUB " + ", ".join(f"HI({x})" for x in labels))
 
 
-emit("\\ each term's code, by term, and its row (times 2) and column")
+emit("\\ each term's code, by term (0 where rotate_approx has none), and its row")
+emit("\\ (times 2) and column")
 table("rot_base", [f"rot{e}" for e in range(9)])
-table("rap_base", [f"rap{e}" for e in range(9)])
+table("rap_base", [f"rap{e}" if e in APPROX_TERMS else "0" for e in range(9)])
 emit(".rot_row")
 emit("    EQUB " + ", ".join(str(2 * (e // 3)) for e in range(9)))
 emit(".rot_col")
@@ -379,8 +405,8 @@ emit(".rapc_go")
 emit("    EQUB " + ", ".join(f"rapc{j}_go + 1 - rapc{j}" for j in range(3)))
 emit(".rotc_go")
 emit("    EQUB " + ", ".join(f"rotc{j}_go + 1 - rotc{j}" for j in range(3)))
-table("rapk", [f"rapk{i}" for i in range(3)])
-for i in range(1, 3):
+table("rapk", [f"rapk{i}" for i in APPROX_ROWS])
+for i in APPROX_ROWS[1:]:
     emit(f"ASSERT rapk{i}_lo - rapk{i} = rapk0_lo - rapk0 AND rapk{i}_hi - rapk{i} = rapk0_hi - rapk0")
 emit()
 
@@ -398,17 +424,17 @@ def units(prefix, e, j, acc):
     jump(prefix, "the next link")
 
 
-def start(prefix, name, what):
+def start(prefix, name, what, rows):
     emit(f"\\ {name}: {what}")
     emit(f".{name}")
-    for r in range(6):
+    for r in [r for r in range(6) if r // 2 in rows]:
         emit(f".{prefix}_k{r}")
         emit(f"    LDA #0 : STA rot_acc+{r}               ; patched: the rows' constants")
     emit(f".{prefix}_go")
     jump(prefix, "the first link")
 
 
-start("rot", "rotate_exact", "rot_acc = cam rot_d, as the ST's: X and Y are\n\\ each column's D, low and high byte.")
+start("rot", "rotate_exact", "rot_acc = cam rot_d, as the ST's: X and Y are\n\\ each column's D, low and high byte.", range(3))
 for j in range(3):
     emit(f".rotc{j}                          ; column {'xyz'[j]}'s D")
     emit(f"    LDX rot_d+{2 * j}")
@@ -483,7 +509,7 @@ emit(".rot_done")
 emit("    RTS")
 emit()
 
-start("rap", "rotate_approx", "rot_acc = cam rot_d from D's high bytes alone,\n\\ each column's in Y: each term M D_hi / 256.")
+start("rap", "rotate_approx", "rot_acc's x' and z' = cam rot_d from D's high\n\\ bytes alone, each column's in Y: each term M D_hi / 256. It leaves y' as\n\\ it was (decision 21).", APPROX_ROWS)
 for j in range(3):
     emit(f".rapc{j}                          ; column {'xyz'[j]}'s D_hi, d's towards 0" +
          (": none while it's 0" if j == SKIP_COLUMN else ""))
@@ -507,7 +533,7 @@ for j in range(3):
         emit("    EOR #&80 : TAY")
         emit(f".rapc{j}_go")
         jump("rap", "the column's first product")
-    for i in range(3):
+    for i in APPROX_ROWS:
         e = 3 * i + j
         acc = f"rot_acc+{2 * i}"
         emit(f"\\ term {e}: {term_name(e)}")
@@ -559,7 +585,7 @@ for j in range(3):
         jump("rap", "the next link")
         units("rap", e, j, acc)
     if j == SKIP_COLUMN:
-        for i in range(3):
+        for i in APPROX_ROWS:
             acc = f"rot_acc+{2 * i}"
             emit(f".rapk{i}                          ; row {'xyz'[i]}'s constant for column {'xyz'[j]}'s product")
             emit(f".rapk{i}_lo")

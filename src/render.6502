@@ -82,12 +82,10 @@ ENDIF
     STA line_plot.f_dy0+2 : STA line_plot.f_dy1+2 : ADC #2
     STA line_plot.f_code+2
     RTS
-IF DEFINED(SPIKE)                   ; (on the disc with the flight layer)
 .erase_more
     LDX draw_buffer
     LDA erase_stop,X : STA erase_i
     BRA erase_aim
-ENDIF
 .draw_end
 .erase_keep
     LDX draw_buffer
@@ -328,74 +326,6 @@ OM_SIZE = 6 + 18
     SUBW objc, mul_r
     MOVW mul_y, dx : JSR fmul16
     ADDW objc+4, mul_r
-    RTS
-}
-
-\ kmul: kp = kv (a signed word) by each of the five constants, each
-\ (kv K) >> 14 in magnitude, signed. Each product's bytes 1-3 build in
-\ kq and kp (the lowest byte can't carry into them); every factor is a
-\ sine's size, at most 16384, so the high bytes' products are small
-\ enough that only the last sum into kp carries.
-ZA_AUTO2 kv
-ZA_AUTO 10, kp
-.kmul
-{
-    ZA_AUTO 10, kq              ; each product's byte 1, by 2 k
-    ZA_AUTO1 kneg, tlo
-    LDA kv+1 : STA kneg : BPL positive
-    LDA #0 : SEC : SBC kv : STA kv : LDA #0 : SBC kv+1 : STA kv+1
-.positive
-    LDA kv : MUL_SET
-    ZA_DISCARD kq, kp
-    LDX #8
-.low
-    LDY kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    SEC : LDA (m_sqlo),Y : SBC (m_nglo),Y : LDA (m_sqhi),Y : SBC (m_nghi),Y
-    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    LDY kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    MUL8 tlo : STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    LDA tlo : CLC : ADC kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    BCC low_carried
-    INC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-.low_carried
-    DEX : DEX : BPL low
-    LDA kv+1 : MUL_SET
-    LDX #8
-.high
-    LDY kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    MUL8 tlo
-    CLC : ADC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    LDA tlo : CLC : ADC kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    BCC high_carried
-    INC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-.high_carried
-    LDY kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    MUL8 tlo : STA kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    LDA tlo : CLC : ADC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    BCC top_carried
-    INC kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-.top_carried
-    \ >> 14: bytes 1-3 shifted left 2, the top two; then signed
-    LDA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    ASL A : ROL kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    ROL kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    ASL A : ROL kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    ROL kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    TXA : LSR A : TAY
-    LDA kneg : EOR ksign,Y : ZA_INDEXEDBY 0..4
-    BPL high_next
-    LDA #0 : SEC : SBC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    LDA #0 : SBC kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-    STA kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
-.high_next
-    DEX : DEX : BMI done
-    JMP high
-.done
     RTS
 }
 
@@ -667,7 +597,7 @@ NEXT
 \ the object lies wholly inside the window. To first order in the
 \ object's offsets, its x on the screen is X0 + (128 / tz)(A_x - (tx /
 \ tz) A_z) k / 1024, and tx / tz is X0 / 128: so B_x = 128 (A_x - X0 A_z
-\ / 128) / tz, which is proj_x's, and the same for y.
+\ / 128) / tz, which is proj_x.r8's, and the same for y.
 ZA_AUTO 4, sc_0                 ; x, y
 sc_x0 = sc_0
 sc_y0 = sc_0 + 2
@@ -750,6 +680,19 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     MOVW pz, tz : JSR proj_z
     LDX #0 : JSR centre
     LDX #2 : JSR centre
+    \ B's 128 d / tz from R's high byte alone, rounded (proj_x.r8, decision
+    \ 22): a far object is at most about 16 pixels across, so 8 bits of B
+    \ are enough, and so are 8 of R. It's at least 16 radii away, so deep
+    \ enough for r8.
+    ASSERT 16 * SHAPE_RADIUS_MIN >= 128
+    LDA proj_x.a+1 : ASL A                  ; R's low byte's top bit ...
+    LDA proj_x.c+1 : ADC #0                 ; ... rounds its high byte
+    BCC r_rounded
+    LDA #&FF
+.r_rounded
+    STA proj_x.ra+1 : STA proj_x.rc+1 : STA proj_x.re+1
+    EOR #&FF
+    STA proj_x.rb+1 : STA proj_x.rd+1 : STA proj_x.rf+1
     \ B by term (3 row + j): d = A_row - X0 A_z / 128 (X0 or Y0), the
     \ product rounded down as the 68000's shifts would, then 128 d / tz
     ZA_DISCARD sc_bmag, sc_bsign
@@ -852,27 +795,33 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA d24+1 : ADC mul_p+2 : STA d24+1
     LDA d24+2 : ADC mul_p+3 : STA d24+2
 .got_d
-    \ B = 128 d / tz, d halved (and B doubled) until it fits proj_x's word
-    STZ halved
+    \ |B| = 128 |d| / tz, |d| halved (and |B| doubled) until it's below
+    \ 2^15, as r8 takes it; B's sign is d's
+    LDX term
+    LDA d24+2 : AND #&80 : STA sc_bsign,X : ZA_INDEXEDBY 0..5
+    BPL d_pos
+    LDA #0 : SEC : SBC d24 : STA d24
+    LDA #0 : SBC d24+1 : STA d24+1
+    LDA #0 : SBC d24+2 : STA d24+2
+.d_pos
+    LDX #0
 .fit
-    LDA d24+1 : ASL A : LDA d24+2 : ADC #0 : BEQ fits   ; bits 15-23 all one or all zero
-    LDA d24+2 : CMP #&80 : ROR d24+2 : ROR d24+1 : ROR d24
-    INC halved
+    LDA d24+2 : BNE halve
+    BIT d24+1 : BPL fits
+.halve
+    LSR d24+2 : ROR d24+1 : ROR d24
+    INX
     BRA fit
 .fits
+    STX halved
     MOVW px, d24
-    JSR proj_x
+    JSR proj_x.r8
     LDX halved : BEQ unhalved
 .double
     ASL pq : ROL pq+1
     DEX : BNE double
 .unhalved
-    LDX term
-    LDA pq+1 : AND #&80 : STA sc_bsign,X : ZA_INDEXEDBY 0..5
-    TXA : ASL A : TAX
-    BIT pq+1 : BPL b_pos
-    LDA #0 : SEC : SBC pq : STA pq : LDA #0 : SBC pq+1 : STA pq+1
-.b_pos
+    LDA term : ASL A : TAX
     LDA pq : STA sc_bmag,X : ZA_INDEXEDBY 0..10
     LDA pq+1 : STA sc_bmag+1,X : ZA_INDEXEDBY 0..10
 .next_term
@@ -1347,7 +1296,8 @@ ENDMACRO
 .c1
     LDY xh : BNE high
     TYA
-    BRA shift
+    JMP (shift+1)                           ; (BRA shift's cycles, but none for a page)
+    ZA_CANJUMP right24_2, right24_3, right24_4, left24_3, left24_2, left24_1, right0, right16_1, right16_2, right16_3, right16_4, right16_5, left16_2, left16_1
 .high
     SEC
 .g  LDA sqr_lo,Y
@@ -1429,6 +1379,30 @@ ENDMACRO
     LDA #0 : SBC pq+1 : STA pq+1
 .done
     RTS
+\ r8: pq = 128 px / pz for px from 0 to 32767 and pz from 128, from R's
+\ high byte alone (decision 22): px R_hi >> (S - 8), for far_setup's B,
+\ which patches R_hi in. From S = 16 the shifts read A:pq alone, not p1.
+.r8
+    ZA_DISCARD p1
+    LDY px
+    SEC
+.ra LDA sqr_hi,Y
+.rb SBC neg_hi,Y
+    STA pq                                  ; px's low byte by R_hi, its high byte
+    LDY px+1 : BEQ r8_low
+    SEC
+.rc LDA sqr_lo,Y
+.rd SBC neg_lo,Y
+    TAX
+.re LDA sqr_hi,Y
+.rf SBC neg_hi,Y                            ; px's high byte by R_hi
+    STA u1
+    TXA : CLC : ADC pq : STA pq
+    LDA u1 : ADC #0
+    JMP shift
+.r8_low
+    TYA
+    JMP shift
 \ the ways in, by S from 10
 .shift_lo
     EQUB LO(right24_2), LO(right24_3), LO(right24_4), LO(left24_3), LO(left24_2), LO(left24_1)

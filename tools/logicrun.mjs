@@ -48,6 +48,9 @@ const ROUTINES = {
     mine: { from: "mine", to: "mined", call: "mine_proximity", bank: "BANK_LOGIC", x: true },
     level: { from: "level", to: "next:top", call: "level_start", bank: "BANK_LOGIC", d0: true },
     newgame: { from: "newgame", to: "level", call: "new_game", bank: "BANK_LOGIC" },
+    // a whole step as the disc takes it (src/step.6502), the keys as
+    // read_keys found them
+    step: { from: "top", to: "next:top", call: "spike_step", bank: "BANK_WORLD", inputs: "render" },
 };
 
 const args = process.argv.slice(2);
@@ -293,11 +296,12 @@ for (const f of map.objects) {
 }
 // The camera-space positions of the objects the list phase rotated
 // approximately (decision 11, ob_exact 0) are the ST's only to within the
-// approximation's slack, and only for an object the ST neither drew nor had
-// within reach of the player on every axis (tools/scenecheck.py's rule): a
-// slot that keeps to that is taken as matching. Drawn is the ST's draw list
-// at the exit, not the record's flag: the silo's two records keep what TOS
-// left in theirs, which nothing clears.
+// approximation's slack in x and z, and only for an object the ST neither
+// drew nor had within reach of the player in x and z (tools/scenecheck.py's
+// rule): a slot that keeps to that is taken as matching. Their y' isn't
+// made at all (decision 21). Drawn is the ST's draw list at the exit, not
+// the record's flag: the silo's two records keep what TOS left in theirs,
+// which nothing clears.
 const ROT_SLACK = 512;
 const NEAR_BOX = 2000 + ROT_SLACK;
 const exactAt = need("ob_exact");
@@ -308,7 +312,11 @@ for (const it of camera)
     it.approx = (got, want, exit) => {
         for (let s = 0; s < got.length; s++) {
             if (got[s] === want[s] || ram[exactAt + s]) continue;
-            const st = camera.map((c) => s16(c.want(exit)[s]));
+            if (it.name === "ob_cy") {
+                got[s] = want[s];
+                continue;
+            }
+            const st = [camera[0], camera[2]].map((c) => s16(c.want(exit)[s]));
             const drawn = drawList.want(exit).slice(1).some((ptr) => slotOf(ptr) === s);
             const off = Math.abs(s16((got[s] - want[s]) & 0xffff));
             if (off <= ROT_SLACK && !drawn && !st.every((c) => Math.abs(c) <= NEAR_BOX)) got[s] = want[s];

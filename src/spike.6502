@@ -45,7 +45,17 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 .logic_jump
     JMP (logic_call)
     ZA_CANJUMP animate_shapes, player_flight, random8, random32, world_lists, world_after, world_whole, read_keys, object_handlers, collisions, level_message, frame_end_logic, post_frame, level_start, mine_proximity
-    ZA_CANJUMP new_game
+    ZA_CANJUMP new_game, spike_step
+
+\ spike_step: a whole step as the disc takes it (step.6502), but for its
+\ frame, which the logic doesn't read, and the disc's controls and frame,
+\ which the harness hasn't: they do nothing here.
+.spike_step
+    JSR step_lists
+    JMP step_logic
+.input_step
+.frame_show
+    RTS
 
 \ spike_erase: the last frame's lines erased (from its erase list), as the
 \ disc erases a screen before drawing it again.
@@ -71,7 +81,8 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
     ZA_ENTRY
     STZ log_n : STZ log_n+1
     LDA log_base : STA log_ptr : LDA log_base+1 : STA log_ptr+1
-    JMP view_overlays
+    BANK_ANDY BANK_LOGIC                        ; (as frame_show calls view_overlays)
+    JMP over_draw
 
 \ spike_sines: sincos at every angle, the sine and cosine (4 bytes) for
 \ each into the log's bank in turn, for tools/sinecheck.py.

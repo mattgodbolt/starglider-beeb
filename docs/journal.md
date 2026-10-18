@@ -699,3 +699,109 @@ at the routine's entry and compared at its exit, all matching (checked
   seemed unreachable. A list assignment referring forward to a label
   also failed to settle (waitingforvsync/baron#31).
 
+### Nine calls
+
+The transcription and the optimisation rounds left nine places where the
+port would do something the ST doesn't, or where the ST leaves the choice
+open. They went to Matt as one page, each with its options, figures and a
+recommendation, and Matt took every recommendation (2026-10-18):
+decisions 15 to 22. One call kept the ST as it is, so it has no number:
+each step still clears every object's drawn and near flags below the
+slot count, as the ST does, rather than only the last lists' (about 750
+cycles a step, against the object table's exact check).
+
+### No y' for the approximated, and B from R's high byte
+
+Decisions 21 and 22 were built and measured on 2026-10-18. Before building
+21, the ST's code was searched for every read of an object's camera-space
+y (+$2A). There are eight:
+
+- the two draw loops, enemy fire and the player's laser read only objects
+  on the draw list, which are always rotated exactly;
+- the scanners load y' and overwrite it before using it;
+- the collisions read it, but test z and x first, and an approximated
+  object is always out of the box on one of those.
+
+So `rotate_approx` now makes only x' and z', and the relevance test asks
+only about those. In flight the list phase falls from 28,856 to 25,487
+cycles a step on average; steps where the craft is banked or pitched
+fall from 56,872 to 49,628, and the worst from 53,419 to 45,426. The same
+objects are rotated exactly as before. The approximate path also got its
+own way out of the loop: while it joined the exact path, baron took y'
+to be read there, and its zero page rose from &F4 to &FA.
+
+Of decision 22's two trims, far objects' B now comes from R's high byte,
+rounded: two byte products where proj_x has four. That saves 1,229
+cycles a frame in flight and 858 at the towers, about half the estimate,
+as the rest of B's set-up stays, and no edge comes to be 2 pixels or more
+from the ST's. The room came from moving `kmul` into the world bank, as
+only ground_matrix's build calls it, after paging that bank. Dropping
+proj_x's lowest product from a shift of 17 failed the silo tunnel: its
+long level lines cross the window's bottom edge, where a pixel's change in
+height slid one clipped end 16 pixels. From a shift of 18 it would pass,
+for 693 cycles in flight, 1,137 at the towers and 136 lost docked, but
+it is left out.
+
+| `make spike`, mean a frame | Flight | Towers | Docked |
+|---|---|---|---|
+| Camera and lists | 34,574 → 31,105 | 16,114 → 15,668 | 1,283 → 1,260 |
+| Objects | 99,226 → 97,997 | 163,400 → 162,542 | 128,303 → 128,341 |
+
+### The game on the disc
+
+The disc plays now. After loading, a new game starts at level 1, as the
+ST's title starts one, and every step runs the ST's frame in its order
+(`src/step.6502`): world_lists, the frame drawn on the last step due,
+world_after, read_keys, player_flight, object_handlers, animate_shapes,
+collisions, level_message and frame_end's logic, then the post-frame
+tests, going on to level_start. At a game over it goes straight to the
+next game until the front end is in. The model viewer is gone.
+
+- **A whole step checked.** The spike includes the step too
+  (`spike_step`, with the controls and the frame's showing stubbed), and
+  `tools/logicrun.mjs`'s `step` runs it from each frame's top to the next
+  frame's. Every capture's 2,022 steps match the ST's in everything the
+  map holds, level changes included (checked 2026-10-18). So the routines
+  are right in the order and the banks the disc runs them in, not only
+  one at a time.
+- **The frame waits for its logic.** A frame is still drawn between its
+  step's lists and logic, but shown only after the logic and
+  `view_overlays`, so the enemies' lasers, the mines' messages and the
+  bolt go on the frame they belong to (decision 16).
+- **The keys** (decision 6) are the ST's. The vertical sync's interrupt
+  reads the BBC's matrix into the ST's key states and its one-byte
+  latch, as the ST's keyboard interrupt writes them. It reads them only
+  when the keyboard's auto-scan has seen a key since the last read, or
+  one was held then (the OS's own trigger, CA2): about a hundred cycles a
+  field with none held, about 1,100 with one. Where the BBC lacks the
+  ST's key, the nearest: COPY for Insert, the Master's keypad RETURN for
+  keypad Enter, DELETE for Backspace. The logic never reads Help.
+- **The joystick** is the ST's mouse. Each step adds the stick's move
+  since the last into the accumulators the mouse moves. Its fire button
+  is the mouse's left button (the laser), and the second joystick's is
+  the right (while it's held, the stick's climb sets the speed). Its
+  travel from centre to either end is the turn's clamp and the climb's,
+  so a stick kept within its ends comes back to level flight, and a
+  count's move is noise. `tools/inputcheck.mjs` checks the stick, every
+  key and both buttons. The Master's ADC is at &FE18, not the Model B's
+  &FEC0, which cost a hang at start.
+- **Zero page.** On the disc the drawing and the logic share one call
+  graph, and the step is a loop. So anything baron thinks a step reads
+  before writing is kept from one step to the next, through everything.
+  The dots' tests made five such (values made on paths the carry
+  chooses), and the pool ran out; discarding them per dot fixed it. They
+  were found by discarding every global at the step's top, which fit,
+  then every one but one.
+- **One mine routine.** The handlers and the collisions had each
+  transcribed the mines' proximity (&07B28). The disc reached only the
+  handlers' copy, and the build warned of the other as dead code. The
+  handler now calls collide.6502's, which flags the mine's text.
+- **The cost.** Flying straight at the level's start: 8.5 frames a second
+  at 12.6 steps (`make fps`). A step's logic takes about 34,000 cycles,
+  three quarters of it object_handlers' walk of the slots, and
+  world_lists 36,000. In a hard turn the camera's matrix is full and
+  changes every step: world_lists takes 112,000 (the dots 42,000, the
+  rotations 49,000) and a step 146,000. The frame rate falls to 2.7, and
+  decision 14's cap slows the game to 10.6 steps a second (measured
+  2026-10-18, before decision 21's saving in the rotations).
+

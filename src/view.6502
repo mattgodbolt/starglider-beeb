@@ -87,21 +87,18 @@ NEAR_D = 1024
 ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
 .dots_draw
 {
-    ZA_AUTO1 dot
-    ZA_AUTO 6, at                       ; the camera's place
     LDA dots_ran : BNE ran
     RTS
 .ran
-    ZA_DISCARD at
     LDX #5
     LDA mv_render : BNE missile
 .player
-    LDA pl_x,X : STA at,X : ZA_INDEXEDBY 0..5
+    LDA pl_x,X : STA at,X
     DEX : BPL player
     LDX #3
     BRA placed
 .missile
-    LDA m_x,X : STA at,X : ZA_INDEXEDBY 0..5
+    LDA m_x,X : STA at,X
     DEX : BPL missile
     LDX #WIN_MISSILE + 3
 .placed
@@ -154,6 +151,9 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
 .next
     DEC dot : BPL each
     RTS
+\ (in the bank's own RAM, as the draw phase leaves zero page little room)
+.dot  SKIP 1                            ; the dot drawn
+.at   SKIP 6                            ; the camera's place
 }
 
 \ The windows a dot must be strictly inside, as tests on its projection
@@ -239,14 +239,12 @@ WIN_MISSILE = 8
 \ ST plots it: a column of a pixel, or 2 down when it's under &1000 deep,
 \ and a second column beside it when it's under &700. Each column goes onto
 \ the erase list as the line drawer sets a column up (line_go's kind 0,
-\ dx 0: tools/mkline.py), and is ORed into the screen draw_bank names. ACCCON's X
-\ is set for the erase list, and stays set to draw into shadow RAM: this
-\ runs from the logic's bank, and reads only zero page, the bank and
-\ HAZEL while it's set.
-ZA_AUTO1 dot_colour                     ; colour_map's byte for the ST's colour 2
+\ dx 0: tools/mkline.py), and is ORed into the screen draw_bank names.
+\ ACCCON's X is set for the erase list, and stays set to draw into shadow
+\ RAM: this runs from the logic's bank, and reads only zero page, the bank
+\ and HAZEL while it's set.
 .dot_put
 {
-    ZA_AUTO1 dy, cols, mask, row
     STZ dy : LDA #1 : STA cols
     LDA rot_acc+5 : CMP #HI(&1000) : BCS sized
     INC dy
@@ -309,7 +307,13 @@ ZA_AUTO1 dot_colour                     ; colour_map's byte for the ST's colour 
     JMP column
 .done
     RTS
+\ (in the bank's own RAM, which X leaves where it is)
+.dy   SKIP 1                            ; the column's rows less 1
+.cols SKIP 1                            ; the columns to go
+.mask SKIP 1                            ; the column's pixel in the colour
+.row  SKIP 1                            ; its lower end's row in its character row
 }
+.dot_colour SKIP 1                      ; colour_map's byte for the ST's colour 2
 .dot_pix                                ; each pixel of a byte, from the left
     EQUB &88, &44, &22, &11
 ASSERT LO(&1000) = 0 AND LO(&700) = 0

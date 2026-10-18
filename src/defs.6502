@@ -11,14 +11,21 @@ acccon     = &FE34          ; the Master's access control
 ACCCON_D   = 1              ; ... D: the CRTC shows shadow RAM
 ACCCON_X   = 4              ; ... X: the CPU's &3000-&7FFF is shadow RAM
 ACCCON_Y   = 8              ; ... Y: HAZEL's RAM at &C000-&DFFF
+sysvia_orb = &FE40          ; the addressable latch (bit 3: the keyboard's enable);
+                            ; read, bits 4 and 5 the joysticks' fire buttons, low pressed
+sysvia_ddra = &FE43
 sysvia_ifr = &FE4D          ; bit 1: the vertical sync (CA1) has come
 sysvia_ier = &FE4E          ; write bit 7 clear to disable the bits set
+sysvia_ora_nh = &FE4F       ; port A without handshake: the keyboard
 usrvia_t1cl = &FE64         ; T1's counter, low (reading it acknowledges T1)
 usrvia_t1ch = &FE65         ; ... high (writing it starts the count)
 usrvia_acr = &FE6B
 usrvia_ifr = &FE6D
 usrvia_ier = &FE6E
 ula_pal    = &FE21          ; the video ULA's palette
+adc_control = &FE18         ; the Master's ADC: write a channel to convert it (bit 3
+                            ; clear: 8 bits); read, bit 7 set while converting
+adc_high   = &FE19          ; the conversion's top 8 bits
 irq1v      = &0204          ; the OS's IRQ vector, which the game takes
 
 \ --- The screen -----------------------------------------------------------

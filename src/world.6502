@@ -8,12 +8,6 @@
 \ with the sine table; the objects are in main RAM (objects.6502).
 \ ***************************************************************************
 
-\ list_phase: the camera, and the lists from it.
-.list_phase
-    JSR camera
-    JSR coarse_list
-    JMP rotate_lists
-
 \ ---------------------------------------------------------------------------
 \ camera (&050A2, &04258): the matrix from the player's angles, the roll
 \ negated. Most steps have the last one's angles (the player isn't
@@ -189,10 +183,12 @@ ENDMACRO
 
 \ RELEVANT yes (decision 11): on to yes if an object at rot_acc, rotated
 \ approximately (within ROT_SLACK), could be drawn or meet the player:
-\ in front, short of &2000 and within the view's pyramid, or within
-\ NEAR_BOX on every axis (the largest collision box is 2000). Only those
+\ in front, short of &2000 and within the view's pyramid across, or within
+\ NEAR_BOX in x and z (the largest collision box is 2000). Only those
 \ need the exact rotation: nothing else the game decides reads the rest.
-\ (rotate_lists' z2 and t16 are its workings.)
+\ The approximation has no y' (decision 21), so neither test has it: the
+\ collisions test y only once x and z are in the box. (rotate_lists' z2
+\ and t16 are its workings.)
 ROT_SLACK = 512
 NEAR_BOX = 2000 + ROT_SLACK
 MACRO RELEVANT yes
@@ -218,20 +214,18 @@ MACRO RELEVANT yes
     LDA rot_acc+4 : BNE not
     ASSERT LO(&2000 + ROT_SLACK) = 0
 .pyramid
-    \ in the view's pyramid, with the slack: |x|, |y| <= 2z + 3 slack,
+    \ in the view's pyramid across, with the slack: |x| <= 2z + 3 slack,
     \ which is no pyramid if that's negative
     LDA rot_acc+4 : ASL A : STA z2 : LDA rot_acc+5 : ROL A : STA z2+1
     LDA z2 : CLC : ADC #LO(3 * ROT_SLACK) : STA z2
     LDA z2+1 : ADC #HI(3 * ROT_SLACK) : STA z2+1
     BMI near_test
     WITHIN rot_acc, z2, near_test
-    WITHIN rot_acc+2, z2, near_test
     JMP yes
 .near_test
-    \ within NEAR_BOX on every axis? (z first: most behind are far behind)
+    \ within NEAR_BOX in z and x? (z first: most behind are far behind)
     WITHIN rot_acc+4, #NEAR_BOX, no
     WITHIN rot_acc, #NEAR_BOX, no
-    WITHIN rot_acc+2, #NEAR_BOX, no
     JMP yes
 .no
 ENDMACRO
@@ -272,12 +266,11 @@ ENDMACRO
     LDA ob_y_hi,X : SBC pl_y+1 : STA rot_d+3
     LDA ob_z_lo,X : SEC : SBC pl_z : STA rot_d+4
     LDA ob_z_hi,X : SBC pl_z+1 : STA rot_d+5
+    BIT rot_exactly : BMI exactly           ; no products: as cheap as approximately
     JSR rotate_approx
-    BIT rot_exactly : BMI exact             ; the matrix has no products
     JMP relevance
 .exactly
     JSR rotate_exact
-.exact
     LDX slot
     LDA #1 : STA ob_exact,X
 .store
@@ -291,8 +284,8 @@ ENDMACRO
     TXA : LDY nears : STA near_slots,Y
     INC nears
 .far_off
-    LDA ob_exact,X : BEQ next
-    \ The draw list: z up to &2000, not wholly behind (z > -size) and
+    \ The draw list, for an object rotated exactly (the others have their
+    \ own way to next): z up to &2000, not wholly behind (z > -size) and
     \ |x|, |y| <= 2z. A negative z leaves nothing between -2z and 2z, and
     \ no size is negative, so only z = 0 needs the size.
     LDA rot_acc+5 : BMI next
@@ -320,8 +313,88 @@ ENDMACRO
     RTS
 .relevance
     RELEVANT exactly
-    \ Approximately: kept for the scanner, never drawn (decision 11).
+    \ Approximately: x' and z' kept for the scanner, and the near list
+    \ unless it's exploding, but never drawn (decisions 11 and 21). Not by
+    \ the draw list's test, which reads y': so Baron sees no y' read here.
     LDX slot
     STZ ob_exact,X
-    JMP store
+    LDA rot_acc : STA ob_cx_lo,X : LDA rot_acc+1 : STA ob_cx_hi,X
+    LDA rot_acc+4 : STA ob_cz_lo,X : LDA rot_acc+5 : STA ob_cz_hi,X
+    LDA ob_exploding,X : BNE approximated
+    LDA #&FF : STA ob_near,X
+    TXA : LDY nears : STA near_slots,Y
+    INC nears
+.approximated
+    JMP next
+}
+
+\ ---------------------------------------------------------------------------
+\ kmul: kp = kv (a signed word) by each of the five constants, each
+\ (kv K) >> 14 in magnitude, signed. Each product's bytes 1-3 build in
+\ kq and kp (the lowest byte can't carry into them); every factor is a
+\ sine's size, at most 16384, so the high bytes' products are small
+\ enough that only the last sum into kp carries. It's the draw phase's
+\ (ground_matrix's, render.6502), kept here, out of main RAM, as
+\ ground_matrix pages this bank for the sines before it calls it.
+ZA_AUTO2 kv
+ZA_AUTO 10, kp
+.kmul
+{
+    ZA_AUTO 10, kq              ; each product's byte 1, by 2 k
+    ZA_AUTO1 kneg, tlo
+    LDA kv+1 : STA kneg : BPL positive
+    LDA #0 : SEC : SBC kv : STA kv : LDA #0 : SBC kv+1 : STA kv+1
+.positive
+    LDA kv : MUL_SET
+    ZA_DISCARD kq, kp
+    LDX #8
+.low
+    LDY kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    SEC : LDA (m_sqlo),Y : SBC (m_nglo),Y : LDA (m_sqhi),Y : SBC (m_nghi),Y
+    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDY kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    MUL8 tlo : STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA tlo : CLC : ADC kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    BCC low_carried
+    INC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.low_carried
+    DEX : DEX : BPL low
+    LDA kv+1 : MUL_SET
+    LDX #8
+.high
+    LDY kmag,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    MUL8 tlo
+    CLC : ADC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA tlo : CLC : ADC kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    BCC high_carried
+    INC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.high_carried
+    LDY kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    MUL8 tlo : STA kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA tlo : CLC : ADC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    BCC top_carried
+    INC kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.top_carried
+    \ >> 14: bytes 1-3 shifted left 2, the top two; then signed
+    LDA kq,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ASL A : ROL kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ROL kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ASL A : ROL kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    ROL kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    TXA : LSR A : TAY
+    LDA kneg : EOR ksign,Y : ZA_INDEXEDBY 0..4
+    BPL high_next
+    LDA #0 : SEC : SBC kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    LDA #0 : SBC kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+    STA kp+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
+.high_next
+    DEX : DEX : BMI done
+    JMP high
+.done
+    RTS
 }

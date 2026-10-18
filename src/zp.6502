@@ -145,10 +145,13 @@ ASSERT LO(edge_mark) = 0 AND LO(v_xlo) = 0
 .mat_scaled SKIP 1          ; non-zero: xf_amag and xf_asign are mat's, for scaled_for
 .scaled_for SKIP 1          ; the shape's scale they're for
     \ the frame (engine.6502): the screen being drawn, 0 main RAM's or 1
-    \ shadow's, whether it's ready to show, and each screen's erase list
+    \ shadow's, whether it's drawn and ready to show, and each screen's
+    \ erase list
 .draw_buffer SKIP 1
+.frame_drawn SKIP 1         ; non-zero: this step's frame is drawn, not yet ready
 .frame_ready SKIP 1
 .stepped    SKIP 1          ; the field count the steps taken have reached
+.steps_due  SKIP 1          ; the steps still to take before waiting again
 .frames     SKIP 2          ; frames drawn
 .steps      SKIP 2          ; steps taken
 .erase_stop SKIP 2          ; by screen: its erase list's next free index (0: full, so cleared whole)
