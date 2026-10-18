@@ -540,16 +540,18 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     RTS
 }
 
-\ edges_far: each marked edge of a far object, its vertices straight onto
-\ the screen; clipped to the window only if the object reaches past it.
+\ edges_far: each marked edge of a far object, the last first, its
+\ vertices straight onto the screen; clipped to the window only if the
+\ object reaches past it.
 .edges_far
 {
-    STZ edge_i
+    LDA sh_nedges : STA edge_i
 .each
-    LDY edge_i : CPY sh_nedges : BCC test
+    LDY edge_i : BNE test
     RTS
 .test
-    LDA edge_mark,Y : CMP stamp : BNE next
+    DEY : STY edge_i
+    LDA edge_mark,Y : CMP stamp : BNE each
     LDA (sh_ev1),Y : STA vb
     LDA (sh_ev0),Y : STA va : JSR vertex_far
     LDA vb : JSR vertex_far
@@ -560,11 +562,9 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
     BIT far_inside : BPL clip
     JSR clip_line.accept
-    BRA next
+    BRA each
 .clip
     JSR clip_line
-.next
-    INC edge_i
     BRA each
 }
 
@@ -632,14 +632,12 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA objc_mag+3 : STA fy.hi_a+1 : STA fy.hi_c+1 : EOR #&FF : STA fy.hi_b+1 : STA fy.hi_d+1
     LDA objc_mag+4 : STA fz.lo_a+1 : STA fz.lo_c+1 : EOR #&FF : STA fz.lo_b+1 : STA fz.lo_d+1
     LDA objc_mag+5 : STA fz.hi_a+1 : STA fz.hi_c+1 : EOR #&FF : STA fz.hi_b+1 : STA fz.hi_d+1
-    STZ face_i
-    BRA each
+    LDA sh_nfaces : STA face_i
 .next
-    INC face_i
-.each
-    LDY face_i : CPY sh_nfaces : BCC test
+    LDY face_i : BNE test               ; the last first
     RTS
 .test
+    DEY : STY face_i
     LDA (sh_fflags),Y : ORA all_faces : BPL tested
     JMP visible
 .tested
@@ -700,21 +698,21 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     JMP next
 }
 
-\ edges (&04D16): each marked edge, its vertices transformed as needed.
+\ edges (&04D16): each marked edge, the last first, its vertices
+\ transformed as needed.
 .edges
 {
-    STZ edge_i
+    LDA sh_nedges : STA edge_i
 .each
-    LDY edge_i : CPY sh_nedges : BCC test
+    LDY edge_i : BNE test
     RTS
 .test
-    LDA edge_mark,Y : CMP stamp : BNE next
+    DEY : STY edge_i
+    LDA edge_mark,Y : CMP stamp : BNE each
     LDA (sh_ev1),Y : STA vb
     LDA (sh_ev0),Y : STA va : JSR vertex
     LDA vb : JSR vertex
     JSR edge
-.next
-    INC edge_i
     BRA each
 }
 
