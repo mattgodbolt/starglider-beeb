@@ -87,12 +87,11 @@ INCLUDE "../build/gen/sight.6502"
 \ logic does, unless it did) and projected by the drawing's projection
 \ (proj_z, proj_x). The rest are where ground_dots rotated them, or where
 \ they were, moved with the camera while its matrix holds (dot_kept), or
-\ else rotated by ground_x, ground_y and ground_z (build/gen/ground.6502,
-\ which ground_dots made for this camera), within a pixel, a row at a
-\ time, depth first, so that one outside the window in x needs no y; and
-\ they're projected by their own (far_x, far_y). In the missile view the camera is
-\ the missile, and the window its own (L_05248), its bottom where the
-\ window's opening leaves it: the dots are only drawn when it's open.
+\ else rotated by ground_all (build/gen/ground.6502, which ground_dots made
+\ for this camera), within a pixel; and they're projected by their own
+\ (far_x, far_y). In the missile view the camera is the missile, and the
+\ window its own (L_05248), its bottom where the window's opening leaves
+\ it: the dots are only drawn when it's open.
 NEAR_D = 1024
 ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
 .dots_draw
@@ -138,9 +137,8 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     LDA colour_map+2 : STA dot_colour
     LDA #39 : STA dot
 .each
-    \ (far_x's far_pv reads x' alone, but baron takes it to read y' too,
-    \ before ground_y makes it: without this it keeps y' from one dot to
-    \ the next)
+    \ (each way makes it before it's read, as the carry chooses, which
+    \ baron can't follow: without this it keeps it from one dot to the next)
     ZA_DISCARD rot_acc
     LDX dot
     LDA dot_seen,X : BEQ next
@@ -170,24 +168,17 @@ ASSERT NEAR_D = 4 * 256                 ; (each offset's high byte from -4 to 3)
     \ as ground_dots rotated it, or as it was, or rotated
     BIT dot_seen,X : BVC unrotated
     JSR dot_given
-    BIT dv_steady : BPL given
-    JSR dot_base
-.given
-    JSR far_x : BCS done
-    BRA y_known
+    BRA based
 .unrotated
     BIT dv_steady : BPL rotate
-    JSR dot_kept : BCS rotate
-    JSR far_x : BCS done
-    BRA y_known
+    JSR dot_kept : BCC known
 .rotate
-    JSR ground_z
-    JSR ground_x
-    JSR far_x : BCS done
-    JSR ground_y
-    BIT dv_steady : BPL y_known
+    JSR ground_all
+.based
+    BIT dv_steady : BPL known
     JSR dot_base
-.y_known
+.known
+    JSR far_x : BCS done
     JSR far_y : BCS done
     JMP dot_put
 .done

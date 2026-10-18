@@ -30,9 +30,7 @@ INCLUDE "step.6502"
 \ which the drawing then uses too.
 .ground_rows
     BANK_ANDY BANK_PIC
-    JSR ground_z
-    JSR ground_x
-    JSR ground_y
+    JSR ground_all
     BANK_ANDY BANK_WORLD
     RTS
 .ground_make

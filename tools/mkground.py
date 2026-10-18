@@ -242,20 +242,20 @@ def term(t):
     emit(f"    ADC gr_hi : STA rot_acc+{2 * r + 1}")
 
 
-emit("""\\ ground_x, ground_y, ground_z: one row of rot_acc = cam rot_d, x', y' or
-\\ z', for a dot at the ground, within 2 of the ST's (ground_setup made
-\\ them for this frame's cam and dy), a row at a time so that a dot can be
-\\ given up before its other rows. X and Y are a column's D, low and high
-\\ byte.""")
+emit("""\\ ground_all: rot_acc = cam rot_d, x', y' and z', for a dot at the
+\\ ground, each within 4 of the ST's (ground_setup made them for this
+\\ frame's cam and dy): the rows' constants, then column x's terms and
+\\ column z's, X and Y each column's D, low and high byte.
+.ground_all""")
 for r in range(3):
-    emit(f".ground_{'xyz'[r]}")
     emit(f".gk{2 * r}")
     emit(f"    LDA #0 : STA rot_acc+{2 * r}             ; patched: the row's constant")
     emit(f".gk{2 * r + 1}")
     emit(f"    LDA #0 : STA rot_acc+{2 * r + 1}")
-    for c in (0, 2):
-        emit(f"    LDX rot_d+{2 * c}                      ; column {'xyz'[c]}'s D")
-        emit(f"    LDA rot_d+{2 * c + 1} : EOR #&80 : TAY")
+for c in (0, 2):
+    emit(f"    LDX rot_d+{2 * c}                      ; column {'xyz'[c]}'s D")
+    emit(f"    LDA rot_d+{2 * c + 1} : EOR #&80 : TAY")
+    for r in range(3):
         term(TERMS.index((r, c)))
-    emit("    RTS")
+emit("    RTS")
 print("\n".join(out))
