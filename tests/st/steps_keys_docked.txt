@@ -1,0 +1,80 @@
+# The keys and commands docked (read_keys), on the keys: teleported into a
+# silo's box (x &1C30, z &DC60, heading &C10, as tests/st/docked.txt) with
+# no missiles ($278 0, written before the capture), so that L finds none,
+# P takes the silo's (and the tunnel's flight finds none to take), P finds
+# no other, L is refused docked, and N and M do nothing out of cheat mode.
+# Q before the launch, whose countdown's effects would stop the keyboard's
+# interrupts under EmuTOS. Then space held through the tunnel's end: the
+# launch and the acceleration after it, with L and P every few seconds
+# from about when the tunnel ends (L refused docked, refused in the
+# countdown, then a missile launched, then refused with none left; P
+# refused, docked with the silo's taken and then out of the silo). S last.
+wait 38
+key 57
+wait 4
+debug w w $5c178 0
+debug w w $5c02e $1c30 $ffd0 $dc60
+debug w w $5c03c $0c10
+wait 0.3
+debug parse {arm}
+debug echo \nSEG docked\n
+wait 1
+key 0x26
+wait 1.5
+key 0x19
+wait 1.5
+key 0x19
+wait 1.5
+key 0x26
+wait 1.5
+key 0x31
+wait 1.5
+key 0x32
+wait 1.5
+key 0x10
+wait 1.5
+# the tunnel's flight, then the launch
+down 57
+wait 36
+key 0x26
+wait 2
+key 0x19
+wait 2
+key 0x26
+wait 2
+key 0x19
+wait 2
+key 0x26
+wait 2
+key 0x19
+wait 2
+key 0x26
+wait 2
+key 0x19
+wait 2
+key 0x26
+wait 2
+key 0x19
+wait 2
+key 0x26
+wait 2
+key 0x19
+wait 2
+key 0x26
+wait 2
+key 0x19
+wait 2
+key 0x26
+wait 2
+key 0x19
+wait 2
+key 0x26
+wait 2
+key 0x19
+wait 2
+up 57
+wait 1
+key 0x1f
+wait 1.5
+debug echo \nSEG end\n
+quit

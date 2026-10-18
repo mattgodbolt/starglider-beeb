@@ -418,3 +418,60 @@ frame in flight now comes to about 9 a second at the ST's pace, against
 its 12.5. The agents left ideas for a second round. Some need decisions
 (erasing small objects by clearing their boxes, leaving y' out of the
 approximate rotation, 8-bit products for far objects); most don't.
+
+### The keys and commands
+
+`read_keys` (`src/logic/keys.6502`) is the ST's &0270E: one command a step
+from the latch the ST's keyboard interrupt fills (`key_latch`), through
+the ST's own scancode table, or else the flight keys held (`key_state`)
+into the accumulators. The port's input is the ST's, two arrays the
+keyboard layer will fill (decision 6). Everything the ST's commands do
+is there: F, M, N, P, Q, S, L with its missile view and the ground dots
+kept, the launch from the tunnel's end with its two random numbers thrown
+away, I in flight, and the cheat prompt. Three things a command enters
+are later layers, stubbed: the Interrogate screen, the waits for keys in
+the cheat prompt (which return no key until the keyboard layer comes, so
+the prompt ends at its first test), and Esc to the title.
+
+Two captures check it beside the flight's: `steps_keys_cmds` (in
+flight, with cheat mode and the K screen's keys written before the
+capture starts, so that no write lands inside a checked routine) and
+`steps_keys_docked` (teleported into a silo with no missiles, through
+the tunnel, the launch and L and P after it). On both, every variable
+and field the map holds matches. Things learned on the way:
+
+- **Q first.** Under EmuTOS the first sound effect stops the keyboard's
+  interrupts for good (`docs/research/st-logic.md`), so both captures
+  turn the sound off before anything plays one, and S comes last.
+- **The cheat prompt blocks inside `read_keys`**, so the keys typed at it
+  arrive between the capture's two points. Holding Z, pressing Delete,
+  then releasing Z and pressing it again gives the prompt its key with
+  the key states as they were, which the check compares. The prompt's
+  other paths were checked once, outside the captures, with the waits
+  returning the keys typed (J S space A R G twice, then J and a wrong
+  key): they match but for the last key, still held.
+- **Interrogate is frames of its own**: an ad hoc capture of one session
+  (I, two spaces, E) ran 216 frames inside `read_keys`, each with
+  `animate_shapes` and `frame_end`, and draw_shape overwrote `$1CE/$1D0`
+  (the heading's sine and cosine, which `player_flight` recomputes). Its
+  layer must run those in each of its frames.
+
+### A baron curiosity, and its issue
+
+Merging the keys part broke the spike's build with a warning that `rot_d`,
+the rotations' input, was an input to the harness's entry. Nothing the
+keys code ran touched it. The warning came and went as unrelated code
+moved, even when only dead code was removed. The cause was in baron:
+it matches its control-flow annotations (`ZA_CANJUMP` and the rest) to
+their jumps by address alone. Banks 5 and 6 share addresses, so a jump in
+bank 6 that landed at the address of one of the rotations' annotated
+jumps in bank 5 took on that jump's targets, and with them the rotation
+code's read of `rot_d`.
+
+Rich had already opened the issue for `ZA_CANCALL`
+(waitingforvsync/baron#29), where it can silently overlap zero page. A
+25-line reproduction for `ZA_CANJUMP`, showing an edge added rather than
+lost, went there as a comment. Until it's fixed, the logic bank's code
+starts past the world bank's list phase, where the rotations' annotated
+jumps are (`world_list_end` in `src/banks.6502`). Any annotated jump
+elsewhere in the banks needs the same care.

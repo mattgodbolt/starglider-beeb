@@ -1,8 +1,295 @@
 \ ***************************************************************************
 \ STARGLIDER for the BBC Master - the keys and commands (the ST's &0270E)
 \
-\ To be transcribed exactly (docs/research/st-logic.md, "The keys, the commands and the input interrupt").
+\ read_keys: a command from the last key made (key_latch, the ST's one-byte
+\ latch, so one a step at most and each only once), or else the flight keys
+\ held (key_state, by the ST's scancode) into the accumulators. Exactly the
+\ ST's (docs/research/st-logic.md, "The keys, the commands and the input
+\ interrupt"): every command but I when docked costs the step its flight
+\ keys, as it costs the ST its frame's. The keyboard layer fills key_state
+\ and key_latch from the BBC's keys (decision 6).
+\
+\ What a command enters that runs frames of its own or leaves the game is a
+\ later layer, stubbed here: the Interrogate screen, the cheat prompt's
+\ waits for keys (the prompt itself is transcribed), and Esc to the title.
 \ ***************************************************************************
 
+\ read_keys (&0270E)
 .read_keys
+{
+    JSR get_key
+    \ Backspace and Delete, and Esc, before the case is folded
+    CMP #&7F : BNE not_cheat
+    JMP cheat_prompt
+.not_cheat
+    CMP #&1B : BNE not_esc
+    JMP quit_to_title
+.not_esc
+    AND #&DF
+    CMP #'F' : BEQ fixed_sight
+    CMP #'M' : BEQ freeze
+    CMP #'L' : BNE not_l
+    JMP launch_missile
+.not_l
+    CMP #'P' : BEQ pick_up
+    CMP #'Q' : BEQ sound_off
+    CMP #'S' : BEQ sound_on_key
+    CMP #'I' : BNE keys_n
+    \ I: docked, the Interrogate screen, then the flight keys; in flight,
+    \ the flight keys with the ST's d0 'I', which isn't N
+    LDA docked : BEQ flight_keys
+    JSR interrogate
+    JMP flight_keys                     ; (it leaves on E, which isn't N)
+
+\ &0275E: N, then the flight keys
+.keys_n
+    CMP #'N' : BNE flight_keys
+    \ N, in cheat mode: 5000 points, BCD, for the next world_render
+    LDA cheat_mode : BEQ done_n
+    STZ pending_score : LDA #&50 : STA pending_score+1
+.done_n
     RTS
+
+\ F (&02942): the sight fixed at the view's centre, or freed
+.fixed_sight
+    LDA sight_fixed : EOR #&FF : STA sight_fixed
+    JMP beep
+
+\ M (&02932), in cheat mode: the enemies frozen, or freed
+.freeze
+    LDA cheat_mode : BEQ done_m
+    LDA enemies_active : EOR #&FF : STA enemies_active
+    JMP beep
+.done_m
+    RTS
+
+\ Q (&02A12) and S (&02A2A): the sound off, ending a clip that plays; on
+.sound_off
+    STZ sound_on
+    JMP sample_stop
+.sound_on_key
+    LDA #&FF : STA sound_on
+    RTS
+
+\ P (&0295A): a missile, while there are fewer than two (the ST's test is
+\ for equality); in cheat mode anywhere, or else the docked silo's, if it
+\ has one ready (its +&14 alone: unlike flying through the silo's missile,
+\ P neither restarts the silo's reload count nor flashes colour 0)
+.pick_up
+    LDA missiles : CMP #2 : BEQ done_p
+    LDA cheat_mode : BNE picked
+    LDA docked : BEQ done_p
+    LDX docked_silo
+    LDA ob_timer_a_hi,X : BEQ done_p
+    STZ ob_timer_a_hi,X
+.picked
+    INC missiles
+.done_p
+    RTS
+
+\ &0275E's flight keys: one of accelerate and brake, in the ST's order
+\ (space, /, the defined brake, the defined accelerate); then left and
+\ right, then dive and climb, each pair added up, so both keys cancel. A
+\ defined key is a scancode, 0 when the K screen hasn't set it, whose state
+\ no key sets. (The ST's index is a byte, and one of &80 or more would read
+\ past the key states into the accumulators; the K screen stores only a
+\ key made, below &80.)
+.flight_keys
+    LDA key_state + &39 : BNE accelerate        ; space
+    LDA key_state + &35 : BNE brake             ; /
+    LDX def_brake : LDA key_state,X : BNE brake
+    LDX def_accel : LDA key_state,X : BEQ bank
+\ &02826: accelerate, but at the tunnel's end (the word launch_state &1E
+\ exactly) the launch (&0283A), which skips the step's other flight keys:
+\ the count of 29 steps begun, undocked at speed 320, two random numbers
+\ drawn and dropped, and the craft out over the silo
+.accelerate
+    LDA launch_state+1 : BNE faster
+    LDA launch_state : CMP #&1E : BEQ launch
+.faster
+    LDA speed_acc : SEC : SBC #&10 : STA speed_acc
+    BCS bank
+    DEC speed_acc+1
+    BRA bank
+.launch
+    DEC launch_state                    ; (&1E: no borrow)
+    STZ docked
+    LDA #LO(-320) : STA speed_acc : LDA #HI(-320) : STA speed_acc+1
+    JSR random32
+    JSR random32
+    LDA #LO(-48) : STA pl_y : LDA #HI(-48) : STA pl_y+1
+    LDA pl_x : CLC : ADC #LO(2000) : STA pl_x
+    LDA pl_x+1 : ADC #HI(2000) : STA pl_x+1
+    RTS
+.brake
+    LDA speed_acc : CLC : ADC #&10 : STA speed_acc
+    BCC bank
+    INC speed_acc+1
+.bank
+    LDA key_state + &4B : BNE left              ; cursor left
+    LDA key_state + &2D : BNE left              ; X
+    LDX def_left : LDA key_state,X : BEQ right_keys
+.left
+    LDA mouse_x : SEC : SBC #&20 : STA mouse_x
+    BCS right_keys
+    DEC mouse_x+1
+.right_keys
+    LDA key_state + &4D : BNE right             ; cursor right
+    LDA key_state + &2E : BNE right             ; C
+    LDX def_right : LDA key_state,X : BEQ dive_keys
+.right
+    LDA mouse_x : CLC : ADC #&20 : STA mouse_x
+    BCC dive_keys
+    INC mouse_x+1
+.dive_keys
+    LDA key_state + &48 : BNE dive              ; cursor up
+    LDA key_state + &27 : BNE dive              ; ;
+    LDX def_dive : LDA key_state,X : BEQ climb_keys
+.dive
+    LDA mouse_y : SEC : SBC #&20 : STA mouse_y
+    BCS climb_keys
+    DEC mouse_y+1
+.climb_keys
+    LDA key_state + &50 : BNE climb             ; cursor down
+    LDA key_state + &34 : BNE climb             ; .
+    LDX def_climb : LDA key_state,X : BEQ done_keys
+.climb
+    LDA mouse_y : CLC : ADC #&20 : STA mouse_y
+    BCC done_keys
+    INC mouse_y+1
+.done_keys
+    RTS
+
+\ L (&02982): a missile launched, if there is one, and not docked, with no
+\ missile flying and no launch from a silo counting: clare1's "missile
+\ launched", and the view from the missile's nose, which starts at the
+\ craft on its heading, its roll at &FE00 (player_flight brings it up to
+\ m_roll_aim, 0, by &10 a step before it flies), to live 255 steps; the
+\ ground dots kept, for the view's end to put back (save_ground_dots,
+\ &0477E)
+.launch_missile
+    LDA missiles : BEQ launched
+    LDA docked : ORA missile_view : BNE launched
+    LDA launch_state : ORA launch_state+1 : BEQ launch_it
+.launched
+    RTS
+.launch_it
+    LDA #1 : JSR sample_start
+    DEC missiles
+    MOVW m_x, pl_x
+    MOVW m_y, pl_y
+    MOVW m_z, pl_z
+    STZ m_pitch : STZ m_pitch+1
+    MOVW m_heading, pl_heading
+    STZ m_roll : LDA #&FE : STA m_roll+1
+    STZ m_roll_aim : STZ m_roll_aim+1
+    LDA #&FF : STA missile_view : STA mv_render
+    STA m_life : STZ m_life+1
+    LDA #&70 : STA m_iris : STZ m_iris+1
+    LDX #39
+.save_dots
+    LDA dot_x_lo,X : STA dots_x_lo,X
+    LDA dot_x_hi,X : STA dots_x_hi,X
+    LDA dot_z_lo,X : STA dots_z_lo,X
+    LDA dot_z_hi,X : STA dots_z_hi,X
+    DEX : BPL save_dots
+    RTS
+
+\ &02894: Backspace or Delete, the cheat prompt, which waits for a key; if
+\ it's J, S, space, A, R and G must follow, each within 1501 VBLs, and a
+\ wrong one is followed by as many more keys as were still to come before
+\ the end effect. Every second entry, if the sight is fixed and the craft
+\ stopped (speed_acc 0 exactly), fills the energy, shields and laser and
+\ turns cheat mode on or off. The step's flight keys go.
+.cheat_prompt
+    LDA #8 : LDX #1 : JSR sfx_start
+    JSR wait_key
+    CMP #'J' : BEQ cheat_j
+.cheat_end
+    LDA #9 : LDX #1 : JMP sfx_start
+.cheat_5
+    JSR wait_key_timeout
+.cheat_4
+    JSR wait_key_timeout
+.cheat_3
+    JSR wait_key_timeout
+.cheat_2
+    JSR wait_key_timeout
+.cheat_1
+    JSR wait_key_timeout
+    BRA cheat_end
+.cheat_j
+    JSR wait_key_timeout : CMP #'S' : BNE cheat_5
+    JSR wait_key_timeout : CMP #' ' : BNE cheat_4
+    JSR wait_key_timeout : CMP #'A' : BNE cheat_3
+    JSR wait_key_timeout : CMP #'R' : BNE cheat_2
+    JSR wait_key_timeout : CMP #'G' : BNE cheat_1
+    INC cheat_count
+    LDA cheat_count : CMP #2 : BNE done_cheat
+    STZ cheat_count
+    LDA sight_fixed : BEQ done_cheat
+    LDA speed_acc : ORA speed_acc+1 : BNE done_cheat
+    LDA #&FF
+    STA energy : STA energy+1
+    STA shields : STA shields+1
+    STA laser_energy : STA laser_energy+1
+    JSR beep
+    LDA cheat_mode : EOR #&FF : STA cheat_mode
+.beep
+    \ sfx_beep (&04B14): effect 20
+    LDA #&14 : LDX #1 : JMP sfx_start
+.done_cheat
+    RTS
+}
+
+\ get_key (&049AE): the last key made, as the ST's table has it (0 for
+\ none), and the latch cleared.
+.get_key
+{
+    LDA #0
+    LDX key_latch : BEQ none
+    LDA key_ascii - 1,X
+    STZ key_latch
+.none
+    RTS
+}
+
+\ The keyboard layer's, to come (they block, as the ST's do, until a key is
+\ made): wait_key (&00C0C), the next key, as get_key has it; and
+\ wait_key_timeout (&00BCA), the same or &0D after 1501 VBLs. Until then
+\ each returns 0, a key the cheat prompt never takes, so the prompt ends at
+\ its first.
+.wait_key
+.wait_key_timeout
+    LDA #0
+    RTS
+
+\ interrogate (&02A44): the Interrogate screen, a later layer. Its loop
+\ draws each object in turn, frame by frame (animate_shapes and frame_end
+\ run in each), until E.
+.interrogate
+    RTS
+
+\ quit_to_title (&03FF2): Esc, which leaves the frame for the title (the
+\ ST's L_01E94), a later layer.
+.quit_to_title
+    RTS
+
+\ key_ascii (&015F6): the ST's characters, by scancode from 1, uppercase;
+\ the cursor keys are 0. The table ends at &72's (keypad Enter); the ST
+\ reads on into the bytes after it for &73-&7F, which no ST key sends but
+\ the mouse buttons as keys (&74, &75: the right button reads as a space).
+\ Those after &76's are the ST's printer state, as the program loads it.
+.key_ascii
+    EQUB &1B, &31, &32, &33, &34, &35, &36, &37, &38, &39, &30, &2D, &3D, &7F, &00, &51
+    EQUB &57, &45, &52, &54, &59, &55, &49, &4F, &50, &5B, &5D, &0D, &00, &41, &53, &44
+    EQUB &46, &47, &48, &4A, &4B, &4C, &3B, &BA, &23, &00, &5C, &5A, &58, &43, &56, &42
+    EQUB &4E, &4D, &2C, &2E, &2F, &00, &00, &00, &20, &00, &01, &02, &03, &04, &05, &06
+    EQUB &07, &08, &09, &0A, &00, &00, &00, &00, &00, &2D, &00, &00, &00, &2B, &00, &00
+    EQUB &00, &00, &7F, &00, &00, &00, &00, &00, &00, &00, &00, &00, &00, &00, &00, &00
+    EQUB &00, &00, &28, &29, &2F, &2A, &37, &38, &39, &34, &35, &36, &31, &32, &33, &30
+    EQUB &2E, &0D
+    \ &73 reads the high-score entry's last character, 0 as the program loads
+    EQUB &00, &00, &20, &20
+    EQUB &00, &00, &00, &00, &00, &07, &80, &00, &20
+ASSERT P% - key_ascii = &7F

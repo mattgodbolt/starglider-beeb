@@ -1,0 +1,127 @@
+# The keys and commands in flight (read_keys), on the keys: S and Q, F,
+# cheat mode's N, M and P, the defined keys and the flight keys' orders,
+# I in flight, the cheat prompt, and L with the missile flying.
+#
+# Before the capture: the defined keys (the K screen's, $2D8-$2DD: G left,
+# H right, Y dive, U climb, A accelerate, B brake; none a command) and
+# cheat mode ($2CD), written then so that no write lands inside a routine
+# the capture checks. Q comes before any effect: under EmuTOS the first
+# effect stops the keyboard's interrupts for good (docs/research/st-logic.md,
+# "Corrections to st.md").
+wait 38
+key 57
+wait 3
+debug w b $5c1d8 $22 $23 $15 $16 $1e $30
+debug w b $5c1cd $ff
+wait 0.3
+debug parse {arm}
+debug echo \nSEG keys\n
+wait 2
+# S (sound on, as it is), Q (sound off)
+key 0x1f
+wait 1.5
+key 0x10
+wait 1.5
+# F, the sight fixed; then in cheat mode N, M twice, P twice (1 to 2,
+# then 2: none)
+key 0x21
+wait 1.5
+key 0x31
+wait 1.5
+key 0x32
+wait 1.5
+key 0x32
+wait 1.5
+key 0x19
+wait 1.5
+key 0x19
+wait 1.5
+# the defined keys, one at a time
+down 0x1e
+wait 3
+up 0x1e
+down 0x30
+wait 3
+up 0x30
+down 0x22
+wait 3
+up 0x22
+down 0x23
+wait 3
+up 0x23
+down 0x15
+wait 3
+up 0x15
+down 0x16
+wait 3
+up 0x16
+# the orders: space over B, / over A, B over A; left and right together,
+# up and down, and X with C, ; with .
+down 57
+down 0x30
+wait 3
+up 57
+down 0x1e
+wait 3
+up 0x30
+down 0x35
+wait 3
+up 0x35
+up 0x1e
+down 0x4b
+down 0x4d
+wait 3
+up 0x4b
+up 0x4d
+down 0x48
+down 0x50
+wait 3
+up 0x48
+up 0x50
+down 0x2d
+down 0x34
+wait 3
+up 0x34
+down 0x2e
+down 0x27
+wait 3
+up 0x2d
+up 0x2e
+up 0x27
+# I in flight, with cursor left held: the flight keys
+down 0x4b
+wait 2
+key 0x17
+wait 2
+up 0x4b
+# the cheat prompt (Delete): Z held, then Z again for the prompt's key,
+# so that the key states are as they were when the prompt began
+down 0x2c
+wait 2
+down 0x53
+wait 2
+up 0x2c
+wait 0.5
+down 0x2c
+wait 2
+up 0x53
+up 0x2c
+wait 1.5
+# F, the sight free; L, a missile launched; L again with it flying; P in
+# cheat mode with it flying; cursor right and up steering it
+key 0x21
+wait 1.5
+key 0x26
+wait 1.5
+key 0x26
+wait 1.5
+key 0x19
+wait 1.5
+down 0x4d
+down 0x48
+wait 4
+up 0x4d
+up 0x48
+wait 1
+debug echo \nSEG end\n
+quit

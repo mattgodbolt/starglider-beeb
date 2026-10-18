@@ -142,6 +142,12 @@ says how):
   reload what you were holding there.
 - `ROL` and `ASL` don't touch V; `BIT abs,Y`, `STY abs,X` and `STA zp,Y`
   don't exist (baron says "No such addressing mode" or uses abs,Y).
+- Baron matches ZA_CANJUMP, ZA_CANCALL and the other control-flow
+  annotations to their jumps by address alone (waitingforvsync/baron#29):
+  in banks that share addresses, an annotated jump in one lends its
+  targets to any jump at the same address in another. Keep annotated
+  jumps' addresses clear of the other banks' code (the logic bank starts
+  past the world bank's list phase), or route them through main RAM.
 - Generated code with patched operands: assert that each copy's labels
   sit at the same offsets (`mkrotate.py`) when one routine patches them
   all through a pointer.

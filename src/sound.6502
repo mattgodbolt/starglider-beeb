@@ -8,3 +8,15 @@
 \ state the game's logic reads (docs/research/st-logic.md).
 .sfx_start
     RTS
+
+\ sample_start (the ST's &01A50): speech clip A, 1-4 the ST's clare1-4
+\ (docs/research/st.md, "Samples"), which the ST plays only with the sound
+\ on (sound_on). Its callers set the ST's clip in &A0-&A4 and Timer A's
+\ rate in &2CF-&2D0 first, which the speech layer will know by the number.
+.sample_start
+    RTS
+
+\ sample_stop (Q's, and the ST's &02A30): the clip playing, if one is, to
+\ end at its next sample (the ST sets its bytes left, &01E56, to 1).
+.sample_stop
+    RTS
