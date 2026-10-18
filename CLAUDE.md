@@ -223,4 +223,7 @@ says how):
   touches, never by time. Use they/them for Matt.
 - Before committing, run `make check` on its own and look at its exit
   status: piped through grep in an `&&` chain, a failure goes unseen.
+- Agents keep every file they make inside their own worktree, scratch
+  under its `build/`, with no symlinks out of it: a path that resolves
+  outside stops the run for a permission prompt, and nobody is watching.
 - Every agent brief carries these rules.
