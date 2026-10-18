@@ -622,10 +622,21 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 \ camera on its outer side, n.c > 4K.
 .faces
 {
-    ZA_AUTO1 face_i, count
+    ZA_AUTO1 face_i, last
     ZA_AUTO 3, nrm              ; the face's normal, x y z
     ZA_AUTO 3, dot, pp
+    LDA sh_elists : STA mark_edge+1 : LDA sh_elists+1 : STA mark_edge+2
+    \ each axis's products by its |c| (faceterm.6502)
+    LDA objc_mag : STA fx.lo_a+1 : STA fx.lo_c+1 : EOR #&FF : STA fx.lo_b+1 : STA fx.lo_d+1
+    LDA objc_mag+1 : STA fx.hi_a+1 : STA fx.hi_c+1 : EOR #&FF : STA fx.hi_b+1 : STA fx.hi_d+1
+    LDA objc_mag+2 : STA fy.lo_a+1 : STA fy.lo_c+1 : EOR #&FF : STA fy.lo_b+1 : STA fy.lo_d+1
+    LDA objc_mag+3 : STA fy.hi_a+1 : STA fy.hi_c+1 : EOR #&FF : STA fy.hi_b+1 : STA fy.hi_d+1
+    LDA objc_mag+4 : STA fz.lo_a+1 : STA fz.lo_c+1 : EOR #&FF : STA fz.lo_b+1 : STA fz.lo_d+1
+    LDA objc_mag+5 : STA fz.hi_a+1 : STA fz.hi_c+1 : EOR #&FF : STA fz.hi_b+1 : STA fz.hi_d+1
     STZ face_i
+    BRA each
+.next
+    INC face_i
 .each
     LDY face_i : CPY sh_nfaces : BCC test
     RTS
@@ -633,67 +644,61 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA (sh_fflags),Y : ORA all_faces : BPL tested
     JMP visible
 .tested
-    \ dot = 4K - n.c, 24 bits: negative if the face is visible (as n.c - 4K
-    \ > 0 is, but for -2^23, far beyond any object near enough to draw)
-    LDX #0
-    LDA (fr_khi),Y : BPL kpos
-    DEX
-.kpos
-    STX dot+2 : STA dot+1
-    LDA (fr_klo),Y
-    ASL A : ROL dot+1 : ROL dot+2
-    ASL A : ROL dot+1 : ROL dot+2
-    STA dot
     CPY sh_nrigid : BCS turning
     LDA (sh_nx),Y : STA nrm : LDA (sh_ny),Y : STA nrm+1 : LDA (sh_nz),Y : STA nrm+2
     BRA normal
 .turning
     LDA (fr_nx),Y : STA nrm : LDA (fr_ny),Y : STA nrm+1 : LDA (fr_nz),Y : STA nrm+2
 .normal
+    \ dot = 4K - n.c, 24 bits: negative if the face is visible (as n.c - 4K
+    \ > 0 is, but for -2^23, far beyond any object near enough to draw)
+    LDA (fr_khi),Y : BMI k_neg
+    STA dot+1 : STZ dot+2
+    \ K >= 0: not visible unless some product n c is positive
+    LDA nrm : BEQ y_sign : EOR objc_sign : BPL k_low
+.y_sign
+    LDA nrm+1 : BEQ z_sign : EOR objc_sign+1 : BPL k_low
+.z_sign
+    LDA nrm+2 : BEQ next : EOR objc_sign+2 : BMI next
+    BRA k_low
+.k_neg
+    STA dot+1 : LDA #&FF : STA dot+2
+.k_low
+    LDA (fr_klo),Y
+    ASL A : ROL dot+1 : ROL dot+2
+    ASL A : ROL dot+1 : ROL dot+2
+    STA dot
     \ each component's |n| |c| taken away, or added if n c is negative
-FOR i = 0..2
-    LDA nrm+i : BEQ axis_done           ; nothing on this axis
-    BPL n_pos
-    EOR #&FF : INC A
-.n_pos
-    MUL_SET
-    LDY objc_mag+2*i : MUL8 pp : STA pp+1
-    LDY objc_mag+2*i+1 : BEQ small
-    SEC
-    LDA (m_sqlo),Y : SBC (m_nglo),Y : TAX
-    LDA (m_sqhi),Y : SBC (m_nghi),Y : STA pp+2
-    TXA : CLC : ADC pp+1 : STA pp+1
-    BCC got
-    INC pp+2
-.got
-    LDA nrm+i : EOR objc_sign+i : BMI add
-    SEC
-    LDA dot : SBC pp : STA dot
-    LDA dot+1 : SBC pp+1 : STA dot+1
-    LDA dot+2 : SBC pp+2 : STA dot+2
-    BRA axis_done
-.small
-    STZ pp+2                            ; |c| < 256
-    BRA got
-.add
-    CLC
-    LDA dot : ADC pp : STA dot
-    LDA dot+1 : ADC pp+1 : STA dot+1
-    LDA dot+2 : ADC pp+2 : STA dot+2
-.axis_done
-NEXT
-    LDA dot+2 : BPL next
+.fx
+{
+    AXIS = 0
+    INCLUDE "faceterm.6502"
+}
+.fy
+{
+    AXIS = 1
+    INCLUDE "faceterm.6502"
+}
+.fz
+{
+    AXIS = 2
+    INCLUDE "faceterm.6502"
+}
+    LDA dot+2 : BMI visible
+    JMP next
 .visible
+    \ its edge list: a count, then the edges
     LDY face_i
     LDA (sh_fedges),Y : TAY
-    LDA (sh_elists),Y : STA count
+    CLC : ADC (sh_elists),Y : STA last
+    LDA stamp
 .mark
-    INY : LDA (sh_elists),Y : TAX
-    LDA stamp : STA edge_mark,X
-    DEC count : BNE mark
-.next
-    INC face_i
-    JMP each
+    INY
+.mark_edge
+    LDX &8000,Y                         ; patched: sh_elists
+    STA edge_mark,X
+    CPY last : BNE mark
+    JMP next
 }
 
 \ edges (&04D16): each marked edge, its vertices transformed as needed.
@@ -1035,14 +1040,14 @@ ENDMACRO
 .crossing
     LDA cx1 : CMP cx0 : BNE not_vertical
     LDA cx1+1 : CMP cx0+1 : BNE not_vertical
-    CLAMP cy0, VIEW_YMIN, VIEW_YMAX
-    CLAMP cy1, VIEW_YMIN, VIEW_YMAX
+    LDX #cy0 - clip_pts : JSR clamp_y
+    LDX #cy1 - clip_pts : JSR clamp_y
     JMP again
 .not_vertical
     LDA cy1 : CMP cy0 : BNE slanted
     LDA cy1+1 : CMP cy0+1 : BNE slanted
-    CLAMP cx0, VIEW_XMIN, VIEW_XMAX
-    CLAMP cx1, VIEW_XMIN, VIEW_XMAX
+    LDX #cx0 - clip_pts : JSR clamp_x
+    LDX #cx1 - clip_pts : JSR clamp_x
     JMP again
 .slanted
     LDA code0 : BNE cut
@@ -1101,6 +1106,41 @@ ENDMACRO
     RTS
 .overflow
     MOVW pq, mul_p
+    RTS
+\ clamp_y, clamp_x: the word at clip_pts + X into the window's y or x
+\ range, below first (&0A2F8, &0A330).
+.clamp_y
+    LDA clip_pts+1,X : ZA_INDEXEDBY {2, 6}
+    BMI y_low : BNE y_high
+    LDA clip_pts,X : ZA_INDEXEDBY {2, 6}
+    CMP #VIEW_YMIN : BCC y_low
+    CMP #VIEW_YMAX + 1 : BCC clamped
+.y_high
+    LDA #VIEW_YMAX
+    BRA y_set
+.y_low
+    LDA #VIEW_YMIN
+.y_set
+    STA clip_pts,X : ZA_INDEXEDBY {2, 6}
+    STZ clip_pts+1,X : ZA_INDEXEDBY {2, 6}
+.clamped
+    RTS
+.clamp_x
+    LDA clip_pts+1,X : ZA_INDEXEDBY {0, 4}
+    BMI x_low : BEQ x_byte
+    CMP #HI(VIEW_XMAX + 1) : BNE x_high
+    LDA clip_pts,X : ZA_INDEXEDBY {0, 4}
+    CMP #LO(VIEW_XMAX + 1) : BCC clamped
+.x_high
+    LDA #LO(VIEW_XMAX) : STA clip_pts,X : ZA_INDEXEDBY {0, 4}
+    LDA #HI(VIEW_XMAX) : STA clip_pts+1,X : ZA_INDEXEDBY {0, 4}
+    RTS
+.x_byte
+    LDA clip_pts,X : ZA_INDEXEDBY {0, 4}
+    CMP #VIEW_XMIN : BCS clamped
+.x_low
+    LDA #VIEW_XMIN : STA clip_pts,X : ZA_INDEXEDBY {0, 4}
+    STZ clip_pts+1,X : ZA_INDEXEDBY {0, 4}
     RTS
 .accept
 IF DEFINED(SPIKE)

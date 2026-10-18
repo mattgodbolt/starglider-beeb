@@ -1,0 +1,57 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - one axis of faces' n.c (render.6502)
+\
+\ Included once an axis, each copy in a scope of its own with AXIS set, so
+\ faces can patch each copy's products by name: |n| |c| on this axis taken
+\ from dot, or added to it if n c is negative. The table reads are MUL8's,
+\ with |n| in Y and |c|'s bytes patched into their offsets once an object,
+\ as MUL_SET would set the pointers.
+\ ***************************************************************************
+
+    LDA nrm+AXIS : BEQ done             ; nothing on this axis
+    BPL n_pos
+    EOR #&FF : INC A
+.n_pos
+    TAY
+    SEC
+.lo_a
+    LDA sqr_lo,Y
+.lo_b
+    SBC neg_lo,Y
+    STA pp
+.lo_c
+    LDA sqr_hi,Y
+.lo_d
+    SBC neg_hi,Y
+    STA pp+1
+    LDA objc_mag+2*AXIS+1 : BEQ small
+    SEC
+.hi_a
+    LDA sqr_lo,Y
+.hi_b
+    SBC neg_lo,Y
+    TAX
+.hi_c
+    LDA sqr_hi,Y
+.hi_d
+    SBC neg_hi,Y
+    STA pp+2
+    TXA : CLC : ADC pp+1 : STA pp+1
+    BCC got
+    INC pp+2
+.got
+    LDA nrm+AXIS : EOR objc_sign+AXIS : BMI add
+    SEC
+    LDA dot : SBC pp : STA dot
+    LDA dot+1 : SBC pp+1 : STA dot+1
+    LDA dot+2 : SBC pp+2 : STA dot+2
+    BRA done
+.small
+    STZ pp+2                            ; |c| < 256
+    BRA got
+.add
+    CLC
+    LDA dot : ADC pp : STA dot
+    LDA dot+1 : ADC pp+1 : STA dot+1
+    LDA dot+2 : ADC pp+2 : STA dot+2
+.done
