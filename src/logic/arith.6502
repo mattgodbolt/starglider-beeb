@@ -12,3 +12,14 @@
     LDA mul_p+2 : STA mul_r
     LDA mul_p+3 : STA mul_r+1
     RTS
+
+\ world_call: the world bank's routine at world_vec, from the logic's bank,
+\ and back (ANDY stays paged).
+.world_call
+    LDA bank_now : PHA
+    LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
+    JSR world_jump
+    PLA : STA bank_now : STA romsel
+    RTS
+.world_jump
+    JMP (world_vec)

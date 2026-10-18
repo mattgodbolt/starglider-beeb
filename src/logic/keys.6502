@@ -1,0 +1,8 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the keys and commands (the ST's &0270E)
+\
+\ To be transcribed exactly (docs/research/st-logic.md, "The keys, the commands and the input interrupt").
+\ ***************************************************************************
+
+.read_keys
+    RTS

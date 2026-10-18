@@ -1,0 +1,8 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - collisions, docking, refuelling (the ST's &08416)
+\
+\ To be transcribed exactly (docs/research/st-logic.md, "The bearing, collisions, docking, refuelling and the laser").
+\ ***************************************************************************
+
+.collisions
+    RTS

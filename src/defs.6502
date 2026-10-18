@@ -30,7 +30,8 @@ SCREEN      = &8000 - SCREEN_ROWS * SCREEN_ROW
 
 \ --- Sideways RAM ---------------------------------------------------------
 BANK_SHAPES  = 4
-BANK_WORLD   = 5                    ; the list phase and the sine table (world.6502)
+BANK_WORLD   = 5                    ; the list phase, the sine table and the logic that reads it
+BANK_LOGIC   = 6                    ; the rest of the logic
 BANK_LOG     = 7                    ; the spike's line log
 
 \ --- Objects --------------------------------------------------------------

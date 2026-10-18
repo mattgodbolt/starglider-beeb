@@ -1,0 +1,24 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - world_render's logic (the ST's &04FE8)
+\
+\ world_render draws, but it also decides: the level-up test, the score
+\ add, the camera, the ground dots' respawning (which takes random
+\ numbers), the docked tunnel's stop, refill and pick-up and the launch's
+\ count inside the coarse pass, the lists, and after the draw loop the
+\ player's laser (docs/research/st-logic.md, "The frame's end, the score,
+\ the interrupts and world_render's logic"). world_lists is its logic up to
+\ the lists (the capture's top to lists), world_after the rest (lists to
+\ render). For now world_lists is the list phase alone.
+\ ***************************************************************************
+
+.world_lists
+    \ the list phase is below ANDY_TOP, so ANDY comes out round it
+    LDA #BANK_WORLD : STA bank_now : STA romsel
+    JSR camera
+    JSR coarse_list
+    JSR rotate_lists
+    LDA #BANK_WORLD OR ROMSEL_ANDY : STA bank_now : STA romsel
+    RTS
+
+.world_after
+    RTS

@@ -1,0 +1,8 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the object handlers (the ST's &07A54)
+\
+\ To be transcribed exactly (docs/research/st-logic.md, "The object handlers, first half and second half").
+\ ***************************************************************************
+
+.object_handlers
+    RTS

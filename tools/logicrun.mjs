@@ -20,9 +20,20 @@ import { loadSymbols } from "./beeb.mjs";
 // The routines: their entry and exit points in the capture, the port's
 // routine, and its bank; and whether the ST's d0 at the exit is compared
 // (where a later random8 adds it).
+// An exit point "next:P" is P in the next frame; "unless" skips the frames
+// with that point (the post-frame tests, when they go to the level change).
 const ROUTINES = {
-    animate: { from: "handlers", to: "animate", call: "animate_shapes", bank: "BANK_WORLD" },
+    world: { from: "top", to: "lists", call: "world_lists", bank: "BANK_WORLD" },
+    world_after: { from: "lists", to: "render", call: "world_after", bank: "BANK_WORLD" },
+    keys: { from: "render", to: "keys", call: "read_keys", bank: "BANK_LOGIC" },
     flight: { from: "keys", to: "flight", call: "player_flight", bank: "BANK_WORLD", d0: true },
+    handlers: { from: "flight", to: "handlers", call: "object_handlers", bank: "BANK_WORLD" },
+    animate: { from: "handlers", to: "animate", call: "animate_shapes", bank: "BANK_WORLD" },
+    collide: { from: "animate", to: "collide", call: "collisions", bank: "BANK_LOGIC" },
+    message: { from: "collide", to: "message", call: "level_message", bank: "BANK_LOGIC" },
+    frame_end: { from: "message", to: "end", call: "frame_end_logic", bank: "BANK_LOGIC" },
+    post: { from: "end", to: "next:top", call: "post_frame", bank: "BANK_LOGIC", unless: "level" },
+    level: { from: "level", to: "next:top", call: "level_start", bank: "BANK_LOGIC" },
 };
 
 const args = process.argv.slice(2);
@@ -68,6 +79,7 @@ load("TABLES", where(need("TABLES")));
 load("CODE2", where(need("CODE2")));
 load("SHAPES", bank(need("BANK_SHAPES")));
 load("WORLD", bank(need("BANK_WORLD")));
+load("LOGIC", bank(need("BANK_LOGIC")));
 
 const STUB = 0x0140;
 const STUB_DONE = STUB + 4;
@@ -215,8 +227,12 @@ const differ = (name, n, got, want) => {
 };
 for (let n = 0; n < steps.frames.length; n++) {
     const fr = steps.frames[n];
+    const next = routine.to.startsWith("next:");
+    const exitFrame = next ? steps.frames[n + 1] : fr;
+    const exitPoint = next ? routine.to.slice(5) : routine.to;
+    if (!exitFrame || (routine.unless && fr.points[routine.unless])) continue;
     const entry = regionsAt(fr, routine.from);
-    const exit = regionsAt(fr, routine.to);
+    const exit = regionsAt(exitFrame, exitPoint);
     if (!entry || !exit) continue;
     frames++;
     for (const it of items) it.put(entry);
@@ -233,9 +249,10 @@ for (let n = 0; n < steps.frames.length; n++) {
             differ(it.name, n, got.length > 2 ? `[${at}] ${got[at]}` : got.join(" "), want.length > 2 ? `[${at}] ${want[at]}` : want.join(" "));
         }
     }
-    if (routine.d0 && routine.to in d0) {
+    const exitD0 = exitFrame.d0 ?? {};
+    if (routine.d0 && exitPoint in exitD0) {
         const got = ram[rngD0] | (ram[rngD0 + 1] << 8);
-        if (got !== fr.d0[routine.to]) differ("d0 (rng_d0)", n, got, fr.d0[routine.to]);
+        if (got !== exitD0[exitPoint]) differ("d0 (rng_d0)", n, got, exitD0[exitPoint]);
     }
 }
 console.log(`logicrun ${routineName}: ${frames} frames, ${items.length} variables and fields, ${diffs.size} differ`);

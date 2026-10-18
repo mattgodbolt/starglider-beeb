@@ -1,0 +1,8 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the level change (the ST's &01F06
+\
+\ To be transcribed exactly (docs/research/st-logic.md, " the flash, init_objects):The main loop, the post-frame tests, game over, the level change and init_objects").
+\ ***************************************************************************
+
+.level_start
+    RTS

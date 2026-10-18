@@ -1,0 +1,19 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the frame's end: level_message (the ST's
+\ &0260C), frame_end's logic (&08EC2: the frame count, colour 0's flash)
+\ and the post-frame tests (&01F30: the level change, game over, the
+\ warnings, ramming's cost, the energy drain, the ground scrape)
+\
+\ To be transcribed exactly (docs/research/st-logic.md, "The main loop,
+\ the post-frame tests, game over, the level change and init_objects" and
+\ "The frame's end, the score, the interrupts and world_render's logic").
+\ ***************************************************************************
+
+.level_message
+    RTS
+
+.frame_end_logic
+    RTS
+
+.post_frame
+    RTS

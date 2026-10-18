@@ -29,6 +29,7 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .mouse_x      SKIP 2        ; {ST P&01842 word} the turn: roll is -(it asr 4)
 .mouse_y      SKIP 2        ; {ST P&01844 word} the climb
 .speed_acc    SKIP 2        ; {ST P&01848 word} the speed, negated
+.world_vec    SKIP 2        ; world_call's routine (logic/arith.6502)
 .logic_work_end
 ENDSECTION
 
@@ -81,4 +82,17 @@ SECTION LogicAndy, org = ANDY_OBJECTS_END, guard = ANDY_TOP, virtual = TRUE
 .dots_x_hi    SKIP 40       ; {ST $8AC(a6) whi 40 4}
 .dots_z_lo    SKIP 40       ; {ST $8AE(a6) wlo 40 4}
 .dots_z_hi    SKIP 40       ; {ST $8AE(a6) whi 40 4}
+
+    \ world_render's logic (logic/worldlogic.6502)
+
+    \ the keys and commands (logic/keys.6502)
+
+    \ the object handlers (logic/handlers.6502)
+
+    \ collisions, docking, refuelling and the laser (logic/collide.6502)
+
+    \ the frame's end and the post-frame tests (logic/frame.6502)
+
+    \ the level change (logic/level.6502)
+
 ENDSECTION
