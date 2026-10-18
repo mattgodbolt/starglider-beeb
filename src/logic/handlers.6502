@@ -410,6 +410,7 @@ ENDMACRO
 \ turn_by: the heading = h0 + (h_bear - h0) asr 4, h0 the heading masked
 \ (kept in the heading and rng_d0).
 .turn_by
+{
     LDA ob_heading_lo,X : STA rng_d0
     LDA ob_heading_hi,X : AND #&0F : STA rng_d0+1
     \ (h_bear is 0-&FFF too, so the difference's top four bits are its
@@ -424,6 +425,7 @@ ENDMACRO
     CLC : ADC rng_d0 : STA ob_heading_lo,X
     TYA : ADC rng_d0+1 : STA ob_heading_hi,X
     RTS
+}
 
 \ ---------------------------------------------------------------------------
 \ h_wanderer (&07CA4): nothing while frozen; on, and 1 in 64 it turns by
