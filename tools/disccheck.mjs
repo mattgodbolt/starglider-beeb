@@ -6,9 +6,9 @@
 // it says how long each took. Then, as the game plays, the harness has it
 // read TABLES again into the loading area's first 4K
 // (from engine_run's wait, which steps the read on), while the logic
-// runs with ANDY paged and a speech clip plays, its player in that bank
-// (the third clip, whose bytes are the logic bank's, which the read leaves
-// alone), and the read must come out the same too; the clip must keep about its time,
+// runs with ANDY paged and a speech clip plays, its player paging a bank
+// for each byte (the third clip, whose bytes are the logic bank's, which
+// the read leaves alone), and the read must come out the same too; the clip must keep about its time,
 // and the fields their count, with the read's NMIs beside them. What the
 // read overwrote is put back.
 //

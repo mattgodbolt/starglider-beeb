@@ -1310,3 +1310,35 @@ moved.
   went from 6.40 to 7.60 frames a second flying straight, and from 3.42 to
   3.67 holding a turn (measured 2026-10-18).
 
+### The speech's tick in main RAM
+
+Decision 38 left the speech's tick in bank 7, behind an entry in main RAM
+that paged it in and out. With the room made in main RAM, the tick moved
+there whole, below &3000 with its entry. It pages a bank only for the
+byte a first sample reads; the clips stay where they were.
+
+- **What a tick needs from the last** is in the code it runs. Which
+  sample comes next is a branch each sample sets, so a clip's end byte is
+  tested only when it's read. A tick on time needs no guard on its count's
+  high byte, as its low byte is never near its wrap; only a late tick
+  reads the count again.
+- **Late ticks.** A late tick used to set the next count to 1 and take
+  what it owed off the one after. Beside the disc's NMIs, ticks fired that
+  way came one after another for longer than a field: the speech's entry,
+  taking T2 first, kept the vertical sync out, and T1 came round to 0 with
+  no split due, so the tick waited on its flag for ever. A late tick now
+  writes its sample and those it owes in the same interrupt, handing the
+  engine anything waiting between them by pushing a return as an interrupt
+  does, so the engine's RTI comes back into the tick. The split's wait
+  ends too if T1 passes 0 without its flag.
+- **The debt paid exactly.** The old late ticks paid a few microseconds
+  short: with a key held, a clip ran at 4,095.7 samples a second against
+  4,098.4. `make speech` now holds a clip with a key held to the rate it
+  keeps with none.
+- **The cost.** A tick takes about 150 cycles, from about 220, so a clip
+  takes 30-31% of the CPU, from 45-48%. With a warning repeating the disc
+  runs at 7.27 frames a second, against 7.10 before and 7.60 with no
+  speech; with clips back to back, 4.27 against 2.77, and the steps at
+  12.17 a second against 10.33 (measured 2026-10-18). Main RAM gave 349
+  bytes, and fixed zero page's last byte is the tick's.
+

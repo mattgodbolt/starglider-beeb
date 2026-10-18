@@ -34,6 +34,9 @@ SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
     \ the renderer's: the last object's stamp on its edges and vertices,
     \ which lasts from frame to frame as the marks do
 .stamp      SKIP 1
+    \ the speech player's (speech_tick.6502): the byte whose second sample
+    \ the next tick writes
+.sp_byte    SKIP 1
 ENDSECTION
 
 \ The pool stops short of &FC, where the MOS's IRQ entry keeps A.
