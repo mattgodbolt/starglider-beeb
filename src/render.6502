@@ -1181,7 +1181,7 @@ ENDMACRO
     LDA (fr_vy),Y : EOR #&80 : STA xf_u+1
     LDA (fr_vz),Y : EOR #&80 : STA xf_u+2
 .got
-    JMP xform_vertex                        ; which comes back to back or folded (fold's)
+    JMP xform_vertex                        ; back to back, folded or in_front (xform_back)
 .back
     \ the sums px, xf_y, pz into world units, the object's position added
     \ (only where it can't be folded in, seldom: so in a loop)

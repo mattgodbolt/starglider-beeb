@@ -77,21 +77,10 @@ MACRO CLAMP v, lo, hi
 .done
 ENDMACRO
 
-\ WORLD acc, t, lo, hi: a vertex's coordinate in world units, in place:
-\ its transform's sum in quarters (acc) plus the object's position t, into
-\ acc and the vertex arrays lo and hi at Y; N and Z are its high byte's.
-MACRO WORLD acc, t, lo, hi
-    LDA acc+1
-    CMP #&80 : ROR A : ROR acc
-    CMP #&80 : ROR A : ROR acc
-    TAX
-    LDA acc : CLC : ADC t : STA acc : STA lo,Y
-    TXA : ADC t+1 : STA acc+1 : STA hi,Y
-ENDMACRO
-
-\ WORLD_FOLDED acc, lo, hi: WORLD for a sum that started with the
-\ object's position in it, in quarters (render.6502's fold): the shift
-\ alone. N and Z are its low byte's.
+\ WORLD_FOLDED acc, lo, hi: a vertex's coordinate in world units, in
+\ place, from its transform's sum in quarters (acc), which started with
+\ the object's position in it (xform_setup's fold), and into the vertex
+\ arrays lo and hi at Y. N and Z are its low byte's.
 MACRO WORLD_FOLDED acc, lo, hi
     LDA acc+1
     CMP #&80 : ROR A : ROR acc
