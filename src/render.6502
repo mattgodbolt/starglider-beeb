@@ -547,17 +547,14 @@ NEXT
     \ The matrix scaled to the shape, for the vertices: A = m g / 256, so
     \ A k / 1024 is in world units (g = 32 x scale): (|m| scale + 4) / 8,
     \ which is (2 |m| x 16 scale + 128) / 256, the bytes falling where
-    \ they're wanted. (16 scale is a byte: mkshapes.py.) The sign is m's
-    \ high byte, whose bit 7 is all that's read.
+    \ they're wanted. (16 scale is a byte: mkshapes.py.)
     LDA sh_scale : ASL A : ASL A : ASL A : ASL A : MUL_SET
     LDX #0
-    ZA_DISCARD xf_amag, xf_asign
+    ZA_DISCARD xf_amag
 .scale_term
-    TXA : LSR A : TAY
     LDA mat,X : ZA_INDEXEDBY 0..16
     STA u_lo
     LDA mat+1,X : ZA_INDEXEDBY 0..16
-    STA xf_asign,Y : ZA_INDEXEDBY 0..8
     BPL scale_pos
     LDA #0 : SEC : SBC u_lo : STA u_lo
     LDA #0 : SBC mat+1,X : ZA_INDEXEDBY 0..16
@@ -571,6 +568,10 @@ NEXT
     INC xf_amag+1,X : ZA_INDEXEDBY 0..16
 .scale_next
     INX : INX : CPX #18 : BNE scale_term
+    \ and the signs, &00 or &80 (the transforms' setups widen them in place)
+FOR e = 0..8
+    LDA mat + 2 * e + 1 : AND #&80 : STA xf_asign + e
+NEXT
     \ A new stamp marks this object's edges and vertices.
     INC stamp : BNE stamped
     LDX #0
