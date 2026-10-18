@@ -61,28 +61,32 @@ ENDMACRO
     RTS
 }
 
-\ smul16: mul_p = mul_x * mul_y, signed 16-bit to 32 (the 68000's muls):
-\ the unsigned product of the two's complement words, less 2^16 y if x is
-\ negative and 2^16 x if y is.
-.smul16
-{
-    JSR umul16
+\ SIGNED: mul_p, umul16's product, made mul_x * mul_y signed (the 68000's
+\ muls): the unsigned product of the two's complement words, less 2^16 y
+\ if x is negative and 2^16 x if y is.
+MACRO SIGNED
     BIT mul_x+1 : BPL x_pos
     LDA mul_p+2 : SEC : SBC mul_y : STA mul_p+2
     LDA mul_p+3 : SBC mul_y+1 : STA mul_p+3
 .x_pos
-    BIT mul_y+1 : BPL done
+    BIT mul_y+1 : BPL y_pos
     LDA mul_p+2 : SEC : SBC mul_x : STA mul_p+2
     LDA mul_p+3 : SBC mul_x+1 : STA mul_p+3
-.done
+.y_pos
+ENDMACRO
+
+\ smul16: mul_p = mul_x * mul_y, signed 16-bit to 32 (the 68000's muls).
+.smul16
+    JSR umul16
+    SIGNED
     RTS
-}
 
 \ fmul16: mul_r = the 68000's `muls; asl.l #2; swap` of mul_x and mul_y:
 \ floor(x * y / 16384), wrapped to 16 bits. Two's complement shifts round
 \ down, so the floor comes free.
 .fmul16
-    JSR smul16
+    JSR umul16
+    SIGNED
     LDA mul_p+2 : STA mul_r
     LDA mul_p+3 : STA mul_r+1
     LDA mul_p+1

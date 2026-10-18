@@ -271,7 +271,7 @@ NEXT
 .draw_shape
 {
     ZA_AUTO1 shape, nmove, nturn, row_i, u_lo, h0, l0
-    ZA_AUTO2 fr, fr_k, t16
+    ZA_AUTO2 fr, t16
     LDX otype
     LDA type_shape,X : CMP #SHAPES : BCC known
     RTS
@@ -352,21 +352,56 @@ NEXT
     \ Its arrays follow each other: the moving vertices' x, y, z, the
     \ changing faces' normals, then every face's K. Each pointer is set
     \ back by the count of still vertices or rigid faces, so it's indexed
-    \ by vertex or face number.
+    \ by vertex or face number: each the one before it on by an array's
+    \ length, the low byte in A and the high in X. Past the vertices, fr
+    \ + 3 nmove, is fr_vz + nverts.
     LDA sh_nverts : SEC : SBC sh_nstill : STA nmove
     LDA sh_nfaces : SEC : SBC sh_nrigid : STA nturn
-    LDA fr : SEC : SBC sh_nstill : STA fr_vx : LDA fr+1 : SBC #0 : STA fr_vx+1
-    LDA fr_vx : CLC : ADC nmove : STA fr_vy : LDA fr_vx+1 : ADC #0 : STA fr_vy+1
-    LDA fr_vy : CLC : ADC nmove : STA fr_vz : LDA fr_vy+1 : ADC #0 : STA fr_vz+1
-    \ fr_nx = fr + 3 nmove - nrigid
-    LDA nmove : ASL A : ADC nmove : STA t16 : LDA #0 : ROL A : STA t16+1   ; 3 nmove (C = 0 after ASL of < 128)
-    LDA fr : CLC : ADC t16 : STA fr_k : LDA fr+1 : ADC t16+1 : STA fr_k+1  ; past the vertices
-    LDA fr_k : SEC : SBC sh_nrigid : STA fr_nx : LDA fr_k+1 : SBC #0 : STA fr_nx+1
-    LDA fr_nx : CLC : ADC nturn : STA fr_ny : LDA fr_nx+1 : ADC #0 : STA fr_ny+1
-    LDA fr_ny : CLC : ADC nturn : STA fr_nz : LDA fr_ny+1 : ADC #0 : STA fr_nz+1
-    LDA nturn : ASL A : ADC nturn : STA t16 : LDA #0 : ROL A : STA t16+1
-    LDA fr_k : CLC : ADC t16 : STA fr_klo : LDA fr_k+1 : ADC t16+1 : STA fr_klo+1
-    LDA fr_klo : CLC : ADC sh_nfaces : STA fr_khi : LDA fr_klo+1 : ADC #0 : STA fr_khi+1
+    LDX fr+1
+    LDA fr : SEC : SBC sh_nstill : STA fr_vx
+    BCS vx_hi
+    DEX
+.vx_hi
+    STX fr_vx+1
+    CLC : ADC nmove : STA fr_vy
+    BCC vy_hi
+    INX
+.vy_hi
+    STX fr_vy+1
+    CLC : ADC nmove : STA fr_vz
+    BCC vz_hi
+    INX
+.vz_hi
+    STX fr_vz+1
+    CLC : ADC sh_nverts
+    BCC past_vertices
+    INX
+.past_vertices
+    SEC : SBC sh_nrigid : STA fr_nx
+    BCS nx_hi
+    DEX
+.nx_hi
+    STX fr_nx+1
+    CLC : ADC nturn : STA fr_ny
+    BCC ny_hi
+    INX
+.ny_hi
+    STX fr_ny+1
+    CLC : ADC nturn : STA fr_nz
+    BCC nz_hi
+    INX
+.nz_hi
+    STX fr_nz+1
+    CLC : ADC sh_nfaces : STA fr_klo
+    BCC klo_hi
+    INX
+.klo_hi
+    STX fr_klo+1
+    CLC : ADC sh_nfaces : STA fr_khi
+    BCC khi_hi
+    INX
+.khi_hi
+    STX fr_khi+1
     \ The colour: the shape's, or the beam's, which animate_shapes cycles.
     LDA sh_colour : CMP #&FF : BNE colour_ok
     LDA beam_colour
