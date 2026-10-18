@@ -529,19 +529,20 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     RTS
 }
 
-\ edges_far: each marked edge of a far object, its vertices straight onto
-\ the screen; clipped to the window only if the object reaches past it.
+\ edges_far: each marked edge of a far object, the last first, its
+\ vertices straight onto the screen; clipped to the window only if the
+\ object reaches past it.
 .edges_far
 {
-    STZ edge_i
+    LDA sh_nedges : STA edge_i
 .each
-    LDY edge_i : CPY sh_nedges : BCC test
+    LDY edge_i : BNE test
     RTS
 .test
-    LDA edge_mark,Y : CMP stamp : BNE next
-    LDA (sh_ev0),Y : STA va
+    DEY : STY edge_i
+    LDA edge_mark,Y : CMP stamp : BNE each
     LDA (sh_ev1),Y : STA vb
-    LDA va : JSR vertex_far
+    LDA (sh_ev0),Y : STA va : JSR vertex_far
     LDA vb : JSR vertex_far
     LDX va : LDY vb
     LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
@@ -550,11 +551,9 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
     BIT far_inside : BPL clip
     JSR clip_line.accept
-    BRA next
+    BRA each
 .clip
     JSR clip_line
-.next
-    INC edge_i
     BRA each
 }
 
@@ -611,14 +610,23 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 \ camera on its outer side, n.c > 4K.
 .faces
 {
-    ZA_AUTO1 face_i, row_i, count, psign, ph
+    ZA_AUTO1 face_i, last
     ZA_AUTO 3, nrm              ; the face's normal, x y z
-    ZA_AUTO 3, dot, kk, pp
-    STZ face_i
-.each
-    LDY face_i : CPY sh_nfaces : BCC test
+    ZA_AUTO 3, dot, pp
+    LDA sh_elists : STA mark_edge+1 : LDA sh_elists+1 : STA mark_edge+2
+    \ each axis's products by its |c| (faceterm.6502)
+    LDA objc_mag : STA fx.lo_a+1 : STA fx.lo_c+1 : EOR #&FF : STA fx.lo_b+1 : STA fx.lo_d+1
+    LDA objc_mag+1 : STA fx.hi_a+1 : STA fx.hi_c+1 : EOR #&FF : STA fx.hi_b+1 : STA fx.hi_d+1
+    LDA objc_mag+2 : STA fy.lo_a+1 : STA fy.lo_c+1 : EOR #&FF : STA fy.lo_b+1 : STA fy.lo_d+1
+    LDA objc_mag+3 : STA fy.hi_a+1 : STA fy.hi_c+1 : EOR #&FF : STA fy.hi_b+1 : STA fy.hi_d+1
+    LDA objc_mag+4 : STA fz.lo_a+1 : STA fz.lo_c+1 : EOR #&FF : STA fz.lo_b+1 : STA fz.lo_d+1
+    LDA objc_mag+5 : STA fz.hi_a+1 : STA fz.hi_c+1 : EOR #&FF : STA fz.hi_b+1 : STA fz.hi_d+1
+    LDA sh_nfaces : STA face_i
+.next
+    LDY face_i : BNE test               ; the last first
     RTS
 .test
+    DEY : STY face_i
     LDA (sh_fflags),Y : ORA all_faces : BPL tested
     JMP visible
 .tested
@@ -628,88 +636,72 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 .turning
     LDA (fr_nx),Y : STA nrm : LDA (fr_ny),Y : STA nrm+1 : LDA (fr_nz),Y : STA nrm+2
 .normal
-    \ dot = n.c, 24 bits: each component's |n| |c| added or taken away
-    STZ dot : STZ dot+1 : STZ dot+2
-    LDX #0
-.axis
-    LDA nrm,X : ZA_INDEXEDBY 0..2
-    BEQ axis_next                       ; nothing on this axis
-    STX row_i
-    EOR objc_sign,X : ZA_INDEXEDBY 0..2
-    STA psign
-    LDA nrm,X : ZA_INDEXEDBY 0..2
-    BPL n_pos
-    EOR #&FF : CLC : ADC #1
-.n_pos
-    MUL_SET
-    TXA : ASL A : TAX
-    LDY objc_mag,X : ZA_INDEXEDBY {0, 2, 4}
-    MUL8 pp : STA pp+1
-    LDY objc_mag+1,X : ZA_INDEXEDBY {0, 2, 4}
-    MUL8 ph : CLC : ADC #0 : STA pp+2           ; ph: its low byte
-    LDA pp+1 : CLC : ADC ph : STA pp+1
-    BCC carried
-    INC pp+2
-.carried
-    BIT psign : BMI subtract
-    CLC
-    LDA dot : ADC pp : STA dot
-    LDA dot+1 : ADC pp+1 : STA dot+1
-    LDA dot+2 : ADC pp+2 : STA dot+2
-    BRA added
-.subtract
-    SEC
-    LDA dot : SBC pp : STA dot
-    LDA dot+1 : SBC pp+1 : STA dot+1
-    LDA dot+2 : SBC pp+2 : STA dot+2
-.added
-    LDX row_i
-.axis_next
-    INX : CPX #3 : BNE axis
-    \ visible if dot - 4K > 0
-    LDY face_i
-    LDA (fr_klo),Y : STA kk : LDA (fr_khi),Y : STA kk+1
-    LDA #0 : BIT kk+1 : BPL kpos
-    LDA #&FF
-.kpos
-    STA kk+2
-    ASL kk : ROL kk+1 : ROL kk+2
-    ASL kk : ROL kk+1 : ROL kk+2
-    SEC
-    LDA dot : SBC kk : STA dot
-    LDA dot+1 : SBC kk+1 : STA dot+1
-    LDA dot+2 : SBC kk+2 : STA dot+2
-    BMI next
-    ORA dot : ORA dot+1 : BEQ next              ; zero: on the plane
+    \ dot = 4K - n.c, 24 bits: negative if the face is visible (as n.c - 4K
+    \ > 0 is, but for -2^23, far beyond any object near enough to draw)
+    LDA (fr_khi),Y : BMI k_neg
+    STA dot+1 : STZ dot+2
+    \ K >= 0: not visible unless some product n c is positive
+    LDA nrm : BEQ y_sign : EOR objc_sign : BPL k_low
+.y_sign
+    LDA nrm+1 : BEQ z_sign : EOR objc_sign+1 : BPL k_low
+.z_sign
+    LDA nrm+2 : BEQ next : EOR objc_sign+2 : BMI next
+    BRA k_low
+.k_neg
+    STA dot+1 : LDA #&FF : STA dot+2
+.k_low
+    LDA (fr_klo),Y
+    ASL A : ROL dot+1 : ROL dot+2
+    ASL A : ROL dot+1 : ROL dot+2
+    STA dot
+    \ each component's |n| |c| taken away, or added if n c is negative
+.fx
+{
+    AXIS = 0
+    INCLUDE "faceterm.6502"
+}
+.fy
+{
+    AXIS = 1
+    INCLUDE "faceterm.6502"
+}
+.fz
+{
+    AXIS = 2
+    INCLUDE "faceterm.6502"
+}
+    LDA dot+2 : BMI visible
+    JMP next
 .visible
+    \ its edge list: a count, then the edges
     LDY face_i
     LDA (sh_fedges),Y : TAY
-    LDA (sh_elists),Y : STA count
+    CLC : ADC (sh_elists),Y : STA last
+    LDA stamp
 .mark
-    INY : LDA (sh_elists),Y : TAX
-    LDA stamp : STA edge_mark,X
-    DEC count : BNE mark
-.next
-    INC face_i
-    JMP each
+    INY
+.mark_edge
+    LDX &8000,Y                         ; patched: sh_elists
+    STA edge_mark,X
+    CPY last : BNE mark
+    JMP next
 }
 
-\ edges (&04D16): each marked edge, its vertices transformed as needed.
+\ edges (&04D16): each marked edge, the last first, its vertices
+\ transformed as needed.
 .edges
 {
-    STZ edge_i
+    LDA sh_nedges : STA edge_i
 .each
-    LDY edge_i : CPY sh_nedges : BCC test
+    LDY edge_i : BNE test
     RTS
 .test
-    LDA edge_mark,Y : CMP stamp : BNE next
-    LDA (sh_ev0),Y : STA va
+    DEY : STY edge_i
+    LDA edge_mark,Y : CMP stamp : BNE each
     LDA (sh_ev1),Y : STA vb
-    LDA va : JSR vertex
+    LDA (sh_ev0),Y : STA va : JSR vertex
     LDA vb : JSR vertex
     JSR edge
-.next
-    INC edge_i
     BRA each
 }
 
@@ -882,31 +874,31 @@ ZA_AUTO1 proj_shift
 
 \ edge (&04D66): the edge from vertex va to vb, clipped at z = 2 if it
 \ crosses the plane, projected and clipped to the window.
+ASSERT NEAR_Z > 0 AND NEAR_Z < 256
 .edge
 {
-    ZA_AUTO1 code
+    \ each end in front if z >= NEAR_Z, which its high byte mostly settles
     LDX va : LDY vb
-    LDA v_zlo,X : STA ep+4 : LDA v_zhi,X : STA ep+5
-    LDA v_zlo,Y : STA eq+4 : LDA v_zhi,Y : STA eq+5
-    STZ code                            ; bit 1: p in front, bit 0: q
-    CMPS16 ep+4, #NEAR_Z : BMI p_behind
-    LDA #2 : TSB code
+    LDA v_zhi,X : BMI p_behind : BNE p_front
+    LDA v_zlo,X : CMP #NEAR_Z : BCC p_behind
+.p_front
+    LDA v_zhi,Y : BMI crosses : BNE in_front
+    LDA v_zlo,Y : CMP #NEAR_Z : BCS in_front
+    BRA crosses
 .p_behind
-    CMPS16 eq+4, #NEAR_Z : BMI q_behind
-    LDA #1 : TSB code
-.q_behind
-    LDA code : CMP #3 : BEQ in_front
-    CMP #0 : BNE crosses
-    RTS                                 ; both behind
+    LDA v_zhi,Y : BMI both_behind : BNE crosses
+    LDA v_zlo,Y : CMP #NEAR_Z : BCS crosses
+.both_behind
+    RTS
 .in_front
-    LDX va : LDY vb
     LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
     LDA v_sylo,X : STA cy0 : LDA v_syhi,X : STA cy0+1
     LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
     LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
     JMP clip_line
 .crosses
-    LDX va : LDY vb
+    LDA v_zlo,X : STA ep+4 : LDA v_zhi,X : STA ep+5
+    LDA v_zlo,Y : STA eq+4 : LDA v_zhi,Y : STA eq+5
     LDA v_xlo,X : STA ep : LDA v_xhi,X : STA ep+1
     LDA v_ylo,X : STA ep+2 : LDA v_yhi,X : STA ep+3
     LDA v_xlo,Y : STA eq : LDA v_xhi,Y : STA eq+1
@@ -952,14 +944,22 @@ ZA_AUTO1 proj_shift
     LDA #HI(NEAR_Z) : SBC ep+5 : STA mul_p+3
     LDA eq+4 : SEC : SBC ep+4 : STA div_d
     LDA eq+5 : SBC ep+5 : STA div_d+1
+    \ When both are positive (all but where a depth is too far off for a
+    \ word), divs overflows just when 2 (2 - z) >= dz: a fraction of 0,
+    \ which leaves x and y as they are, so neither divs nor muls is needed.
+    \ An overflow is a fraction of 0 too.
+    ORA mul_p+3 : BMI divide
+    LDA mul_p+2 : ASL A : TAX
+    LDA mul_p+3 : ROL A : TAY
+    TXA : CMP div_d : TYA : SBC div_d+1 : BCS cut
+.divide
     JSR sdiv32
-    BCC fits
-    STZ div_q : STZ div_q+1
-.fits
+    BCS cut
     LDX #0
     JSR cut_axis
     LDX #2
     JSR cut_axis
+.cut
     LDA #LO(NEAR_Z) : STA ep+4 : LDA #HI(NEAR_Z) : STA ep+5
     BRA again
 .cut_axis
@@ -981,6 +981,50 @@ ZA_AUTO1 proj_shift
     RTS
 }
 
+\ OUTCODE x, y: A = the window's outcode of the point (x, y), words: 8
+\ right, 4 below, 2 left, 1 above (&0A174). Y is lost. The window spans
+\ x's high bytes 0 and 1 and lies in y's 0, so a high byte settles most
+\ points alone.
+ASSERT VIEW_XMIN < 256 AND HI(VIEW_XMAX + 1) = 1
+ASSERT VIEW_YMIN < 256 AND VIEW_YMAX < 255
+MACRO OUTCODE x, y
+    LDA x+1 : BNE x_high
+    LDA x : CMP #VIEW_XMIN
+    LDA #0 : BCS x_done
+    BCC x_left
+.x_high
+    BMI x_left
+    CMP #HI(VIEW_XMAX + 1) : BNE x_right
+    LDA x : CMP #LO(VIEW_XMAX + 1)
+    LDA #0 : BCC x_done
+.x_right
+    LDA #8 : BRA x_done
+.x_left
+    LDA #2
+.x_done
+    LDY y+1 : BNE y_high
+    LDY y : CPY #VIEW_YMIN : BCC y_above
+    CPY #VIEW_YMAX + 1 : BCC y_done
+.y_below
+    ORA #4 : BRA y_done
+.y_high
+    BPL y_below
+.y_above
+    ORA #1
+.y_done
+ENDMACRO
+
+\ BYTE_MAG w, far: A = |w| if it's under 256, and otherwise to far.
+MACRO BYTE_MAG w, far
+    LDA w+1 : BEQ positive
+    INC A : BNE far                     ; the high byte wasn't &FF
+    SEC : SBC w : BEQ far               ; -256 is too far
+    BRA done
+.positive
+    LDA w
+.done
+ENDMACRO
+
 \ clip_line (&0A170): Cohen-Sutherland to the window, as the ST clips: a
 \ vertical or horizontal line is clamped; otherwise point 0 is cut, the
 \ points swapped first (and left so) when point 0 is inside. Then the line
@@ -988,10 +1032,14 @@ ZA_AUTO1 proj_shift
 .clip_line
 {
     ZA_AUTO1 code0, code1
+    ZA_AUTO2 edge                       ; the window's edge a cut is to
+    ZA_AUTO2 num                        ; muldiv's product, then quotient
+    ZA_AUTO1 den                        ; ... and its divisor
 .again
-    MOVW px, cx0 : MOVW pz, cy0 : JSR outcode : STA code0
-    MOVW px, cx1 : MOVW pz, cy1 : JSR outcode : STA code1
-    ORA code0 : BNE outside
+    OUTCODE cx1, cy1 : STA code1
+.again0                                 ; only point 0 moved
+    OUTCODE cx0, cy0 : STA code0
+    ORA code1 : BNE outside
     JMP accept
 .outside
     LDA code0 : AND code1 : BEQ crossing
@@ -999,14 +1047,14 @@ ZA_AUTO1 proj_shift
 .crossing
     LDA cx1 : CMP cx0 : BNE not_vertical
     LDA cx1+1 : CMP cx0+1 : BNE not_vertical
-    CLAMP cy0, VIEW_YMIN, VIEW_YMAX
-    CLAMP cy1, VIEW_YMIN, VIEW_YMAX
+    LDX #cy0 - clip_pts : JSR clamp_y
+    LDX #cy1 - clip_pts : JSR clamp_y
     JMP again
 .not_vertical
     LDA cy1 : CMP cy0 : BNE slanted
     LDA cy1+1 : CMP cy0+1 : BNE slanted
-    CLAMP cx0, VIEW_XMIN, VIEW_XMAX
-    CLAMP cx1, VIEW_XMIN, VIEW_XMAX
+    LDX #cx0 - clip_pts : JSR clamp_x
+    LDX #cx1 - clip_pts : JSR clamp_x
     JMP again
 .slanted
     LDA code0 : BNE cut
@@ -1018,35 +1066,36 @@ ZA_AUTO1 proj_shift
     STY clip_pts,X : ZA_INDEXEDBY 0..3
     DEX : BPL swap
     LDA code1 : STA code0
+    STZ code1                           ; point 1 is now the one inside
 .cut
+    \ the window's first edge that point 0 is outside: above, left, below,
+    \ right, by code0's bits from the bottom
     LSR code0 : BCC not_top
-    \ above: x0 += (ymin - y0)(x1 - x0) / (y1 - y0), y0 = ymin
-    LDA #LO(VIEW_YMIN) : SEC : SBC cy0 : STA mul_x : LDA #HI(VIEW_YMIN) : SBC cy0+1 : STA mul_x+1
-    JSR dx_dy
-    ADDW cx0, pq
-    LDA #LO(VIEW_YMIN) : STA cy0 : LDA #HI(VIEW_YMIN) : STA cy0+1
-    JMP again
+    LDA #VIEW_YMIN : BRA cut_y
 .not_top
     LSR code0 : BCC not_left
-    \ left: y0 += (xmin - x0)(y1 - y0) / (x1 - x0), x0 = xmin
-    LDA #LO(VIEW_XMIN) : SEC : SBC cx0 : STA mul_x : LDA #HI(VIEW_XMIN) : SBC cx0+1 : STA mul_x+1
-    JSR dy_dx
-    ADDW cy0, pq
-    LDA #LO(VIEW_XMIN) : STA cx0 : LDA #HI(VIEW_XMIN) : STA cx0+1
-    JMP again
+    LDX #LO(VIEW_XMIN) : LDA #HI(VIEW_XMIN) : BRA cut_x
 .not_left
     LSR code0 : BCC not_bottom
-    LDA #LO(VIEW_YMAX) : SEC : SBC cy0 : STA mul_x : LDA #HI(VIEW_YMAX) : SBC cy0+1 : STA mul_x+1
-    JSR dx_dy
-    ADDW cx0, pq
-    LDA #LO(VIEW_YMAX) : STA cy0 : LDA #HI(VIEW_YMAX) : STA cy0+1
-    JMP again
+    LDA #VIEW_YMAX : BRA cut_y
 .not_bottom
-    LDA #LO(VIEW_XMAX) : SEC : SBC cx0 : STA mul_x : LDA #HI(VIEW_XMAX) : SBC cx0+1 : STA mul_x+1
+    LDX #LO(VIEW_XMAX) : LDA #HI(VIEW_XMAX)
+.cut_x
+    \ y0 += (edge - x0)(y1 - y0) / (x1 - x0), x0 = edge
+    STX edge : STA edge+1
+    TXA : SEC : SBC cx0 : STA mul_x : LDA edge+1 : SBC cx0+1 : STA mul_x+1
     JSR dy_dx
     ADDW cy0, pq
-    LDA #LO(VIEW_XMAX) : STA cx0 : LDA #HI(VIEW_XMAX) : STA cx0+1
-    JMP again
+    MOVW cx0, edge
+    JMP again0
+.cut_y
+    \ x0 += (edge - y0)(x1 - x0) / (y1 - y0), y0 = edge
+    STA edge
+    SEC : SBC cy0 : STA mul_x : LDA #0 : SBC cy0+1 : STA mul_x+1
+    JSR dx_dy
+    ADDW cx0, pq
+    LDA edge : STA cy0 : STZ cy0+1
+    JMP again0
 \ dx_dy, dy_dx: pq = mul_x (x1 - x0) / (y1 - y0), or with x and y the
 \ other way: muls then divs, and on overflow the product's low word.
 .dx_dy
@@ -1056,7 +1105,8 @@ ZA_AUTO1 proj_shift
 .dy_dx
     LDA cy1 : SEC : SBC cy0 : STA mul_y : LDA cy1+1 : SBC cy0+1 : STA mul_y+1
     LDA cx1 : SEC : SBC cx0 : STA div_d : LDA cx1+1 : SBC cx0+1 : STA div_d+1
-.muldiv
+    BRA muldiv
+.by_words
     JSR smul16
     JSR sdiv32
     BCS overflow
@@ -1064,6 +1114,67 @@ ZA_AUTO1 proj_shift
     RTS
 .overflow
     MOVW pq, mul_p
+    RTS
+\ muldiv: mul_x mul_y / div_d as muls and divs make it. In nearly every
+\ cut all three are within a byte, and as |mul_x| <= |div_d| the quotient
+\ is too: then it's worked in bytes, a product and 8 steps of division.
+.muldiv
+    BYTE_MAG mul_x, by_words : MUL_SET
+    BYTE_MAG mul_y, by_words : TAY
+    MUL8 num : STA num+1
+    BYTE_MAG div_d, by_words : STA den
+    LDA num+1 : CMP den : BCS by_words  ; more than 8 bits
+    LDX #8
+.step
+    ASL num : ROL A : BCS step_sub      ; num's top bit into the remainder
+    CMP den : BCC step_next
+.step_sub
+    SBC den : INC num                   ; C = 1: a quotient bit
+.step_next
+    DEX : BNE step
+    \ truncated towards zero, so the sign follows
+    LDY #0
+    LDA mul_x+1 : EOR mul_y+1 : EOR div_d+1 : BPL signed
+    LDA #0 : SEC : SBC num : STA num
+    BEQ signed
+    DEY
+.signed
+    LDA num : STA pq : STY pq+1
+    RTS
+\ clamp_y, clamp_x: the word at clip_pts + X into the window's y or x
+\ range, below first (&0A2F8, &0A330).
+.clamp_y
+    LDA clip_pts+1,X : ZA_INDEXEDBY {2, 6}
+    BMI y_low : BNE y_high
+    LDA clip_pts,X : ZA_INDEXEDBY {2, 6}
+    CMP #VIEW_YMIN : BCC y_low
+    CMP #VIEW_YMAX + 1 : BCC clamped
+.y_high
+    LDA #VIEW_YMAX
+    BRA y_set
+.y_low
+    LDA #VIEW_YMIN
+.y_set
+    STA clip_pts,X : ZA_INDEXEDBY {2, 6}
+    STZ clip_pts+1,X : ZA_INDEXEDBY {2, 6}
+.clamped
+    RTS
+.clamp_x
+    LDA clip_pts+1,X : ZA_INDEXEDBY {0, 4}
+    BMI x_low : BEQ x_byte
+    CMP #HI(VIEW_XMAX + 1) : BNE x_high
+    LDA clip_pts,X : ZA_INDEXEDBY {0, 4}
+    CMP #LO(VIEW_XMAX + 1) : BCC clamped
+.x_high
+    LDA #LO(VIEW_XMAX) : STA clip_pts,X : ZA_INDEXEDBY {0, 4}
+    LDA #HI(VIEW_XMAX) : STA clip_pts+1,X : ZA_INDEXEDBY {0, 4}
+    RTS
+.x_byte
+    LDA clip_pts,X : ZA_INDEXEDBY {0, 4}
+    CMP #VIEW_XMIN : BCS clamped
+.x_low
+    LDA #VIEW_XMIN : STA clip_pts,X : ZA_INDEXEDBY {0, 4}
+    STZ clip_pts+1,X : ZA_INDEXEDBY {0, 4}
     RTS
 .accept
 IF DEFINED(SPIKE)
@@ -1096,26 +1207,4 @@ ENDIF
     MOVW line_x0, cx0 : LDA cy0 : STA line_y0
     MOVW line_x1, cx1 : LDA cy1 : STA line_y1
     JMP line_plot
-}
-
-\ outcode: A = the window's outcode of (px, pz): 8 right, 4 below, 2 left,
-\ 1 above (&0A174).
-.outcode
-{
-    ZA_AUTO1 code
-    STZ code
-    CMPS16 px, #VIEW_XMAX + 1 : BMI c1
-    LDA #8 : TSB code
-.c1
-    CMPS16 pz, #VIEW_YMAX + 1 : BMI c2
-    LDA #4 : TSB code
-.c2
-    CMPS16 px, #VIEW_XMIN : BPL c3
-    LDA #2 : TSB code
-.c3
-    CMPS16 pz, #VIEW_YMIN : BPL c4
-    LDA #1 : TSB code
-.c4
-    LDA code
-    RTS
 }
