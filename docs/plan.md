@@ -171,10 +171,10 @@ owns.
 | Main RAM &0E00-&417F | the draw phase's code, the main loop, the interrupts and the disc reader, the object table |
 | Shadow RAM &3000-&417F | the erase lists, read and written only by HAZEL's code with X set |
 | HAZEL | the multiply and reciprocal tables, the line drawer, the screen's clear, the vertex transforms |
-| ANDY | the logic's tables (arctan, per-type) and the messages: paged in with the world bank, it hides that bank's first 4K, so that 4K holds what the logic doesn't read |
+| ANDY | *as built:* the object fields only the logic reads, and the logic's variables (`src/vars.6502`): paged in with the logic's banks, over their first 4K |
 | Bank 4 | the shapes |
-| Bank 5 | the world: the logic's code, the list phase's rotation, the sine table |
-| Bank 6 | the rest of play's code (panel, text, sound effects, the ground dots) |
+| Bank 5 | the world: below &9000 the list phase (run with ANDY out), from &9000 the sine table and the logic that reads it (`world_render`'s, the flight, the handlers) |
+| Bank 6 | *as built:* the rest of the logic, from &9000 (the keys, collisions, the frame's end, the level change); below &9000, later, what play draws without ANDY (panel, text) |
 | Bank 7 | the loading area: flight's speech in flight; the docked screens and their clip when docked; the front end and the title outside play; the cockpit picture on its way to the screens |
 
 Each region gets a budget, `ASSERT`ed in the build (section 6), so a part

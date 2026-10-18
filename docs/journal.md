@@ -305,3 +305,50 @@ again into bank 6, which nothing uses yet, as the models turn.
 checks every byte. The tools that run the disc without booting now put
 it in the drive too (`tools/disc.mjs`). Real hardware is the test that
 counts here, as CE2 found: jsbeeb's 1770 is kinder than the chip.
+
+### The logic's inventory and framework
+
+Seven agents read the ST's logic range by range into an inventory
+(`docs/research/st-logic.md`, with `st-logic.json`). It lists every
+routine, variable, object field, table and quirk an exact transcription
+must keep, and corrects the earlier research in many places. Some
+corrections matter a great deal:
+- the post-frame tests settle the ram damage, the energy drain and the
+  ground scrape after the screen swap;
+- each energy tower becomes a group of six records;
+- the free-record stack holds every exploded object, not only missiles;
+- random8 adds its caller's d0, which at some call sites is a value left
+  over from earlier work: the gunsight's blit at the dots, the previous
+  slot's handler at a mine.
+
+Then the framework to check a transcription against the ST, routine by
+routine:
+- `tools/st_steps.py` dumps the state the logic keeps at every boundary
+  of the frame loop, and logs every random number call with its d0 and
+  its caller.
+- Each port variable's declaration carries `{ST address kind}`, and the
+  object table gains the fields only the logic reads, in ANDY.
+  `tools/stmap.py` reads the map.
+- `tools/logicrun.mjs` puts the ST's state at a routine's entry into the
+  port, runs the port's routine, and compares everything the map holds
+  with the ST's state at its exit.
+
+The first routines match the ST exactly in every variable and field over
+93 frames of flight: random8 and random32, animate_shapes (which now
+drives the disc's models too), and player_flight with its missile view
+and sight, the d0 it leaves included. A deliberately corrupted capture is
+caught.
+
+The memory map for the logic followed from the object table. The fields
+only the logic reads come to about 2.8K, which main RAM can't hold beside
+the drawing, so they and the logic's variables live in ANDY. ANDY shows
+over the first 4K of whichever bank is paged, so the logic's code lives
+from &9000 up in two banks: the world bank (5) for what reads the sine
+table, and a logic bank (6) for the rest. The list phase stays below
+&9000 and runs with ANDY paged out.
+
+The rest of the logic is with five agents: world_render's logic (the
+ground dots' respawning among it), the keys and commands, the object
+handlers, collisions with the frame's end and the post-frame tests, and
+the level change with the new game. Each writes captures for its own
+branches.
