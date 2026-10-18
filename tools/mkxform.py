@@ -389,7 +389,7 @@ emit("FOLD_SLACK = 16")
 setup_skipping("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start",
                folding=("tpos", "vertex.back", "vertex.folded"))
 vertex("xform", "xf", 3, ["px", "xf_y", "pz"], "xf_start", "vertex.back", skipping=True,
-       backs=["vertex.folded"], whole="xf_sum")
+       backs=["vertex.folded", "vertex.in_front"], whole="xf_sum")
 sums(2, "sc_acc", "sc_start", "the screen's x and y")
 setup_choosing("screen", "sc", "s8", 2, "sc_bmag", "sc_bsign", "sc_start", ["sc_x0q", "sc_y0q"],
                "vertex_far.screen")

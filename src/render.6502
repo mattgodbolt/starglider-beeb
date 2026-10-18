@@ -618,6 +618,26 @@ NEXT
     JMP edges_far
 .near
     JSR xform_setup                     ; (and the position folded in where it can be)
+    \ Folded, and wholly in front of the near plane (tz - the radius >=
+    \ NEAR_Z + FOLD_SLACK): no vertex is behind it, nor any edge clipped at
+    \ it, so vertex.in_front skips the tests and the camera-space position,
+    \ and each edge goes straight to the window's clip.
+    ASSERT LO(vertex.folded) <> LO(vertex.back)
+    LDA xform_back+1 : CMP #LO(vertex.folded) : BNE straddling
+    LDA tz+1 : BMI straddling
+    LDA tz : SEC : SBC sh_radius : TAX
+    LDA tz+1 : SBC sh_radius+1 : BMI straddling
+    BNE in_front
+    CPX #NEAR_Z + FOLD_SLACK : BCC straddling
+.in_front
+    LDA #LO(vertex.in_front) : STA xform_back+1
+    LDA #HI(vertex.in_front) : STA xform_back+2
+    LDA #LO(clip_line.ends) : LDX #HI(clip_line.ends)
+    BRA patched
+.straddling
+    LDA #LO(edge) : LDX #HI(edge)
+.patched
+    STA edges.call+1 : STX edges.call+2
     JMP edges
 }
 
@@ -627,8 +647,12 @@ NEXT
 \ object's offsets, its x on the screen is X0 + (128 / tz)(A_x - (tx /
 \ tz) A_z) k / 1024, and tx / tz is X0 / 128: so B_x = 128 (A_x - X0 A_z
 \ / 128) / tz, which is proj_x's, and the same for y.
-ZA_AUTO2 sc_x0, sc_y0
-ZA_AUTO2 sc_x0q, sc_y0q         ; ... and in quarters of a pixel
+ZA_AUTO 4, sc_0                 ; x, y
+sc_x0 = sc_0
+sc_y0 = sc_0 + 2
+ZA_AUTO 4, sc_0q                ; ... and in quarters of a pixel
+sc_x0q = sc_0q
+sc_y0q = sc_0q + 2
 ZA_AUTO1 far_inside             ; bit 7: no edge needs the window clip
 ZA_AUTO 12, sc_bmag             ; B: |B| words, two rows of x, y, z ...
 ZA_AUTO 6, sc_bsign             ; ... and signs
@@ -654,29 +678,48 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     CLC : RTS
 }
 
-\ CENTRE t, q, p: q = 512 t / pz (quarters) and p = 128 t / pz as proj_x
-\ has it. When 4 t fitted, p is q / 4 truncated, as proj_x truncates: but
-\ not below a depth of 256, where proj_x's overflow can come into q and
-\ not p.
-MACRO CENTRE t, q, p
-    MOVW px, t : JSR quarters : MOVW q, pq
+\ centre: the centre on the screen on axis X (0 x, 2 y): sc_0q,X = 512 t /
+\ pz (quarters) and sc_0,X = 128 t / pz as proj_x has it, t = tpos,X. When
+\ 4 t fitted, sc_0 is sc_0q / 4 truncated, as proj_x truncates: but not
+\ below a depth of 256, where proj_x's overflow can come into sc_0q and
+\ not sc_0.
+.centre
+{
+    ZA_AUTO1 axis
+    STX axis
+    LDA tpos,X : ZA_INDEXEDBY {0, 2}
+    STA px
+    LDA tpos+1,X : ZA_INDEXEDBY {0, 2}
+    STA px+1
+    JSR quarters
+    LDX axis
+    LDA pq : STA sc_0q,X : ZA_INDEXEDBY {0, 2}
+    LDA pq+1 : STA sc_0q+1,X : ZA_INDEXEDBY {0, 2}
     BCC by_proj
     LDA pz+1 : BEQ by_proj
     LDA pq+1 : BPL positive
-    LDA pq : CLC : ADC #3 : STA p
+    LDA pq : CLC : ADC #3 : STA sc_0,X : ZA_INDEXEDBY {0, 2}
     LDA pq+1 : ADC #0
-    CMP #&80 : ROR A : ROR p
-    CMP #&80 : ROR A : ROR p
-    STA p+1
-    BRA done
+    CMP #&80 : ROR A : ROR sc_0,X : ZA_INDEXEDBY {0, 2}
+    CMP #&80 : ROR A : ROR sc_0,X : ZA_INDEXEDBY {0, 2}
+    STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    RTS
 .positive
     LSR A : ROR pq : LSR A : ROR pq
-    STA p+1 : LDA pq : STA p
-    BRA done
+    STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    LDA pq : STA sc_0,X : ZA_INDEXEDBY {0, 2}
+    RTS
 .by_proj
-    MOVW px, t : JSR proj_x : MOVW p, pq
-.done
-ENDMACRO
+    LDA tpos,X : ZA_INDEXEDBY {0, 2}
+    STA px
+    LDA tpos+1,X : ZA_INDEXEDBY {0, 2}
+    STA px+1
+    JSR proj_x
+    LDX axis
+    LDA pq : STA sc_0,X : ZA_INDEXEDBY {0, 2}
+    LDA pq+1 : STA sc_0+1,X : ZA_INDEXEDBY {0, 2}
+    RTS
+}
 
 .far_setup
 {
@@ -684,8 +727,8 @@ ENDMACRO
     ZA_AUTO2 xs, d
     ZA_AUTO 3, d24
     MOVW pz, tz : JSR proj_z
-    CENTRE tx, sc_x0q, sc_x0
-    CENTRE ty, sc_y0q, sc_y0
+    LDX #0 : JSR centre
+    LDX #2 : JSR centre
     \ B by term (3 row + j): d = A_row - X0 A_z / 128 (X0 or Y0), the
     \ product rounded down as the 68000's shifts would, then 128 d / tz
     ZA_DISCARD sc_bmag, sc_bsign
@@ -1109,7 +1152,10 @@ ENDMACRO
     LDY vb : LDA vert_mark,Y : CMP stamp : BEQ b_done
     JSR vertex
 .b_done
-    JSR edge
+    LDX va : LDY vb
+.call
+    JSR edge                                ; patched (draw_shape): or clip_line.ends
+    ZA_CANCALL edge, clip_line.ends
     BRA each
 }
 
@@ -1166,7 +1212,15 @@ ENDMACRO
     ASSERT NEAR_Z < 256
     BMI behind
     BNE front
-    LDA pz : CMP #NEAR_Z : BCC behind
+    LDA pz : CMP #NEAR_Z : BCS front
+.behind
+    RTS
+.in_front
+    \ the same for an object wholly in front of the near plane: no z to
+    \ test, and no position for edge to keep
+    WORLD_SHIFT px
+    WORLD_SHIFT xf_y
+    WORLD_SHIFT pz
 .front
     JSR proj_z
     JSR proj_x
@@ -1178,7 +1232,6 @@ ENDMACRO
     LDA pq : CLC : ADC #LO(VIEW_CY) : STA v_sylo,Y
     LDA pq+1 : ADC #HI(VIEW_CY) : STA v_syhi,Y
     VERTEX_CODE : STA v_code,Y
-.behind
     RTS
 }
 
@@ -1367,8 +1420,8 @@ ENDMACRO
 ASSERT NEAR_Z > 0 AND NEAR_Z < 256
 .edge
 {
-    \ each end in front if z >= NEAR_Z, which its high byte mostly settles
-    LDX va : LDY vb
+    \ each end (X, Y: va, vb) in front if z >= NEAR_Z, which its high byte
+    \ mostly settles
     LDA v_zhi,X : BMI p_behind : BNE p_front
     LDA v_zlo,X : CMP #NEAR_Z : BCC p_behind
 .p_front

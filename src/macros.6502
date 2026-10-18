@@ -100,6 +100,14 @@ MACRO WORLD_FOLDED acc, lo, hi
     LDA acc : STA lo,Y
 ENDMACRO
 
+\ WORLD_SHIFT acc: WORLD_FOLDED kept in acc alone.
+MACRO WORLD_SHIFT acc
+    LDA acc+1
+    CMP #&80 : ROR A : ROR acc
+    CMP #&80 : ROR A : ROR acc
+    STA acc+1
+ENDMACRO
+
 \ BANK n: page sideways bank n. bank_now first, so an interrupt that pages
 \ a bank of its own and puts back bank_now never puts back the bank before.
 MACRO BANK n
