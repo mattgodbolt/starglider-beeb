@@ -1134,10 +1134,25 @@ ENDMACRO
     JMP xform_vertex                        ; which comes back to back or folded (fold's)
 .back
     \ the sums px, xf_y, pz into world units, the object's position added
+    \ (only where it can't be folded in, seldom: so in a loop)
+    LDX #4
+.add_t
+    LDA xf_sum+1,X : ZA_INDEXEDBY {0, 2, 4}
+    CMP #&80 : ROR A
+    ROR xf_sum,X : ZA_INDEXEDBY {0, 2, 4}
+    CMP #&80 : ROR A
+    ROR xf_sum,X : ZA_INDEXEDBY {0, 2, 4}
+    TAY
+    LDA xf_sum,X : ZA_INDEXEDBY {0, 2, 4}
+    CLC : ADC tpos,X : ZA_INDEXEDBY {0, 2, 4}
+    STA xf_sum,X : ZA_INDEXEDBY {0, 2, 4}
+    TYA : ADC tpos+1,X : ZA_INDEXEDBY {0, 2, 4}
+    STA xf_sum+1,X : ZA_INDEXEDBY {0, 2, 4}
+    DEX : DEX : BPL add_t
     LDY vtx
-    WORLD px, tx, v_xlo, v_xhi
-    WORLD xf_y, ty, v_ylo, v_yhi
-    WORLD pz, tz, v_zlo, v_zhi
+    LDA px : STA v_xlo,Y : LDA px+1 : STA v_xhi,Y
+    LDA xf_y : STA v_ylo,Y : LDA xf_y+1 : STA v_yhi,Y
+    LDA pz : STA v_zlo,Y : LDA pz+1 : STA v_zhi,Y
     BRA tested
 .folded
     \ the same, the object's position in them from the start

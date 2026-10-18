@@ -253,9 +253,10 @@ def row_sum(acc, i):
     return acc[i] if isinstance(acc, (list, tuple)) else f"{acc}+{2 * i}"
 
 
-def vertex(name, prefix, rows, acc, start, back, skipping=False, backs=None):
+def vertex(name, prefix, rows, acc, start, back, skipping=False, backs=None, whole=None):
     """With backs, the jump back is patched (name_back), to back or one of
-    backs."""
+    backs. acc names the sums: a variable of a word a row, or each row's,
+    which are then parts of the variable whole."""
     sums_named = ", ".join(row_sum(acc, i) for i in range(rows))
     emit(f"\\ {name}_vertex: {sums_named} = the matrix by (xf_u - 128), / 256. A term is the")
     emit("\\ high byte by u (X:xf_plo) and the low byte by u, its high byte, added in")
@@ -275,7 +276,7 @@ def vertex(name, prefix, rows, acc, start, back, skipping=False, backs=None):
     if skipping:
         # Every row's first term that's done writes the row, so the sums'
         # old values are dead here, whatever skips Baron can see.
-        emit(f"    ZA_DISCARD {acc if isinstance(acc, str) else sums_named}")
+        emit(f"    ZA_DISCARD {acc if isinstance(acc, str) else whole}")
         for i in range(rows):
             r = f"{prefix}row{i}"
             a = row_sum(acc, i)
@@ -379,18 +380,16 @@ def sums(rows, acc, start, what):
     emit()
 
 
-# The xform's sums are x', y' and z' in quarters of a world unit: x' and z'
-# are the projection's px and pz (render.6502), which vertex shifts in
-# place into world units.
-emit("ZA_AUTO2 xf_y                 ; y', in quarters (x' and z' are px and pz)")
-emit("ZA_AUTO 6, xf_start           ; their starting values")
+# The xform's sums are x', y' and z' in quarters of a world unit: px, xf_y
+# and pz (zp.6502), which vertex shifts in place into world units.
+emit("ZA_AUTO 6, xf_start           ; the sums' starting values")
 emit()
 emit("FOLD_MAX = &7FFF DIV 4             ; (fold's)")
 emit("FOLD_SLACK = 16")
 setup_skipping("xform", "xf", 3, "xf_amag", "xf_asign", "xf_start",
                folding=("tpos", "vertex.back", "vertex.folded"))
 vertex("xform", "xf", 3, ["px", "xf_y", "pz"], "xf_start", "vertex.back", skipping=True,
-       backs=["vertex.folded"])
+       backs=["vertex.folded"], whole="xf_sum")
 sums(2, "sc_acc", "sc_start", "the screen's x and y")
 setup_choosing("screen", "sc", "s8", 2, "sc_bmag", "sc_bsign", "sc_start", ["sc_x0q", "sc_y0q"],
                "vertex_far.screen")

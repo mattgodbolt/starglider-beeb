@@ -96,7 +96,13 @@ cx0 = clip_pts
 cy0 = clip_pts + 2
 cx1 = clip_pts + 4
 cy1 = clip_pts + 6
-ZA_AUTO2 px, pz, pq         ; project's operands
+\ project's operands, px and pz, are two of the vertex transform's sums
+\ (xform.6502), x', y' and z' in turn
+ZA_AUTO 6, xf_sum
+px = xf_sum
+xf_y = xf_sum + 2
+pz = xf_sum + 4
+ZA_AUTO2 pq
 
 \ The line drawer (line.6502). Its ends are the clip's points (y's low
 \ bytes), so a line the clip accepts is already where the drawer reads it.
