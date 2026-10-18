@@ -38,7 +38,9 @@ NEXT
     JSR build_matrix                    ; a full build: its sines are wanted below
     \ The ground objects' constants (ground_matrix): their pitch and roll
     \ are the camera's.
-    FMUL build_matrix.m_s1, build_matrix.m_c3
+    MOVW mul_x, build_matrix.m_s1
+    MOVW mul_y, build_matrix.m_c3
+    JSR fmul_trig
     MOVW kconst+2, mul_r
     MOVW kconst, build_matrix.m_d6
     MOVW kconst+4, build_matrix.m_c1
@@ -93,41 +95,6 @@ NEXT
 .cam_kept   SKIP 18
 .kmag_kept  SKIP 10
 .ksign_kept SKIP 5
-
-\ fmul_trig: fmul16 for build_matrix (render.6502), whose factors are
-\ sines, cosines and their products: a factor of 0 or +-16384 makes the
-\ product 0, the other or its negation, exactly, without the multiply. A
-\ level pitch, its sine 0 and its cosine 16384, gives most of them one.
-.fmul_trig
-{
-    LDA mul_y : BNE x_test
-    LDA mul_y+1 : BEQ zero
-    CMP #HI(16384) : BEQ by_x
-    CMP #HI(-16384) : BEQ by_neg_x
-.x_test
-    LDA mul_x : BNE full
-    LDA mul_x+1 : BEQ zero
-    CMP #HI(16384) : BEQ by_y
-    CMP #HI(-16384) : BNE full
-    LDA #0 : SEC : SBC mul_y : STA mul_r
-    LDA #0 : SBC mul_y+1 : STA mul_r+1
-    RTS
-.full
-    JMP fmul16
-.by_y
-    MOVW mul_r, mul_y
-    RTS
-.by_neg_x
-    LDA #0 : SEC : SBC mul_x : STA mul_r
-    LDA #0 : SBC mul_x+1 : STA mul_r+1
-    RTS
-.by_x
-    MOVW mul_r, mul_x
-    RTS
-.zero
-    STZ mul_r : STZ mul_r+1
-    RTS
-}
 
 \ ---------------------------------------------------------------------------
 \ coarse_list (&05750): every object within &2020 of the player in z, or
@@ -268,16 +235,35 @@ MACRO RELEVANT yes
 .no
 ENDMACRO
 
+\ OFFSET: rot_d, the offset from the player of the object in slot X.
+MACRO OFFSET
+    LDA ob_x_lo,X : SEC : SBC pl_x : STA rot_d
+    LDA ob_x_hi,X : SBC pl_x+1 : STA rot_d+1
+    LDA ob_y_lo,X : SEC : SBC pl_y : STA rot_d+2
+    LDA ob_y_hi,X : SBC pl_y+1 : STA rot_d+3
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA rot_d+4
+    LDA ob_z_hi,X : SBC pl_z+1 : STA rot_d+5
+ENDMACRO
+
 \ rotate_lists (&057B8): the coarse list read from its top, each object
 \ rotated into camera space (&04092) and stored; the near list (all but
 \ the exploding) and the draw list (in front, within the view's pyramid),
 \ pushed in that order.
 .rotate_lists
 {
-    ZA_AUTO1 list_i, as_is, nears, draws
+    ZA_AUTO1 list_i, nears, draws
     ZA_AUTO2 z2, t16
     STZ nears : STZ draws
-    LDA rot_identity : STA as_is
+    \ each object's way, by the camera's matrix: unrotated if it's the
+    \ identity, exactly if it has no products (as cheap), and otherwise
+    \ approximately first (decision 11)
+    LDA #LO(approximately) : LDY #HI(approximately)
+    BIT rot_exactly : BPL way
+    LDA #LO(offset_exactly) : LDY #HI(offset_exactly)
+    BIT rot_identity : BPL way
+    LDA #LO(unrotated) : LDY #HI(unrotated)
+.way
+    STA live+1 : STY live+2
     LDX coarse_n : BNE each
     STZ near_n : STZ draw_n
     RTS
@@ -286,6 +272,9 @@ ENDMACRO
     LDA coarse_slots,X : STA slot : TAX
     LDA ob_type,X : BNE live
     JMP next
+.live
+    JMP approximately                       ; patched: the camera's way
+    ZA_CANJUMP unrotated, offset_exactly, approximately
 .unrotated
     \ the identity: camera space is the offset itself
     LDA ob_x_lo,X : SEC : SBC pl_x : STA rot_acc : STA ob_cx_lo,X
@@ -296,17 +285,11 @@ ENDMACRO
     LDA ob_z_hi,X : SBC pl_z+1 : STA rot_acc+5 : STA ob_cz_hi,X
     LDA #1 : STA ob_exact,X
     JMP stored
-.live
-    BIT as_is : BMI unrotated
-    LDA ob_x_lo,X : SEC : SBC pl_x : STA rot_d
-    LDA ob_x_hi,X : SBC pl_x+1 : STA rot_d+1
-    LDA ob_y_lo,X : SEC : SBC pl_y : STA rot_d+2
-    LDA ob_y_hi,X : SBC pl_y+1 : STA rot_d+3
-    LDA ob_z_lo,X : SEC : SBC pl_z : STA rot_d+4
-    LDA ob_z_hi,X : SBC pl_z+1 : STA rot_d+5
-    BIT rot_exactly : BMI exactly           ; no products: as cheap as approximately
-    JSR rotate_approx
-    JMP relevance
+.approximately
+    OFFSET
+    JMP rotate_approx                       ; (on to relevance)
+.offset_exactly
+    OFFSET
 .exactly
     JSR rotate_exact
     LDX slot
@@ -364,6 +347,42 @@ ENDMACRO
     INC nears
 .approximated
     JMP next
+}
+
+\ ---------------------------------------------------------------------------
+\ fmul_trig: fmul16 for build_matrix (render.6502), whose factors are
+\ sines, cosines and their products: a factor of 0 or +-16384 makes the
+\ product 0, the other or its negation, exactly, without the multiply. A
+\ level pitch, its sine 0 and its cosine 16384, gives most of them one.
+.fmul_trig
+{
+    LDA mul_y : BNE x_test
+    LDA mul_y+1 : BEQ zero
+    CMP #HI(16384) : BEQ by_x
+    CMP #HI(-16384) : BEQ by_neg_x
+.x_test
+    LDA mul_x : BNE full
+    LDA mul_x+1 : BEQ zero
+    CMP #HI(16384) : BEQ by_y
+    CMP #HI(-16384) : BNE full
+    LDA #0 : SEC : SBC mul_y : STA mul_r
+    LDA #0 : SBC mul_y+1 : STA mul_r+1
+    RTS
+.full
+    JMP fmul16
+.by_y
+    MOVW mul_r, mul_y
+    RTS
+.by_neg_x
+    LDA #0 : SEC : SBC mul_x : STA mul_r
+    LDA #0 : SBC mul_x+1 : STA mul_r+1
+    RTS
+.by_x
+    MOVW mul_r, mul_x
+    RTS
+.zero
+    STZ mul_r : STZ mul_r+1
+    RTS
 }
 
 \ ---------------------------------------------------------------------------

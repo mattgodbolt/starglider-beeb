@@ -560,7 +560,8 @@ emit()
 
 emit("""\\ rotate_approx: rot_acc's x' and z' = cam rot_d approximately, from D's
 \\ high bytes, each column's in Y; y' as it was (decision 21). Column y's
-\\ products are in the rows' constants while its D_hi is 0 or -1.
+\\ products are in the rows' constants while its D_hi is 0 or -1. Jumped
+\\ to by rotate_lists, and on to its relevance test at the end.
 .rotate_approx
     LDA rot_d+3 : BEQ rap_y0
     CMP #&FF : BEQ rap_y1
@@ -616,5 +617,5 @@ for j in [SKIP_COLUMN] + STUB_COLUMNS:
         if j != SKIP_COLUMN:
             units("rap", e, j, acc)
 emit(".rap_done")
-emit("    RTS")
+emit("    JMP rotate_lists.relevance           ; (its one caller jumps in, not calls)")
 print("\n".join(out))
