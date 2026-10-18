@@ -9,10 +9,11 @@ the high nibble), and ended by SPEECH_END.
     mkspeech.py PRG SFX.JSON OUTDIR [--wav DIR]
 
 writes OUTDIR/speech.6502 (the part of the clips the logic bank's own
-first 4K holds), OUTDIR/speech_clips.6502 (each clip's start, for the
-player in bank 7, then the part its window section's tail holds),
-OUTDIR/speech_a.bin, speech_b.bin and speech_c.bin (the three parts), and
-OUTDIR/speech.json (each clip's levels, for tools/speechcheck.mjs). The clips run one after another
+first 4K holds), OUTDIR/speech_clips.6502 (each clip's start, its area's
+bank and address, for the player in main RAM), OUTDIR/speech_a.bin,
+speech_b.bin and speech_c.bin (the three parts; bank 7's window section's
+tail holds C), and OUTDIR/speech.json (each clip's levels, for
+tools/speechcheck.mjs). The clips run one after another
 through the areas, A, B, then C, crossing from one to the next where it
 fills: A from &8008 (past the bank's ROM header, zeros), B from the effects'
 tables' end (SFX.JSON's bytes) to ANDY's top, C the rest. --wav also
@@ -114,8 +115,8 @@ def main():
     lines = head + [f"ASSERT SPEECH_A = &{AREA_A:04X} AND SPEECH_END = &{SPEECH_END:02X}",
                     f"ASSERT SPEECH_RATE = {RATE}",
                     ".speech_b", '    INCBIN "speech_b.bin"', "ASSERT P% = ANDY_TOP"]
-    table = head + ["\\ by clip (sample_clip, from 1): &80 if it starts in the logic bank's",
-                    "\\ area, and its address", ".speech_far"]
+    table = head + ["\\ by clip (sample_clip, from 1): the bank of the area it starts in, and",
+                    "\\ its address", ".speech_bank"]
     at, area_of, addr_of = 0, [], []
     for c in clips:
         area = 0 if at < AREA_A_BYTES else 1 if at < AREA_A_BYTES + area_b else 2
@@ -124,10 +125,9 @@ def main():
         addr_of.append(f"{starts[area]} + {off}")
         c.update(area=area, offset=off)
         at += len(c["bytes"])
-    table += ["    EQUB " + ", ".join("&80" if a == 1 else "0" for a in area_of),
+    table += ["    EQUB " + ", ".join("BANK_LOGIC" if a == 1 else "BANK_PIC" for a in area_of),
               ".speech_lo", "    EQUB " + ", ".join(f"LO({a})" for a in addr_of),
-              ".speech_hi", "    EQUB " + ", ".join(f"HI({a})" for a in addr_of),
-              ".speech_c", '    INCBIN "speech_c.bin"']
+              ".speech_hi", "    EQUB " + ", ".join(f"HI({a})" for a in addr_of)]
     out = Path(args.outdir)
     (out / "speech_a.bin").write_bytes(parts[0])
     (out / "speech_b.bin").write_bytes(parts[1])
