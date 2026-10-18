@@ -57,6 +57,21 @@ ZA_AUTO 9, xf_asign         ; ... and signs (bit 7), by term (mkxform.py)
 ZA_AUTO 6, objc_mag         ; the camera in the object's space: |c| words ...
 ZA_AUTO 3, objc_sign        ; ... and signs
 
+\ CLAMP v, lo, hi: the word v into lo..hi, below first (player_flight's
+\ accumulators, as the ST clamps them).
+MACRO CLAMP v, lo, hi
+    CMPS16 v, #lo : BPL not_low
+    LDA #LO(lo) : STA v : LDA #HI(lo) : STA v+1
+    BRA done
+.not_low
+    SEC : LDA #LO(hi) : SBC v : LDA #HI(hi) : SBC v+1
+    BVC ok : EOR #&80
+.ok
+    BPL done
+    LDA #LO(hi) : STA v : LDA #HI(hi) : STA v+1
+.done
+ENDMACRO
+
 MACRO WORLD acc, t, out
     LDA acc+1
     CMP #&80 : ROR A : ROR acc
