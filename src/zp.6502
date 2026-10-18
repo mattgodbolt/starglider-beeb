@@ -95,9 +95,13 @@ cx1 = clip_pts + 4
 cy1 = clip_pts + 6
 ZA_AUTO2 px, pz, pq         ; project's operands
 
-\ The line drawer (line.6502)
-ZA_AUTO2 line_x0, line_x1, line_scr
-ZA_AUTO1 line_y0, line_y1
+\ The line drawer (line.6502). Its ends are the clip's points (y's low
+\ bytes), so a line the clip accepts is already where the drawer reads it.
+line_x0 = cx0
+line_y0 = cy0
+line_x1 = cx1
+line_y1 = cy1
+ZA_AUTO2 line_scr
 ZA_AUTO1 line_dx, line_dy, line_cnt, line_ls, line_errs, line_err
 
 \ The workspace, in the OS's pages, up to the disc reader's NMI page.
