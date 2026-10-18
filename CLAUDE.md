@@ -146,6 +146,11 @@ says how):
   a difference in whichever routine it falls in. Captures crawl, and more
   slowly with several running at once, so a script's waits count frames
   more than seconds: run them one at a time.
+  `st_panel.py run tests/st/panel_X.txt build/stpanel/X ...` captures the
+  state the panel draws from and the screen the ST makes, each frame, for
+  `node tools/panelcheck.mjs --st build/stpanel/X/panel.json` to check its
+  model of the ST's panel against (give Hatari and EmuTOS absolute paths
+  from a worktree).
 - **The Spectrum 128K**: `tools/zx.py`, nm's harness on SkoolKit.
 - **The CPC**: `tools/cpc_emu.py` on the Caprice32 in `../caprice32`.
 - **The C64**: `tools/c64_unfreeze.py` and `tools/c64_run.py` on py65.

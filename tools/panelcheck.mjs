@@ -242,7 +242,7 @@ function stState(r, steps) {
 // at collide), the docked menu (post_frame, at end), a mine's (the mine
 // point's last mine).
 function flagsOf(fr, steps) {
-    const top = regionsAt(fr, "top");
+    const top = regionsAt(fr, "top") ?? regionsAt(fr, "wave");    // (st_panel.py's captures: the panel's own point)
     const collide = regionsAt(fr, "collide");
     const end = regionsAt(fr, "end");
     if (!top || !collide || !end) return null;
@@ -378,6 +378,161 @@ class Model {
     }
 }
 
+// --- the model in the ST's own colours ---
+// stImage: the ST's screen as its panel leaves it, in its colours (its
+// planes ORed and cleared as its code does, on its picture, RESULT.TRA),
+// for the state r (the panel's point) and the flags f; and the pixels the
+// panel decides there (cmp): the rows the 3D never reaches (0-9, 131-199:
+// row 130 the missile view blacks) and the cells of the texts it prints
+// opaque after its 3D.
+const tra = fs.readFileSync("build/st/disc/RESULT.TRA");
+const picture = new Uint8Array(W * H);
+for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) picture[y * W + x] = (tra[0x90 + y * 160 + (x >> 1)] >> (x & 1 ? 0 : 4)) & 15;
+const ST_PALETTE = [0x000, 0x700, 0x070, 0x760, 0x730, 0x737, 0x077, 0x056, 0x034, 0x014, 0x003, 0x066, 0x045, 0x024, 0x002, 0x777].map((w) =>
+    [(w >> 8) & 7, (w >> 4) & 7, w & 7].map((c) => Math.round((c * 255) / 7)),
+);
+function pngST(file, pix) {
+    const save = bandsOf.splice(0);
+    bandsOf.push([0, ST_PALETTE]);
+    png(file, pix);
+    bandsOf.splice(0, bandsOf.length, ...save);
+}
+function stImage(r, steps, f) {
+    const s = stState(r, steps);
+    const v = r.vars;
+    const px = Uint8Array.from(picture);
+    const set = (x, y, c) => (px[y * W + x] = c);
+    const or = (x, y, c) => (px[y * W + x] |= c);
+    const and = (x, y, c) => (px[y * W + x] &= c);
+    const cmp = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) if (y <= 9 || y >= 131) for (let x = 0; x < W; x++) cmp[y * W + x] = 1;
+    const cell = (x, y, ch, c, mark) => {
+        const g = glyphOf(ch);
+        for (let rr = 0; rr < 8; rr++)
+            for (let i = 0; i < 8; i++) {
+                set(x + i, y + rr, (g[rr] >> (7 - i)) & 1 ? c : 0);
+                if (mark) cmp[(y + rr) * W + x + i] = 1;
+            }
+    };
+    const text = (x, y, str, c, mark) => [...str].forEach((ch, i) => cell(x + 8 * i, y, ch, c, mark));
+    const P = panel.places;
+    // waveforms, from the ST's own steps ($266, $268), then the energy's dimming ($27E)
+    const wl = (v.readUInt16BE(0x266) + 1) & 15;
+    const wr = (v.readUInt16BE(0x268) + 1) & 15;
+    for (const [k, [x0, y0]] of [[panel.wave_order.left[wl], P.wave_left], [panel.wave_order.right[wr], P.wave_right]])
+        for (let rr = 0; rr < 8; rr++) for (let i = 0; i < 16; i++) set(x0 + i, y0 + rr, (panel.waves[k][rr][i >> 2] >> (3 - (i & 3))) & 1 ? 3 : 0);
+    let dim = v.readUInt16BE(0x27e);
+    if ((s.frameCount & 2) === 0) dim ^= 2;
+    // altitude: rows 198-170 cleared, d of plane 0 up from 198, 28 - d of plane 1 (and 2 warning)
+    const d = ((-s.y & 0xffff) >> 6) & 31;
+    for (let y = 170; y <= 198; y++) for (const x of panel.altitude_x) set(x, y, 0);
+    for (let k = 0; k < d; k++) for (const x of panel.altitude_x) or(x, 198 - k, 1);
+    const warn = d < 8 && (s.frameCount & 4) === 0;
+    for (let k = d; k < 28; k++) for (const x of panel.altitude_x) or(x, 198 - k, warn ? 6 : 2);
+    // speed: plane 1 set on d rows up from 198, cleared on 31 - d above
+    const sp = (s.speed >> 4) & 31;
+    for (let k = 0; k < 31; k++) for (const x of panel.speed_x) (k < sp ? or : and)(x, 198 - k, k < sp ? 2 : ~2);
+    // bars: cleared, then planes 0 and 2 (energy's 1 and 3 dimmed)
+    const bar = (value, [x0, y0], c) => {
+        const len = value ? (value >> 11) + 1 : 0;
+        for (let y = y0; y < y0 + 4; y++) for (let i = 0; i < 32; i++) set(x0 + i, y, i < len ? c : 0);
+    };
+    bar(s.shields, P.shields, 5);
+    const elen = s.energy ? (s.energy >> 11) + 1 : 0;
+    bar(s.energy, P.energy, elen <= 6 && dim ? 10 : 5);
+    bar(s.laser, P.laser, 5);
+    // ticks: planes 0 and 2 of x 80-113 and 206-239 cleared, plane 0 at the ticks
+    const t = ((s.roll >> 1) + 16) & 31;
+    for (let y = 170; y <= 173; y++)
+        for (const [x0, tx] of [[80, 82 + t], [206, 206 + t]]) {
+            for (let x = x0; x <= x0 + 33; x++) and(x, y, ~5);
+            or(tx, y, 1);
+        }
+    // the scanner
+    for (let y = 148; y <= 180; y++) for (let x = 144; x <= 175; x++) set(x, y, 0);
+    set(160, 164, 15);
+    for (const o of s.near) {
+        if (!(o.cx > -0x2000 && o.cx < 0x2000 && o.cz > -0x2000 && o.cz < 0x2000)) continue;
+        or(160 + (o.cx >> 9), 164 + (-o.cz >> 9), o.type === 11 ? s.beam : panel.types[o.type]);
+    }
+    // the numbers (score and kill: normal view; the rest with a near list)
+    const hex = (val, k) => val.toString(16).toUpperCase().padStart(k, "0");
+    if (!s.mvRender) {
+        text(P.score[0], P.score[1], s.score.map((b) => hex(b, 2)).join(""), 3);
+        text(P.kill[0], P.kill[1], hex(f.kill, 4), 4);
+    }
+    if (s.near.length) {
+        text(P.sector_x[0], P.sector_x[1], String(Math.floor(s.x / 0x290) & 0xff).padStart(2, "0"), 4);
+        text(P.sector_z[0], P.sector_z[1], String(Math.floor(s.z / 0x290) & 0xff).padStart(2, "0"), 3);
+        const deg = Math.trunc(((s.heading & 0xfff) << 5) / 365) & 0x1ff;
+        text(P.heading[0], P.heading[1], String(deg).padEnd(4, " "), 1);
+        cell(P.heading[0] + 32, P.heading[1], deg >= 315 || deg < 45 ? "N" : deg < 135 ? "E" : deg < 225 ? "S" : "W", 2);
+        text(P.missiles[0], P.missiles[1], String.fromCharCode(48 + (s.missiles & 15)), 4);
+    }
+    // the texts: those printed before the 3D (DOCKING, LAUNCHING, the
+    // countdown) and MISSILE VIEW drawn but not compared, as the 3D crosses
+    // them in the ST's; refuelling's, then the logic's in the current colour
+    const S = panel.strings;
+    const shown = [];
+    const cur = s.refuelling ? 15 : s.near.length ? 4 : f.world & 2 ? 15 : 3;
+    // (the view cleared as the ST clears it, but in the missile view, whose window is the picture)
+    if (!s.mvRender) for (let y = 10; y <= 128; y++) for (let x = 16; x <= 303; x++) set(x, y, 0);
+    if (f.world & 1) text(...P.docking, S.docking, 15, false);
+    if (f.world & 2) text(...P.launching, S.launching, 15, false);
+    if (s.mvRender && s.life >= 0x0f && s.iris >= 0x11) text(...P.missile_view, S.missile_view, 15, false);
+    if (f.world & 8 && (s.life >= 0x38 || (s.frameCount & 4) === 0)) text(...P.countdown, String(s.life - 0x0f), 4, false);
+    if (!s.mvRender && s.refuelling) text(...P.refuelling, S.refuelling, 15, true), shown.push("REFUELLING");
+    if (f.mine) text(...P.mine, f.mine === 2 ? S.mine_exploded : S.mine_detected, cur, true), shown.push("mine");
+    if (f.level) text(...P.level, S.level + String(s.level), cur, true), text(...P.manual, S.manual, cur, true), shown.push("LEVEL");
+    if (f.dock)
+        text(...P.replenished, S.replenished, cur, true), text(...P.press_space, S.press_space, cur, true),
+            text(...P.or_interrogate, S.or_interrogate, cur, true), shown.push("docked menu");
+    return { px, cmp, shown };
+}
+
+// --st PANEL.json (tools/st_panel.py's capture): the model against the
+// screens the ST made, frame by frame, where the panel decides them.
+const stCapture = opt("--st", null);
+if (stCapture) {
+    const cap = JSON.parse(fs.readFileSync(stCapture, "utf8"));
+    const stScreen = (hex) => {
+        const b = Buffer.from(hex, "hex");
+        const out = new Uint8Array(W * H);
+        for (let y = 0; y < H; y++)
+            for (let x = 0; x < W; x++) {
+                const o = y * 160 + (x >> 4) * 8;
+                let c = 0;
+                for (let p = 0; p < 4; p++) c |= ((b.readUInt16BE(o + 2 * p) >> (15 - (x & 15))) & 1) << p;
+                out[y * W + x] = c;
+            }
+        return out;
+    };
+    let bad = 0;
+    let n = 0;
+    const kinds = new Map();
+    for (const fr of cap.frames) {
+        const f = flagsOf(fr, cap);
+        const { px, cmp, shown } = stImage(regionsAt(fr, "wave"), cap, f);
+        for (const k of shown) kinds.set(k, (kinds.get(k) ?? 0) + 1);
+        const got = stScreen(fr.screen);
+        let diff = 0;
+        for (let i = 0; i < W * H; i++)
+            if (cmp[i] && got[i] !== px[i]) {
+                if (diff < 4 && bad < show) say(`  frame ${n}: (${i % W},${Math.floor(i / W)}) ST ${got[i]} model ${px[i]}`);
+                diff++;
+            }
+        if (diff) bad++;
+        if (pngDir && at.has(`st:${n}`)) {
+            const name = path.basename(path.dirname(stCapture));
+            pngST(path.join(pngDir, `st_${name}_${n}.png`), got);
+            pngST(path.join(pngDir, `st_${name}_${n}_model.png`), px);
+        }
+        n++;
+    }
+    say(`panelcheck --st ${stCapture}: ${n} frames of the ST's, ${bad} differ from the model; texts: ${[...kinds].map(([k, c]) => `${k} ${c}`).join(", ") || "none"}`);
+    process.exit(bad ? 1 : 0);
+}
+
 // --- each capture ---
 const put = (steps) => stPut(map, steps, ram);
 let failed = 0;
@@ -395,13 +550,21 @@ for (const file of captures) {
     const examples = [];
     for (let n = 0; n < steps.frames.length; n++) {
         const fr = steps.frames[n];
-        const point = fr.points.lists ? "lists" : fr.points.render ? "render" : null;
+        const point = fr.points.lists ? "lists" : fr.points.render ? "render" : fr.points.wave ? "wave" : null;
         const flags = point && flagsOf(fr, steps);
         if (!flags) continue;
         const r = regionsAt(fr, point);
         putState(r);
         const st = stState(r, steps);
         const b = frames & 1;
+        if (!frames) {
+            // the ST's own panel state as the capture found it ($266, $268,
+            // $27E), in the port's and the model's, so they're in step with it
+            const v = r.vars;
+            model.wl = ram[need("wave_left_n")] = v[0x267] & 15;
+            model.wr = ram[need("wave_right_n")] = v[0x269] & 15;
+            model.dim = ram[need("energy_dim")] = v[0x27f] & 2;
+        }
         ram[need("world_text")] = flags.world;
         ram[need("kill_shown")] = flags.kill & 0xff;
         ram[need("kill_shown") + 1] = flags.kill >> 8;
@@ -433,7 +596,7 @@ for (const file of captures) {
         if (st.energy && (st.energy >> 11) < 6) saw("energy low");
         if (((-st.y & 0xffff) >> 6 & 31) < 8) saw("altitude low");
         if (((st.speed >> 4) & 31) >= 29) saw("speed top");
-        if (trace) say(`  ${name} ${n} screen ${b}: ${cycles[cycles.length - 1]} cycles, near ${st.near.length}, dots ${dots.length}, flags ${JSON.stringify(flags)}`);
+        if (trace) say(`  ${name} ${n} screen ${b}: ${cycles[cycles.length - 1]} cycles, near ${st.near.length}, dots ${dots.length} (colours ${[...new Set(dots.map((o) => (o.type === 11 ? "b" : panel.types[o.type])))].join(" ")}), flags ${JSON.stringify(flags)}`);
         const got = screenOf(b);
         frames++;
         let diff = 0;
@@ -447,6 +610,7 @@ for (const file of captures) {
         if (at.has(`${name}:${n}`) && pngDir) {
             png(path.join(pngDir, `${name}_${n}${colours ? "_" + colours : ""}.png`), got);
             png(path.join(pngDir, `${name}_${n}_model.png`), want);
+            pngST(path.join(pngDir, `${name}_${n}_st.png`), stImage(r, steps, flags).px);
         }
     }
     allCycles.push(...cycles);

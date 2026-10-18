@@ -181,9 +181,21 @@ ZA_AUTO1 blit_mid, blit_next
     LSR A : BCC erase
     BLIT_COLUMNS 1
 .opaque
+    LDA psplit : CMP #8 : BEQ one_row
     BLIT_COLUMNS 0
 .erase
     BLIT_COLUMNS 2
+.one_row
+    \ (most cells: opaque, in one character row, each column's eight rows
+    \ in a run)
+    LDX ncols
+    LDY #0
+.run
+    FOR r = 0..7
+        LDA (pg),Y : AND pcol : STA (pp),Y : INY
+    NEXT
+    DEX : BNE run
+    RTS
 }
 
 \ print_cell: glyph A (preserving X) in the cell at pp, by pmode, in pcol.
@@ -267,10 +279,7 @@ ZA_AUTO1 blit_mid, blit_next
 .waves
 {
     LDA PC_WAVE : STA pcol
-    STZ pmode
-    LDA #4 : STA ncols
     ASSERT P_WAVE_LEFT_Y = P_WAVE_RIGHT_Y AND (P_WAVE_LEFT_X OR P_WAVE_RIGHT_X) MOD 4 = 0
-    LDA #(8 - P_WAVE_LEFT_Y MOD 8) : STA psplit
     LDA wave_left_n : INC A : AND #15 : STA wave_left_n
     TAX : LDA wave_left,X
     LDX #LO(scr(P_WAVE_LEFT_X, P_WAVE_LEFT_Y)) : LDY #HI(scr(P_WAVE_LEFT_X, P_WAVE_LEFT_Y))
@@ -279,13 +288,26 @@ ZA_AUTO1 blit_mid, blit_next
     TAX : LDA wave_right,X
     LDX #LO(scr(P_WAVE_RIGHT_X, P_WAVE_RIGHT_Y)) : LDY #HI(scr(P_WAVE_RIGHT_X, P_WAVE_RIGHT_Y))
 .one
-    \ frame A to (X, Y)
+    \ frame A to (X, Y): each column's rows in a run, the first five in
+    \ the waveforms' character row, the last three in the next
     STX pp : STY pp+1
     STZ pg+1
     ASL A : ASL A : ASL A : ASL A : ROL pg+1 : ASL A : ROL pg+1
     CLC : ADC #LO(wave_frames) : STA pg
     LDA pg+1 : ADC #HI(wave_frames) : STA pg+1
-    JMP blit
+    TXA : CLC : ADC #LO(SCREEN_ROW - 8) : STA pr
+    TYA : ADC #HI(SCREEN_ROW - 8) : STA pr+1
+    ASSERT P_WAVE_LEFT_Y MOD 8 = 3
+    LDY #0
+.column
+    FOR r = 0..4
+        LDA (pg),Y : AND pcol : STA (pp),Y : INY
+    NEXT
+    FOR r = 5..7
+        LDA (pg),Y : AND pcol : STA (pr),Y : INY
+    NEXT
+    CPY #4 * 8 : BNE column
+    RTS
 }
 
 \ ---------------------------------------------------------------------------

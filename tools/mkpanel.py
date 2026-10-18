@@ -183,7 +183,7 @@ OPTIONS = {
     # both come out cyan, blinks to blue
     "nearest": {"elements": {"alt_warn": 3}, "scanner": {}},
     # the scanner's dots as the view's lines are (src/main.6502's
-    # model_colours: 1-5 red, 6-14 cyan, white logical 3, which is blue
+    # st_colours: 1-5 red, 6-14 cyan, white logical 3, which is blue
     # below the split), and the player white's logical 3 too
     "as_view": {"elements": {"alt_warn": 3, "player": 3},
                 "scanner": {c: 1 if c <= 5 else 2 if c <= 14 else 3 for c in range(1, 16)}},
@@ -247,7 +247,7 @@ def main():
     ap.add_argument("tra")
     ap.add_argument("out", nargs="?")
     ap.add_argument("json", nargs="?")
-    ap.add_argument("--colours", default="nearest", choices=sorted(OPTIONS))
+    ap.add_argument("--colours", default="as_view", choices=sorted(OPTIONS))
     ap.add_argument("--options", action="store_true")
     args = ap.parse_args()
     prg = st_prg.load(args.prg)
