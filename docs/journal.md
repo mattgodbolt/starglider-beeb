@@ -198,5 +198,18 @@ game will need. `docs/plan.md` is the result.
 
 The plan's order: an engine skeleton (the memory map with `ASSERT`ed
 budgets, the list and draw phases, the interrupts and the fixed step),
-then the agents' pass, then the layers. Four calls for Matt are in its
-section 7.
+then the agents' pass, then the layers.
+
+Matt's calls on it:
+
+- **No co-processor edition** (decision 8, revised).
+- **The disc stays in use** (decision 12). It's a disc game, so it can
+  load by phase as Elite does, or stream as Chuckie Egg 2's B edition
+  does. CE2S's 1770 reader comes across as it is, and the front end and
+  speech come from disc.
+- **The object table keeps only what the port uses** (decision 13).
+- **Speech at 6kHz**, 4kHz if the memory map can't hold it (decision 5).
+
+With the docked screens, the cockpit picture and the front end loaded
+when they're wanted, the plan's map holds about 86K in flight of the
+96K, which leaves room to spend on speed.
