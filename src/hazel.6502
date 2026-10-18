@@ -17,60 +17,77 @@ FOR r = 0..<SCREEN_ROWS
 NEXT
 
 \ screen_clear: the screen draw_bank names (0 main, ACCCON_X shadow),
-\ from SCREEN to the top of RAM.
+\ from SCREEN to the top of RAM: the rest of SCREEN's page, then two
+\ pages a pass, their addresses patched in.
 .screen_clear
 {
-    ZA_AUTO2 p
     LDA draw_bank : TSB acccon
-    STZ p : LDA #HI(SCREEN) : STA p+1
     LDY #LO(SCREEN) : LDA #0
-.clear
-    STA (p),Y : INY : BNE clear
-    INC p+1 : BPL clear                 ; to &7FFF
+.part
+    STA SCREEN AND &FF00,Y : INY : BNE part
+    ASSERT (&80 - HI(SCREEN) - 1) MOD 2 = 0
+    LDX #HI(SCREEN) + 1
+.pages
+    STX page0+2 : INX : STX page1+2 : INX
+.page0
+    STA &FF00,Y                         ; patched
+.page1
+    STA &FF00,Y                         ; patched
+    INY : BNE page0
+    CPX #&80 : BNE pages                ; to &7FFF
     LDA draw_bank : TRB acccon
     RTS
 }
 
 \ erase_screen: the screen draw_buffer names (draw_bank set to match)
 \ made empty for drawing: the lines on its erase list drawn again as
-\ zeros, or if the list overflowed, the whole screen cleared.
+\ zeros, from their set-ups, or if the list overflowed, the window
+\ cleared (screen.6502). X is set to read the list, and for the main screen cleared
+\ for each line's drawing.
 .erase_screen
 {
-    ZA_AUTO2 p, stop
+    ZA_AUTO1 i
     LDX draw_buffer
-    LDA erase_full,X : BEQ replay
-    JMP screen_clear
+    LDA erase_stop,X : BNE replay
+    JMP window_clear                    ; (the cockpit around the window stays)
 .replay
-    LDA erase_stop_lo,X : STA stop : LDA erase_stop_hi,X : STA stop+1
-    LDA erase_list_lo,X : STA p : LDA erase_list_hi,X : STA p+1
+    STA i
+    \ the loads onto this screen's pages (memory.6502)
+    TXA : CLC : ADC #HI(ERASE_LIST)
+    ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
+    STA f_lo+2 : ADC #2
+    STA f_hi+2 : ADC #2
+    STA f_row+2 : ADC #2
+    STA f_dx+2 : ADC #2
+    STA f_dy+2 : ADC #2
+    STA f_code+2
+    \ X changed around each line for the main screen, kept for the shadow's
+    LDA draw_bank : EOR #ACCCON_X : STA off+1 : STA on+1
     JSR line_erase
-.each
-    LDA p : CMP stop : BNE line_on
-    LDA p+1 : CMP stop+1 : BEQ done
-.line_on
     LDA #ACCCON_X : TSB acccon
-    LDY #0
-    LDA (p),Y : STA line_x0 : INY
-    LDA (p),Y : STA line_x0+1 : INY
-    LDA (p),Y : STA line_y0 : INY
-    LDA (p),Y : STA line_x1 : INY
-    LDA (p),Y : STA line_x1+1 : INY
-    LDA (p),Y : STA line_y1
-    LDA #ACCCON_X : TRB acccon
-    LDA p : CLC : ADC #ERASE_ENTRY : STA p
-    BCC next
-    INC p+1
-.next
-    LDA draw_bank : TSB acccon
-    JSR line
-    LDA draw_bank : TRB acccon
-    BRA each
+    ASSERT ERASE_LINES = 255                ; the list ends where X wraps
+    LDX i : INX : BEQ done
+.each
+    STX i
+.f_lo
+    LDA ERASE_LIST,X : STA line_scr
+.f_hi
+    LDA ERASE_LIST,X : STA line_scr+1
+.f_dx
+    LDA ERASE_LIST,X : STA line_dx
+.f_dy
+    LDA ERASE_LIST,X : STA line_dy
+.f_row
+    LDY ERASE_LIST,X
+.f_code
+    LDA ERASE_LIST,X : TAX
+.off
+    LDA #ACCCON_X : TRB acccon              ; patched
+    JSR line_go
+.on
+    LDA #ACCCON_X : TSB acccon              ; patched
+    LDX i : INX : BNE each
 .done
+    LDA #ACCCON_X : TRB acccon
     JMP line_draw
 }
-
-\ Each screen's erase list.
-.erase_list_lo
-    EQUB LO(ERASE_LIST), LO(ERASE_LIST + ERASE_BYTES)
-.erase_list_hi
-    EQUB HI(ERASE_LIST), HI(ERASE_LIST + ERASE_BYTES)

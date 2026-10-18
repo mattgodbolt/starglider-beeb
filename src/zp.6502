@@ -93,8 +93,8 @@ cy1 = clip_pts + 6
 ZA_AUTO2 px, pz, pq         ; project's operands
 
 \ The line drawer (line.6502)
-ZA_AUTO2 line_x0, line_x1, line_scr, line_mx
-ZA_AUTO1 line_y0, line_y1, line_my
+ZA_AUTO2 line_x0, line_x1, line_scr
+ZA_AUTO1 line_y0, line_y1
 ZA_AUTO1 line_dx, line_dy, line_cnt, line_ls, line_errs, line_err
 
 \ The workspace, in the OS's pages, up to the disc reader's NMI page.
@@ -118,9 +118,7 @@ SECTION Work, org = WORK, guard = NMI_PAGE, virtual = TRUE
 .stepped    SKIP 1          ; the field count the steps taken have reached
 .frames     SKIP 2          ; frames drawn
 .steps      SKIP 2          ; steps taken
-.erase_stop_lo SKIP 2       ; by screen: where its erase list ends ...
-.erase_stop_hi SKIP 2
-.erase_full SKIP 2          ; ... and non-zero if it overflowed
+.erase_stop SKIP 2          ; by screen: its erase list's next free index (0: full, so cleared whole)
     \ the disc (disc.6502): the reader's state, what's left of the file
     \ being read, and the game's files as the catalogue has them
 DISC_MAX = 8

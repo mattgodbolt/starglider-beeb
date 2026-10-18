@@ -27,10 +27,20 @@ ENDSECTION
 \ The top of main RAM's code.
 MAIN_TOP = LISTS
 
-\ The erase lists: each screen's lines as the line drawer drew them
-\ (x0 word, y0, x1 word, y1), in shadow RAM below the shadow screen.
+\ The erase lists: each screen's lines as the line drawer set them up
+\ (line.6502's line_go), to be drawn again as zeros, in shadow RAM below
+\ the shadow screen. A field a page, indexed by line from ERASE_LINES
+\ down (index 0 takes the lines past the end, and is never read), the two
+\ screens' pages of a field side by side: field f of screen s is at
+\ ERASE_LIST + (2 f + s) * 256.
 ERASE_LIST  = &3000
-ERASE_ENTRY = 6
-ERASE_LINES = (SCREEN - ERASE_LIST) DIV 2 DIV ERASE_ENTRY
-ERASE_BYTES = ERASE_LINES * ERASE_ENTRY
-ASSERT ERASE_LIST + 2 * ERASE_BYTES <= SCREEN
+ERASE_LINES = 255
+EF_LO   = 0                         ; the first byte's character row and column
+EF_HI   = 1
+EF_ROW  = 2                         ; its row in the character row
+EF_DX   = 3                         ; |dx|
+EF_DY   = 4                         ; dy
+EF_CODE = 5                         ; kind * 8 + block * 2
+ERASE_FIELDS = 6
+ASSERT LO(ERASE_LIST) = 0
+ASSERT ERASE_LIST + 2 * ERASE_FIELDS * 256 <= SCREEN

@@ -2,15 +2,10 @@
 \ STARGLIDER for the BBC Master - the cockpit's screens
 \
 \ The cockpit (tools/mkcockpit.py, decision 3) is on both screens, around
-\ the view's window, which is all that's ever cleared. These set ACCCON's
-\ X to reach the shadow screen, so they must lie below &3000, where X
-\ changes nothing.
+\ the view's window, which is all that's ever cleared (screen.6502's
+\ window_clear). screen_copy sets ACCCON's X to reach the shadow screen,
+\ so it must lie below &3000, where X changes nothing.
 \ ***************************************************************************
-
-\ The window's bytes: x 16-303 is MODE 1's bytes 4-75 of a scan line.
-WINDOW_COL0 = VIEW_XMIN DIV 4
-WINDOW_COLS = VIEW_XMAX DIV 4 + 1 - WINDOW_COL0
-ASSERT VIEW_XMIN MOD 4 = 0 AND VIEW_XMAX MOD 4 = 3
 
 \ screen_copy: main RAM's screen into shadow RAM's, a page at a time
 \ through edge_mark (free outside the draw phase).
@@ -32,32 +27,4 @@ ASSERT VIEW_XMIN MOD 4 = 0 AND VIEW_XMAX MOD 4 = 3
     RTS
 }
 
-\ window_clear: the view's window cleared, on the screen draw_bank names.
-.window_clear
-{
-    ZA_AUTO2 p
-    ZA_AUTO1 y, cols
-    LDA draw_bank : TSB acccon
-    LDA #VIEW_YMIN : STA y
-.line
-    \ the scan line's first window byte: its character row, its line in
-    \ the row, then the first column
-    LDA y : LSR A : LSR A : LSR A : TAX
-    LDA y : AND #7 : CLC : ADC screen_row_lo,X : STA p
-    LDA screen_row_hi,X : ADC #0 : STA p+1
-    LDA p : CLC : ADC #LO(WINDOW_COL0 * 8) : STA p
-    LDA p+1 : ADC #HI(WINDOW_COL0 * 8) : STA p+1
-    LDA #WINDOW_COLS : STA cols
-    LDY #0
-.byte
-    LDA #0 : STA (p),Y
-    TYA : CLC : ADC #8 : TAY
-    BNE next
-    INC p+1
-.next
-    DEC cols : BNE byte
-    INC y : LDA y : CMP #VIEW_YMAX + 1 : BNE line
-    LDA draw_bank : TRB acccon
-    RTS
-}
 ASSERT P% <= &3000
