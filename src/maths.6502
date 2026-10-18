@@ -113,17 +113,31 @@ ENDMACRO
     \ must be below the divisor.
     LDA div_n+2 : CMP div_u : LDA div_n+3 : SBC div_u+1
     BCS overflow
-    \ 16 steps of shift and subtract: the remainder in div_n+2..3, the
-    \ quotient shifting into div_n..1.
+    \ 16 steps of shift and subtract: the remainder in div_n+2 and A, the
+    \ quotient shifting into div_n..1. When the remainder a byte on is
+    \ still below the divisor, the quotient's top byte is 0, and the
+    \ first 8 steps are a byte's move.
     LDX #16
+    LDA div_n+3 : BNE steps
+    LDA div_n+1 : CMP div_u : LDA div_n+2 : SBC div_u+1
+    BCS steps
+    LDA div_n+2 : STA div_n+3
+    LDA div_n+1 : STA div_n+2
+    LDA div_n : STA div_n+1
+    STZ div_n
+    LDX #8
+.steps
+    LDA div_n+3
 .step
-    ASL div_n : ROL div_n+1 : ROL div_n+2 : ROL div_n+3
+    ASL div_n : ROL div_n+1 : ROL div_n+2 : ROL A
     BCS sub                             ; the remainder passed 16 bits
-    LDA div_n+2 : CMP div_u : LDA div_n+3 : SBC div_u+1
-    BCC next
+    CMP div_u+1 : BCC next
+    BNE sub
+    LDY div_n+2 : CPY div_u : BCC next
 .sub
+    TAY                                 ; (C = 1 on every way here)
     LDA div_n+2 : SBC div_u : STA div_n+2
-    LDA div_n+3 : SBC div_u+1 : STA div_n+3
+    TYA : SBC div_u+1
     INC div_n                           ; the quotient's bit
 .next
     DEX : BNE step

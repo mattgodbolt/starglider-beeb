@@ -271,7 +271,7 @@ NEXT
 .draw_shape
 {
     ZA_AUTO1 shape, nmove, nturn, row_i, u_lo, h0, l0
-    ZA_AUTO2 hdr, fr, fr_k, t16
+    ZA_AUTO2 fr, fr_k, t16
     LDX otype
     LDA type_shape,X : CMP #SHAPES : BCC known
     RTS
@@ -332,13 +332,20 @@ NEXT
 .c_next
     INX : INX : CPX #6 : BNE c_mag
     BANK BANK_SHAPES
+    \ The header, two bytes a turn, from where it's patched in
     LDX shape
-    LDA shape_lo,X : STA hdr : LDA shape_hi,X : STA hdr+1
-    LDY #HDR_BYTES + HDR_WORDS * 2 - 1
+    LDA shape_lo,X : STA header_a+1 : STA header_b+1
+    LDA shape_hi,X : STA header_a+2 : STA header_b+2
+    ASSERT (HDR_BYTES + HDR_WORDS * 2) MOD 2 = 0
+    LDX #HDR_BYTES + HDR_WORDS * 2 - 1
     ZA_DISCARD sh
 .header
-    LDA (hdr),Y : STA sh,Y : ZA_INDEXEDBY 0..HDR_BYTES + HDR_WORDS * 2 - 1
-    DEY : BPL header
+.header_a
+    LDA &8000,X : STA sh,X : ZA_INDEXEDBY 0..HDR_BYTES + HDR_WORDS * 2 - 1
+    DEX
+.header_b
+    LDA &8000,X : STA sh,X : ZA_INDEXEDBY 0..HDR_BYTES + HDR_WORDS * 2 - 1
+    DEX : BPL header
     \ The frame: the animation's, by shape.
     LDX shape : LDA anim_frame,X : ASL A : TAY
     LDA (sh_frames),Y : STA fr : INY : LDA (sh_frames),Y : STA fr+1
