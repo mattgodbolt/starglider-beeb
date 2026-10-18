@@ -305,3 +305,40 @@ again into bank 6, which nothing uses yet, as the models turn.
 checks every byte. The tools that run the disc without booting now put
 it in the drive too (`tools/disc.mjs`). Real hardware is the test that
 counts here, as CE2 found: jsbeeb's 1770 is kinder than the chip.
+
+### The keys and commands
+
+`read_keys` (`src/logic/keys.6502`) is the ST's &0270E: one command a step
+from the latch the ST's keyboard interrupt fills (`key_latch`), through
+the ST's own scancode table, or else the flight keys held (`key_state`)
+into the accumulators. The port's input is the ST's, two arrays the
+keyboard layer will fill (decision 6). Everything the ST's commands do
+is there: F, M, N, P, Q, S, L with its missile view and the ground dots
+kept, the launch from the tunnel's end with its two random numbers thrown
+away, I in flight, and the cheat prompt. Three things a command enters
+are later layers, stubbed: the Interrogate screen, the waits for keys in
+the cheat prompt (which return no key until the keyboard layer comes, so
+the prompt ends at its first test), and Esc to the title.
+
+Two captures check it beside the flight's: `steps_keys_cmds` (in
+flight, with cheat mode and the K screen's keys written before the
+capture starts, so that no write lands inside a checked routine) and
+`steps_keys_docked` (teleported into a silo with no missiles, through
+the tunnel, the launch and L and P after it). On both, every variable
+and field the map holds matches. Things learned on the way:
+
+- **Q first.** Under EmuTOS the first sound effect stops the keyboard's
+  interrupts for good (`docs/research/st-logic.md`), so both captures
+  turn the sound off before anything plays one, and S comes last.
+- **The cheat prompt blocks inside `read_keys`**, so the keys typed at it
+  arrive between the capture's two points. Holding Z, pressing Delete,
+  then releasing Z and pressing it again gives the prompt its key with
+  the key states as they were, which the check compares. The prompt's
+  other paths were checked once, outside the captures, with the waits
+  returning the keys typed (J S space A R G twice, then J and a wrong
+  key): they match but for the last key, still held.
+- **Interrogate is frames of its own**: an ad hoc capture of one session
+  (I, two spaces, E) ran 216 frames inside `read_keys`, each with
+  `animate_shapes` and `frame_end`, and draw_shape overwrote `$1CE/$1D0`
+  (the heading's sine and cosine, which `player_flight` recomputes). Its
+  layer must run those in each of its frames.

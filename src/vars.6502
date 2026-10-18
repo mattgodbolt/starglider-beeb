@@ -29,6 +29,20 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .mouse_x      SKIP 2        ; {ST P&01842 word} the turn: roll is -(it asr 4)
 .mouse_y      SKIP 2        ; {ST P&01844 word} the climb
 .speed_acc    SKIP 2        ; {ST P&01848 word} the speed, negated
+    \ ... and the keys, as the ST's keyboard interrupt leaves them, which
+    \ the keyboard layer fills (decision 6): each key's state by the ST's
+    \ scancode, 1 held, and the last key made, which read_keys consumes
+.key_state    SKIP 128      ; {ST P&017C2 raw 128}
+.key_latch    SKIP 1        ; {ST P&01852 byte} 0 for none
+    \ what the keys and commands (logic/keys.6502) keep that the panel,
+    \ the drawing or the sound read
+.missiles     SKIP 1        ; {ST $278(a6) word8} 0-2
+.m_iris       SKIP 2        ; {ST $27C(a6) word} the missile view's opening and closing
+.sound_on     SKIP 1        ; {ST $2CB(a6) byte} Q's and S's
+.cheat_mode   SKIP 1        ; {ST $2CD(a6) byte}
+.energy       SKIP 2        ; {ST $25E(a6) word} full at &FFFF
+.shields      SKIP 2        ; {ST $260(a6) word}
+.laser_energy SKIP 2        ; {ST $28A(a6) word}
 .world_vec    SKIP 2        ; world_call's routine (logic/arith.6502)
 .logic_work_end
 ENDSECTION
@@ -86,6 +100,16 @@ SECTION LogicAndy, org = ANDY_OBJECTS_END, guard = ANDY_TOP, virtual = TRUE
     \ world_render's logic (logic/worldlogic.6502)
 
     \ the keys and commands (logic/keys.6502)
+.def_left     SKIP 1        ; {ST $2D8(a6) byte} the K screen's keys, as scancodes: 0 for none
+.def_right    SKIP 1        ; {ST $2D9(a6) byte}
+.def_dive     SKIP 1        ; {ST $2DA(a6) byte} (its "Decrease Altitude")
+.def_climb    SKIP 1        ; {ST $2DB(a6) byte}
+.def_accel    SKIP 1        ; {ST $2DC(a6) byte}
+.def_brake    SKIP 1        ; {ST $2DD(a6) byte}
+.cheat_count  SKIP 1        ; {ST $294(a6) word8} the cheat's entries, modulo 2
+.enemies_active SKIP 1      ; {ST $2C7(a6) byte} 0: M has frozen the enemies' handlers
+.pending_score SKIP 2       ; {ST $0D4(a6) word} BCD, for the next world_render to add
+.docked_silo  SKIP 1        ; {ST $0A8(a6) slot} the silo docked with
 
     \ the object handlers (logic/handlers.6502)
 
