@@ -59,6 +59,7 @@ NEXT
     LDA draw_bank : EOR #ACCCON_X : STA off+1 : STA on+1
     JSR line_erase
     LDA #ACCCON_X : TSB acccon
+    ASSERT ERASE_LINES = 255                ; the list ends where X wraps
     LDX i : INX : BEQ done
 .each
     STX i
