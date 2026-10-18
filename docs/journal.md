@@ -1246,3 +1246,36 @@ straight and half of it in a turn (measured 2026-10-18). The reach makes
 a larger saving possible, untried yet: a far object whose reach lies
 wholly outside the window can be skipped before its vertices are made.
 
+### The speech
+
+Clare Edgeley's four clips, resampled 2:3 to 4,096 Hz (decision 37) and
+packed two levels a byte, run through bank 7's first 4K, the logic bank's
+after the effects' tables, and bank 7's window section's tail; each
+clip's trailing near-silence is cut, which is what fits the tail. The
+player ticks on User VIA T2, its count reloaded for what it overran, a
+late tick's debt taken off the next. While a clip plays IRQ1V is the
+speech's own: a short entry in main RAM pages bank 7 for the tick.
+
+- **A read race.** The tick read the count's low byte, then its high byte
+  a few microseconds later, a wrap behind whenever the low byte passed 0
+  in between, and every tick that waited out the palette split hit it:
+  each clip's samples after it came a period early. A new test, that the
+  samples' line stays steady from field to field, fails on every clip
+  without the fix.
+- **A call across banks.** The docking speech, in the world bank, called
+  `speech`, which the effects' work had moved into the logic bank: with
+  the sound on it would have run whatever sat at that address in the
+  world bank. No capture docks with the sound on, so the logic check never
+  met it. It goes by `logic_bank_call` now.
+- **The cost.** A clip takes 45-48% of the CPU (decision 38): with a
+  warning repeating, 5.9 frames a second against 6.4; with clips back to
+  back, the frame loop sits at its step cap and the game slows by a
+  quarter while they last (measured 2026-10-18).
+
+`make speech`, in `make check`, checks every clip's levels against the
+packed ones, the rate, each sample's time, the line's steadiness, the
+clip's end at the ST's length, a clip with a key held, `sample_stop`, and
+that the split is never late; it writes WAVs to listen to. The disc's
+check makes its read in play itself now, beside a clip, and puts back
+what it overwrote: the game no longer reads in the background.
+

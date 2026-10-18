@@ -7,11 +7,11 @@
 \ the noise on the noise channel, clocked by tone 2 (silent), at the YM's
 \ own periods, which the SN takes as they are. Timer A's effects tick on
 \ System VIA T1 at Timer A's rate, the fastest sweeps taking k of its
-\ ticks a tick (tools/mksfx.py); the noise's lock, the YM's envelope and
-\ the samples' count go by the field (sound_vsync), as the ST's VBL counts
-\ the lock. The rest is in the logic's bank (sfx.6502), with the records
-\ each effect starts from. This must lie below &3000, where ACCCON's X
-\ changes nothing: the interrupt runs it.
+\ ticks a tick (tools/mksfx.py); the noise's lock and the YM's envelope go
+\ by the field (sound_vsync), as the ST's VBL counts the lock. The rest is
+\ in the logic's bank (sfx.6502), with the records each effect starts
+\ from; speech.6502 plays the speech. This must lie below &3000, where
+\ ACCCON's X changes nothing: the interrupt runs it.
 \
 \ Every write of the chip is in the interrupt or with interrupts off
 \ (input.6502).
@@ -50,7 +50,6 @@ SN_OFF   = 15
 .noise_att      SKIP 1      ; the noise's attenuation on the chip
 SFX_STATE = P% - ta_kind
 .ta_count       SKIP 1      ; the sweeps or halves to go
-.sample_frac    SKIP 1      ; the samples' count's fraction (sfx.6502)
 SFX_KIND_TWO  = &80
 SFX_MIX_TONE  = &01
 SFX_MIX_NOISE = &40
@@ -139,18 +138,15 @@ ENV_TWO       = 32
 }
 
 \ sound_vsync: the field's part, from the vertical sync's interrupt: the
-\ lock counted down, as the ST's VBL counts &29C; and while a sample's
-\ bytes are left or the noise sounds, sound_field, in the logic's bank
-\ (bank_now first, as the disc's NMI routine expects, and back).
+\ lock counted down, as the ST's VBL counts &29C; and while the noise
+\ sounds, sound_field, in the logic's bank (bank_now first, as the disc's
+\ NMI routine expects, and back).
 .sound_vsync
 {
     LDA sfx_lock : BEQ unlocked
     DEC sfx_lock
 .unlocked
-    LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3
-    TAX : BNE field                             ; (X: sound_field's, a sample's left)
     LDA sfx_mix : CMP #SFX_MIX_NOISE : BNE done
-.field
     LDA bank_now : PHA
     BANK BANK_LOGIC
     JSR sound_field

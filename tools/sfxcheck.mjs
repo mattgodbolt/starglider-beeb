@@ -15,9 +15,9 @@
 // it comes; the envelope's steps within a field and a hundredth. The
 // levels are compared from just after a window's first start, and the
 // windows from an effect the port leaves out (nothing starts one) to the
-// next not at all. Then the gates: nothing with the sound off, nothing
-// while a sample plays (sound_field's count of it at its rate), a
-// sample's start stopping an effect, and the sweeps that take more than
+// next not at all. Then the gates: nothing with the sound off, a clip's
+// start stopping an effect and none while it plays (tools/speechcheck.mjs
+// checks the clip), and the sweeps that take more than
 // one of the ST's ticks losing none of their own with a key held, whose
 // scan is the vertical sync's longest work.
 //
@@ -26,14 +26,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 const root = process.cwd();
-const { loadSymbols } = await import(pathToFileURL(path.join(root, "tools/beeb.mjs")).href);
-const { loadDisc } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
-const jsbeeb = (f) => pathToFileURL(path.join(root, "node_modules/jsbeeb/src", f)).href;
-const { TestMachine } = await import(jsbeeb("test-machine.js"));
-const { SoundChip } = await import(jsbeeb("soundchip.js"));
-const sym = loadSymbols(path.join(root, "build/starglider.json"));
+const { HZ, sym, machine, snEvents, settle } = await import(pathToFileURL(path.join(root, "tools/soundbeeb.mjs")).href);
 const gen = JSON.parse(fs.readFileSync(path.join(root, "build/gen/sfx.json"), "utf8"));
-const HZ = 2e6;
 const SLACK = 1e-3;                     // the port's start, and its interrupt's latency
 
 const args = process.argv.slice(2);
@@ -55,72 +49,6 @@ const fail = (what) => {
     bad++;
     if (bad <= 20) console.log(`sfxcheck: ${what}`);
 };
-
-// The chip, its writes timed in CPU cycles, rendering nothing.
-class Recorder extends SoundChip {
-    constructor() {
-        super(() => {});
-        this.writes = [];
-    }
-    advance() {}
-    poke(value) {
-        this.writes.push([this.scheduler.epoch, value]);
-        super.poke(value);
-    }
-}
-
-// The disc from engine_run's entry, its foreground idle at IDLE, with
-// STUB to call a routine from (LDA #a : LDX #x : JSR r : JMP IDLE).
-const IDLE = 0x0140, STUB = 0x0143;
-async function machine() {
-    const chip = new Recorder();
-    const tm = new TestMachine("Master", { soundChip: chip });
-    await tm.initialise();
-    const q = console.log;
-    console.log = () => {};
-    await tm.runUntilInput();
-    console.log = q;
-    loadDisc(tm, path.join(root, "build/starglider.ssd"), sym);
-    await tm.runUntilAddress(sym.engine_run, 60);
-    const cpu = tm.processor;
-    const ram = cpu.ramRomOs;
-    ram.set([0x4c, IDLE & 0xff, IDLE >> 8], IDLE);
-    cpu.pc = IDLE;
-    const now = () => cpu.scheduler.epoch;
-    const call = async (routine, a = 0, x = 0) => {
-        await tm.runUntilAddress(IDLE, 1);
-        ram.set([0xa9, a, 0xa2, x, 0x20, routine & 0xff, routine >> 8, 0x4c, IDLE & 0xff, IDLE >> 8], STUB);
-        cpu.pc = STUB;
-        const t = now();
-        await tm.runUntilAddress(IDLE, 1);
-        return t;
-    };
-    const runTo = async (cycle) => {
-        const left = cycle - now();
-        if (left > 0) await tm.runFor(left);
-    };
-    return { tm, cpu, ram, chip, now, call, runTo };
-}
-
-// The port's writes as each register's values, in seconds from `from`.
-function snEvents(writes, from) {
-    const ev = { t0p: [], t0a: [], t1a: [], t2p: [], t2a: [], nctl: [], na: [] };
-    const reg = [0, 0, 0, 0];
-    let latched = 0;
-    for (const [c, v] of writes) {
-        const t = (c - from) / HZ;
-        if (v & 0x80) latched = v & 0x70;
-        const ch = (latched >> 5) & 3;
-        if (latched & 0x10) ev[["t0a", "t1a", "t2a", "na"][ch]].push([t, v & 15]);
-        else if (ch === 3) ev.nctl.push([t, v & 7]);
-        else {
-            reg[ch] = v & 0x80 ? (reg[ch] & ~15) | (v & 15) : (reg[ch] & 15) | ((v & 0x3f) << 4);
-            if (ch === 0) ev.t0p.push([t, reg[0]]);
-            if (ch === 2) ev.t2p.push([t, reg[2]]);
-        }
-    }
-    return ev;
-}
 
 const effect = (n) => gen.effects[n];
 const stTick = (n) => (effect(n).rate ? 1 / effect(n).rate : 0);
@@ -213,15 +141,6 @@ function stTimeline(capture) {
     return { ev, late };
 }
 
-// Writes a few microseconds apart (a period's two bytes) as one: the last.
-function settle(list, gap = 40e-6) {
-    const out = [];
-    for (const e of list) {
-        if (out.length && e[0] - out[out.length - 1][0] < gap) out[out.length - 1] = e;
-        else out.push(e);
-    }
-    return out;
-}
 const changes = (list) => list.filter((e, i) => !i || e[1] !== list[i - 1][1]);
 const at = (list, t) => {
     let v = list[0][1];
@@ -332,25 +251,25 @@ for (const file of captures) {
     await m.call(sym.sfx_start, LASER, 1);
     if (await written(0.1)) fail("an effect with the sound off");
     m.ram[sym.sound_on] = 0xff;
-    const bytes = 1000;
-    m.ram.set([bytes & 0xff, bytes >> 8, 0, 0], sym.sample_left);
+    // a clip (speech: the third, the shortest, with the ST's length) over
+    // the laser: the laser's tone and the noise off at once, its ticks
+    // stopped, and no effect while the clip plays, which writes only
+    // tone 1; then one once it's done
     await m.call(sym.sfx_start, LASER, 1);
-    if (await written(0.05)) fail("an effect while a sample plays");
-    const from = m.now() - 0.05 * HZ;
-    while (m.ram[sym.sample_left] | m.ram[sym.sample_left + 1]) await m.runTo(m.now() + 1000);
-    const took = (m.now() - from) / HZ, want = bytes / 6144;
-    if (Math.abs(took - want) > gen.field) fail(`a sample's ${bytes} bytes counted down in ${took.toFixed(3)}s, not ${want.toFixed(3)}s`);
-    await m.call(sym.sfx_start, LASER, 1);
-    if (!(await written(0.05))) fail("no effect once the sample's done");
-    // a sample's start (speech, in the logic's bank, which the engine left
-    // paged): the laser's tone and the noise off at once, its ticks stopped
-    m.ram.set([0x80, 0x00], sym.sample_len);
+    await m.runTo(m.now() + 0.05 * HZ);
+    m.ram[sym.sample_clip] = 3;
+    m.ram.set([0x80, 0x16], sym.sample_len);
     const n = m.chip.writes.length;
     await m.call(sym.speech);
-    await m.runTo(m.now() + 0.3 * HZ);
-    const after = m.chip.writes.slice(n).map((w) => w[1]);
-    if (after.join() !== [0x9f, 0xff].join()) fail(`a sample's start wrote ${after.map((v) => v.toString(16)).join(" ")}`);
-    m.ram.set([0, 0, 0, 0], sym.sample_left);
+    await m.runTo(m.now() + 0.2 * HZ);
+    await m.call(sym.sfx_start, LASER, 1);
+    while (m.ram[sym.sample_left] | m.ram[sym.sample_left + 1]) await m.runTo(m.now() + 2000);
+    const ev = snEvents(m.chip.writes.slice(n), 0);
+    const head = m.chip.writes.slice(n, n + 2).map((w) => w[1]);
+    if (head.join() !== [0x9f, 0xff].join()) fail(`a sample's start wrote ${head.map((v) => v.toString(16)).join(" ")}`);
+    if (ev.t0p.length || ev.t0a.length > 1 || ev.na.length > 1) fail("an effect as a sample plays");
+    await m.call(sym.sfx_start, LASER, 1);
+    if (!(await written(0.05))) fail("no effect once the sample's done");
     // the fastest sweeps, a key held: every tick on time
     m.tm.keyDown("ArrowLeft");
     await m.runTo(m.now() + 0.1 * HZ);

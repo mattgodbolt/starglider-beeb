@@ -242,11 +242,14 @@ def main():
     out += [".sfx_record_at", "    EQUB " + ", ".join(f"&{v:02X}" for v in at), ".sfx_records"]
     out += ["    EQUB " + ", ".join(str(b) for b in r) for r in records]
     out += [".env_att", "    EQUB " + ", ".join(map(str, att3)),
-            "    EQUB " + ", ".join(map(str, att2)), "ASSERT ENV_TWO = 32"]
+            "    EQUB " + ", ".join(map(str, att2)), "ASSERT ENV_TWO = 32", ".sfx_tables_end"]
     Path(sys.argv[2]).write_text("\n".join(out) + "\n")
+    # the tables' bytes, for tools/mkspeech.py, whose clips fill the rest of
+    # the bank's first 4K (banks.6502 asserts it)
+    size = EFFECTS + sum(len(r) for r in records) + len(att3) + len(att2)
     Path(sys.argv[3]).write_text(json.dumps({
         "effects": effects, "att3": att3, "att2": att2, "tone_att": tone_att, "lock": LOCK_VBLS,
-        "field": FIELD, "ym_clock": YM_CLOCK, "via_hz": VIA_HZ}, indent=1) + "\n")
+        "field": FIELD, "ym_clock": YM_CLOCK, "via_hz": VIA_HZ, "bytes": size}, indent=1) + "\n")
 
 
 if __name__ == "__main__":
