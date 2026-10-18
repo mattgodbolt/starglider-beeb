@@ -63,9 +63,15 @@ def variables(syms):
             name, spec = m.group(1), m.group(2).split()
             if name not in syms:
                 raise SystemExit(f"{path}: {name} isn't in the build's symbols")
-            addr, kind, args = spec[0], spec[1], [int(x) for x in spec[2:]]
+            addr, kind = spec[0], spec[1]
             region, offset = st_place(addr)
             e = {"name": name, "at": syms[name], "kind": kind, "region": region, "offset": offset}
+            if kind == "index":
+                # (the array's own ST address, then its entries' size)
+                e["base"], e["stride"] = int(spec[2].lstrip("&"), 16), int(spec[3])
+                out.append(e)
+                continue
+            args = [int(x) for x in spec[2:]]
             if kind == "raw":
                 e["count"] = args[0]
             elif kind in ("wlo", "whi", "barr"):

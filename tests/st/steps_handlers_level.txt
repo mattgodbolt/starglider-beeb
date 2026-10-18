@@ -1,0 +1,33 @@
+# The object handlers on level 3's rules (the level variable $296 set on
+# level 1's layout): StarGlider One's homing missiles and the pyramid
+# launchers', the beams' random numbers, the lasers' level-3 damage; the
+# player high (y -1790), where homing missiles go off; then a tank near,
+# and two silos' and two tanks' counts set to run out (a reload, a
+# quarter turn, and each count's borrow). On the keys. (The capture slows
+# Hatari to about a quarter of real time.)
+wait 38
+key 57
+wait 3
+debug parse {arm}
+debug w w $5c196 3
+debug echo \nSEG level3\n
+key 57 4
+wait 16
+debug echo \nSEG high\n
+debug w w $5c030 $f902
+wait 8
+debug echo \nSEG tank\n
+# tank 57 (x &E9EC, z &5B08), 300 to the side and 1,500 behind, still
+debug w w $12206 0
+debug w w $5c02e $e8c0 $ffd0 $5524
+debug w w $5c03c 0
+wait 10
+debug echo \nSEG counts\n
+# silos 26 and 78 (+16), tanks 97 and 98 (+16)
+debug w w $5d830 2
+debug w w $5e530 $100
+debug w w $5e9f0 1
+debug w w $5ea30 $100
+wait 24
+debug echo \nSEG end\n
+quit

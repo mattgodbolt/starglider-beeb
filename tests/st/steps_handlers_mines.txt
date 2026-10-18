@@ -1,0 +1,48 @@
+# The object handlers' mines, on the keys, the player held still (the
+# speed accumulator P&01848 at 0) and teleported: in front of a mine while
+# "LEVEL 1" shows, until it goes off (random8 adding the d0 the slots
+# before it left); in another's warning zone, then close enough to set it
+# off; past a third, launching a missile (L) that is put in front of it,
+# where it hits it in the missile view; and close to a fourth with the
+# shields low, which go to 0. (The capture slows Hatari to about a quarter
+# of real time, so each wait covers a quarter as many frames.)
+wait 38
+key 57
+wait 1
+debug parse {arm}
+debug echo \nSEG mine_level\n
+# mine 41 (a diamond at x &6910, y -1040, z &6910), 1,280 ahead
+debug w w $12206 0
+debug w w $5c02e $6910 $fbf0 $6410
+debug w w $5c03c 0
+wait 24
+debug echo \nSEG mine_warn\n
+# mine 87 (x &4F70, y -1040, z &DC60), 1,800 ahead
+debug w w $12206 0
+debug w w $5c02e $4f70 $fbf0 $d558
+debug w w $5c03c 0
+wait 6
+debug echo \nSEG mine_blow\n
+# ... then 1,024 ahead
+debug w w $5c02e $4f70 $fbf0 $d860
+wait 6
+debug echo \nSEG missile\n
+# mine 22 (x &6680, y -1120, z &2B90), 2,560 ahead; the missile launched
+debug w w $12206 0
+debug w w $5c02e $6680 $fba0 $2190
+debug w w $5c03c 0
+wait 2
+key l
+wait 7
+# ... and put 1,280 short of the mine, once the lists are made from it
+debug w w $5c16a $6680 $fba0 $2690
+wait 10
+debug echo \nSEG shields\n
+# mine 31 (x &DC60, y -1120, z &2900), 1,024 ahead, the shields at 5,000
+debug w w $12206 0
+debug w w $5c160 $1388
+debug w w $5c02e $dc60 $fba0 $2500
+debug w w $5c03c 0
+wait 6
+debug echo \nSEG end\n
+quit

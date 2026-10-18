@@ -22,7 +22,7 @@ SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
 .pl_pitch   SKIP 2          ; {ST $13A(a6) word}
 .pl_heading SKIP 2          ; {ST $13C(a6) word}
 .pl_roll    SKIP 2          ; {ST $13E(a6) word}
-.n_slots    SKIP 1          ; the slots the coarse list looks at ($1D8)
+.n_slots    SKIP 1          ; {ST $1D8(a6) word8} the slots the coarse list and the handlers look at
 .docked     SKIP 1          ; {ST $2CA(a6) byte} non-zero in the silo
 .silo_missile SKIP 1        ; non-zero while the silo's missile is there
 .all_faces  SKIP 1          ; &80: every face visible (the Interrogate screen's H, $2BD)

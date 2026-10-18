@@ -1,0 +1,30 @@
+# The object handlers' mines once "LEVEL 1" is over, on the keys, the
+# player held still and teleported: in a mine's warning zone, then close
+# enough to set it off with the shields full; then in front of another,
+# a type-3 object drawn beyond it, and docked ($2CA set), where neither
+# the mine nor the lasers act on the lists the last flight step left.
+# (The capture slows Hatari to about a quarter of real time.)
+wait 38
+key 57
+wait 6
+debug parse {arm}
+debug echo \nSEG mine_warn\n
+# mine 87 (x &4F70, y -1040, z &DC60), 1,792 ahead
+debug w w $12206 0
+debug w w $5c02e $4f70 $fbf0 $d560
+debug w w $5c03c 0
+wait 6
+debug echo \nSEG mine_blow\n
+# ... then 1,024 ahead
+debug w w $5c02e $4f70 $fbf0 $d860
+wait 6
+debug echo \nSEG mine_docked\n
+# mine 41 (x &6910, y -1040, z &6910), 1,792 ahead, type 3 43 beyond it
+debug w w $12206 0
+debug w w $5c02e $6910 $fbf0 $6210
+debug w w $5c03c 0
+wait 3
+debug w b $5c1ca $ff
+wait 12
+debug echo \nSEG end\n
+quit

@@ -1,0 +1,34 @@
+# The object handlers on level 3's rules again (the level variable $296
+# set on level 1's layout): StarGlider One's homing missiles, then the
+# player high (y -1790) long enough for them to climb past -1700 and go
+# off; then the free stack emptied (its count $25C and top $9C together)
+# by a Juno cannon, whose launches it refuses, with a tank's heading a
+# step short of a quarter turn and its drive count out (its turn ends, the
+# count set again); then the shields low, which a laser takes to 0. On the
+# keys. (The capture slows Hatari to about a quarter of real time.)
+wait 38
+key 57
+wait 3
+debug parse {arm}
+debug w w $5c196 3
+debug echo \nSEG level3\n
+key 57 4
+wait 6
+debug echo \nSEG high\n
+debug w w $5c030 $f902
+wait 20
+debug echo \nSEG refused\n
+# Juno cannon 47 (x &8540, z &5200) 3,072 ahead; tank 57's heading and +16
+debug w w $12206 0
+debug w w $5c15c 0
+debug w l $5c09c $94c
+debug w w $5dfe6 $7e0
+debug w w $5dff0 0
+debug w w $5c02e $8540 $ffd0 $4600
+debug w w $5c03c 0
+wait 16
+debug echo \nSEG shields\n
+debug w w $5c160 $32
+wait 24
+debug echo \nSEG end\n
+quit

@@ -1,0 +1,44 @@
+# The object handlers with the enemies frozen ($2C7 cleared, as M does in
+# cheat mode), and angle_to_player's edges: the player still at a Juno
+# cannon's x (dx 0, a zero divide) with its bearing clamped below, then
+# above; at a fighter's x with dz -32768 (table B's zero divide), then 5
+# off it (table B's overflow); then thawed, launching a missile (L) by the
+# Juno cannon (launches go on in the missile view, lasers don't); then
+# docked ($2CA set). On the keys. (The capture slows Hatari to about a
+# quarter of real time.)
+wait 38
+key 57
+wait 3
+debug parse {arm}
+debug w b $5c1c7 0
+debug echo \nSEG frozen\n
+wait 6
+debug echo \nSEG juno_below\n
+# Juno cannon 47 (x &8540, z &5200), 1,536 behind it
+debug w w $12206 0
+debug w w $5c02e $8540 $ffd0 $5800
+debug w w $5c03c 0
+wait 6
+debug echo \nSEG juno_above\n
+# ... and 3,072 short of it
+debug w w $5c02e $8540 $ffd0 $4600
+wait 6
+debug echo \nSEG fighter\n
+# fighter 49 (its record's x and z put at &8F80, &5FC0): dz -32768
+debug w w $5ddde $8f80
+debug w w $5dde2 $5fc0
+debug w w $5c02e $8f80 $ffd0 $dfc0
+wait 6
+debug w w $5c02e $8f7b $ffd0 $dfc0
+wait 6
+debug echo \nSEG thawed\n
+debug w b $5c1c7 $ff
+debug w w $5c02e $8540 $ffd0 $4600
+wait 4
+key l
+wait 10
+debug echo \nSEG docked\n
+debug w b $5c1ca $ff
+wait 6
+debug echo \nSEG end\n
+quit

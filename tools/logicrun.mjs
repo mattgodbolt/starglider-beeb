@@ -19,7 +19,8 @@ import { loadSymbols } from "./beeb.mjs";
 
 // The routines: their entry and exit points in the capture, the port's
 // routine, and its bank; and whether the ST's d0 at the exit is compared
-// (where a later random8 adds it).
+// (where a later random8 adds it, or one within the routine adds what
+// the routine's earlier work left, as the mines' does).
 // An exit point "next:P" is P in the next frame; "unless" skips the frames
 // with that point (the post-frame tests, when they go to the level change).
 const ROUTINES = {
@@ -27,7 +28,7 @@ const ROUTINES = {
     world_after: { from: "lists", to: "render", call: "world_after", bank: "BANK_WORLD" },
     keys: { from: "render", to: "keys", call: "read_keys", bank: "BANK_LOGIC" },
     flight: { from: "keys", to: "flight", call: "player_flight", bank: "BANK_WORLD", d0: true },
-    handlers: { from: "flight", to: "handlers", call: "object_handlers", bank: "BANK_WORLD" },
+    handlers: { from: "flight", to: "handlers", call: "object_handlers", bank: "BANK_WORLD", d0: true },
     animate: { from: "handlers", to: "animate", call: "animate_shapes", bank: "BANK_WORLD" },
     collide: { from: "animate", to: "collide", call: "collisions", bank: "BANK_LOGIC" },
     message: { from: "collide", to: "message", call: "level_message", bank: "BANK_LOGIC" },
@@ -170,6 +171,18 @@ for (const v of map.variables) {
             },
             get: () => Array.from({ length: v.count }, (_, i) => ptrOf(ram[at + i])),
             want: (r) => Array.from({ length: v.count }, (_, i) => long(r, i)),
+        });
+    } else if (v.kind === "index") {
+        const long = (r) => st(r).readUInt32BE(v.offset);
+        items.push({
+            name: v.name,
+            put: (r) => {
+                const i = (long(r) - v.base) / v.stride;
+                if (!Number.isInteger(i) || i < 0 || i > 255) throw new Error(`${v.name}: &${long(r).toString(16)} isn't in the array`);
+                ram[at] = i;
+            },
+            get: () => [v.base + v.stride * ram[at]],
+            want: (r) => [long(r)],
         });
     } else if (v.kind === "slot") {
         const long = (r) => st(r).readUInt32BE(v.offset);
