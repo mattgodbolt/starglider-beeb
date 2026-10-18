@@ -30,30 +30,10 @@
     STZ mat_valid                       ; mat holds no object's, nor (as the
     STZ ground_valid                    ; build would leave it) ground_matrix's
     LDA cam_valid : BEQ build
-    LDX #5
-.same
-    LDA ang,X : ZA_INDEXEDBY 0..5
-    CMP cam_angles,X : BNE build
-    DEX : BPL same
-    LDX #17
-    ZA_DISCARD cam
-.put_cam
-    LDA cam_kept,X
-    STA cam,X : ZA_INDEXEDBY 0..17
-    DEX : BPL put_cam
-    LDX #9
-    ZA_DISCARD kmag
-.put_kmag
-    LDA kmag_kept,X
-    STA kmag,X : ZA_INDEXEDBY 0..9
-    DEX : BPL put_kmag
-    LDX #4
-    ZA_DISCARD ksign
-.put_ksign
-    LDA ksign_kept,X
-    STA ksign,X : ZA_INDEXEDBY 0..4
-    DEX : BPL put_ksign
-    RTS
+FOR i = 0..5
+    LDA ang+i : CMP cam_angles+i : BNE build
+NEXT
+    JMP same
 .build
     LDX #5
 .angles
@@ -100,6 +80,17 @@
     DEX : BPL camera_copy
     STZ mat_valid                       ; mat no longer holds an object's
     JMP rotate_setup
+.same
+FOR i = 0..17
+    LDA cam_kept+i : STA cam+i
+NEXT
+FOR i = 0..9
+    LDA kmag_kept+i : STA kmag+i
+NEXT
+FOR i = 0..4
+    LDA ksign_kept+i : STA ksign+i
+NEXT
+    RTS
 }
 \ the angles the camera was last built for (once cam_valid is set), and
 \ what was made from them that zero page doesn't keep
