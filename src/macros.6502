@@ -71,13 +71,16 @@ MACRO CLAMP v, lo, hi
 .done
 ENDMACRO
 
-MACRO WORLD acc, t, out
+\ WORLD acc, t, out, lo, hi: a vertex's coordinate in world units, its
+\ transform's sum in quarters (acc) plus the object's position t, into out
+\ and the vertex arrays lo and hi at Y; N and Z are its high byte's.
+MACRO WORLD acc, t, out, lo, hi
     LDA acc+1
     CMP #&80 : ROR A : ROR acc
     CMP #&80 : ROR A : ROR acc
-    STA acc+1
-    LDA acc : CLC : ADC t : STA out
-    LDA acc+1 : ADC t+1 : STA out+1
+    TAX
+    LDA acc : CLC : ADC t : STA out : STA lo,Y
+    TXA : ADC t+1 : STA out+1 : STA hi,Y
 ENDMACRO
 
 \ BANK n: page sideways bank n. bank_now first, so an interrupt that pages

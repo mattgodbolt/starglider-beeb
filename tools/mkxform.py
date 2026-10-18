@@ -14,7 +14,7 @@ code:
 - screen: straight onto the screen, for an object far enough away that
   its perspective is linear across it (render.6502, decision 10): two rows
   of B, the first-order change in x' and y' on the screen, sc_bmag and
-  sc_bsign.
+  sc_bsign, from the object's centre on the screen (sc_x0q, sc_y0q).
 
 Each object, the setup patches the matrix's bytes into the quarter-square
 reads of the terms, and each term's sign into how it's added: EORed with
@@ -42,7 +42,7 @@ SEC_OP = &38
 """)
 
 
-def transform(name, prefix, rows, mag, sign, acc, start, what):
+def transform(name, prefix, rows, mag, sign, acc, start, what, origin=None):
     emit(f"""ZA_AUTO {2 * rows}, {acc}             ; {what}, in quarters
 ZA_AUTO {2 * rows}, {start}           ; their starting values, {name}_setup's
 
@@ -72,10 +72,15 @@ ZA_AUTO {2 * rows}, {start}           ; their starting values, {name}_setup's
             emit(f"    LDA sum+1 : SBC {mag}+{2 * e + 1} : STA sum+1")
             emit("    LDA sum+2 : SBC #0 : STA sum+2")
             emit(f".done{e}")
-        emit(f"    \\ row {i} starts at -(the row's sum) / 2")
         emit("    LDA sum+2 : CMP #&80 : ROR A : ROR sum+1 : ROR sum")
-        emit(f"    LDA #0 : SEC : SBC sum : STA {start}+{2 * i}")
-        emit(f"    LDA #0 : SBC sum+1 : STA {start}+{2 * i + 1}")
+        if origin:
+            emit(f"    \\ row {i} starts at {origin[i]} - (the row's sum) / 2")
+            emit(f"    LDA {origin[i]} : SEC : SBC sum : STA {start}+{2 * i}")
+            emit(f"    LDA {origin[i]}+1 : SBC sum+1 : STA {start}+{2 * i + 1}")
+        else:
+            emit(f"    \\ row {i} starts at -(the row's sum) / 2")
+            emit(f"    LDA #0 : SEC : SBC sum : STA {start}+{2 * i}")
+            emit(f"    LDA #0 : SBC sum+1 : STA {start}+{2 * i + 1}")
     emit("    RTS")
     emit("}")
     emit()
@@ -123,5 +128,6 @@ ZA_AUTO {2 * rows}, {start}           ; their starting values, {name}_setup's
 
 
 transform("xform", "xf", 3, "xf_amag", "xf_asign", "xf_acc", "xf_start", "x', y', z' in world units")
-transform("screen", "sc", 2, "sc_bmag", "sc_bsign", "sc_acc", "sc_start", "the screen's x and y")
+transform("screen", "sc", 2, "sc_bmag", "sc_bsign", "sc_acc", "sc_start", "the screen's x and y",
+          ["sc_x0q", "sc_y0q"])
 print("\n".join(out))

@@ -569,6 +569,24 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     BRA each
 }
 
+\ TO_PIXELS q, centre, lo, hi: the word q, quarters of a pixel from the
+\ view's centre, to pixels truncated towards zero, as the ST's divs
+\ truncates (a negative q is (q + 3) >> 2), into lo and hi at Y.
+MACRO TO_PIXELS q, centre, lo, hi
+    LDA q+1 : BPL positive
+    LDA q : CLC : ADC #3 : STA q
+    LDA q+1 : ADC #0
+    CMP #&80 : ROR A : ROR q
+    CMP #&80 : ROR A : ROR q
+    BRA shifted
+.positive
+    LSR A : ROR q : LSR A : ROR q
+.shifted
+    TAX
+    LDA q : CLC : ADC #LO(centre) : STA lo,Y
+    TXA : ADC #HI(centre) : STA hi,Y
+ENDMACRO
+
 \ vertex_far: vertex A of a far object onto the screen; once an object.
 .vertex_far
 {
@@ -590,31 +608,10 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA (fr_vy),Y : EOR #&80 : STA xf_u+1
     LDA (fr_vz),Y : EOR #&80 : STA xf_u+2
 .got
-    JSR screen_vertex
-    \ the centre's quarters added, then truncated towards zero to pixels,
-    \ as the ST's divs truncates
+    JSR screen_vertex                       ; from the centre's quarters
     LDY vtx
-    LDA sc_acc : CLC : ADC sc_x0q : STA sc_acc : LDA sc_acc+1 : ADC sc_x0q+1
-    JSR to_pixels
-    LDA sc_acc : CLC : ADC #LO(VIEW_CX) : STA v_sxlo,Y
-    LDA sc_acc+1 : ADC #HI(VIEW_CX) : STA v_sxhi,Y
-    LDA sc_acc+2 : CLC : ADC sc_y0q : STA sc_acc : LDA sc_acc+3 : ADC sc_y0q+1
-    JSR to_pixels
-    LDA sc_acc : CLC : ADC #LO(VIEW_CY) : STA v_sylo,Y
-    LDA sc_acc+1 : ADC #HI(VIEW_CY) : STA v_syhi,Y
-    RTS
-\ to_pixels: sc_acc (its low byte; the high byte in A) / 4, truncated
-\ towards zero, into sc_acc.
-.to_pixels
-    BPL quarter
-    EOR #&FF : STA sc_acc+1 : LDA sc_acc : EOR #&FF : CLC : ADC #1 : STA sc_acc
-    LDA sc_acc+1 : ADC #0
-    LSR A : ROR sc_acc : LSR A : ROR sc_acc
-    EOR #&FF : STA sc_acc+1 : LDA sc_acc : EOR #&FF : CLC : ADC #1 : STA sc_acc
-    LDA sc_acc+1 : ADC #0 : STA sc_acc+1
-    RTS
-.quarter
-    LSR A : ROR sc_acc : LSR A : ROR sc_acc : STA sc_acc+1
+    TO_PIXELS sc_acc, VIEW_CX, v_sxlo, v_sxhi
+    TO_PIXELS sc_acc+2, VIEW_CY, v_sylo, v_syhi
     RTS
 }
 
@@ -729,7 +726,7 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 .vertex
 {
     ZA_AUTO1 vtx
-    ZA_AUTO2 cvx, cvy, cvz
+    ZA_AUTO2 cvy
     TAX
     LDA vert_mark,X : CMP stamp : BNE new
     RTS
@@ -748,16 +745,17 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA (fr_vz),Y : EOR #&80 : STA xf_u+2
 .got
     JSR xform_vertex
-    WORLD xf_acc, tx, cvx
-    WORLD xf_acc+2, ty, cvy
-    WORLD xf_acc+4, tz, cvz
     LDY vtx
-    LDA cvx : STA v_xlo,Y : LDA cvx+1 : STA v_xhi,Y
-    LDA cvy : STA v_ylo,Y : LDA cvy+1 : STA v_yhi,Y
-    LDA cvz : STA v_zlo,Y : LDA cvz+1 : STA v_zhi,Y
-    CMPS16 cvz, #NEAR_Z : BMI behind
-    MOVW pz, cvz : JSR proj_z
-    MOVW px, cvx : JSR proj_x
+    WORLD xf_acc, tx, px, v_xlo, v_xhi
+    WORLD xf_acc+2, ty, cvy, v_ylo, v_yhi
+    WORLD xf_acc+4, tz, pz, v_zlo, v_zhi
+    \ behind the near plane if z < NEAR_Z (a byte), from z's high byte
+    BMI behind
+    BNE front
+    LDA pz : CMP #NEAR_Z : BCC behind
+.front
+    JSR proj_z
+    JSR proj_x
     LDY vtx
     LDA pq : CLC : ADC #LO(VIEW_CX) : STA v_sxlo,Y
     LDA pq+1 : ADC #HI(VIEW_CX) : STA v_sxhi,Y
