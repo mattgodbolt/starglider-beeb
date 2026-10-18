@@ -403,6 +403,8 @@ def main():
     L.append("\\ as the ST prints them before its 3D) and the colour (&FF: the current one)")
     for i, t in enumerate(TEXTS):
         L.append(f"TXT_{t[0]} = {i}")
+    # (each text's top row, for what must know where the texts lie)
+    L.append("TXT_Y = {" + ", ".join(str(places[t[2]][1]) for t in TEXTS) + "}")
 
     def text_at(t, part):
         x, y = places[t[2]]

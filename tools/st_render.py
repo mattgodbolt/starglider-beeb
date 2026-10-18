@@ -6,7 +6,7 @@ arithmetic, checked against the lines the ST drew (tools/st_scenes.py).
 
 For each captured frame it rebuilds, from the frame's dumped state, what
 world_render does: the camera matrix from the player's angles (&050A2,
-&04258), the coarse and near lists (&05750), each object rotated into
+&04258), or in the missile view the missile's (L_05248, &053C8), the coarse and near lists (&05750), each object rotated into
 camera space and the draw list (&057B8, &04092), then each drawn object
 (&04B1C): its matrix (&04114), the back-face test (&04BC2), the vertex
 transform (&03FFE), the near-plane clip (&0A374), the projection (&04D66)
@@ -152,9 +152,13 @@ class Renderer:
     def frame(self, mem):
         """Everything world_render computes before drawing, and the lines."""
         self.mem = mem
-        pitch, heading, roll = mem.var(0x13A), mem.var(0x13C), mem.var(0x13E)
+        # in the missile view (L_05248) the camera is the missile's, its
+        # window the missile view's ($2A0-$2A6, which $146-$14C hold then)
+        cam = 0x26A if mem.u8(A6 + 0x2C9) else 0x12E
+        aim = 0x270 if mem.u8(A6 + 0x2C9) else 0x13A
+        pitch, heading, roll = mem.var(aim), mem.var(aim + 2), mem.var(aim + 4)
         self.camera = self.matrix(*self.angles(pitch, heading, w(-roll)))
-        player = (mem.var(0x12E), mem.var(0x130), mem.var(0x132))
+        player = (mem.var(cam), mem.var(cam + 2), mem.var(cam + 4))
         coarse = self.coarse_list(player)
         near, drawlist, rel = self.lists(coarse, player)
         objects = []
@@ -252,8 +256,8 @@ class Renderer:
         for _ in range(nf):
             hdr = [prg.s16(f + 2 * j) for j in range(9)]
             colour = hdr[0] & 0xFFFF                    # $208: the last face's wins
-            if mem.has(BASE + f - 18):                  # the beam's, which animate_shapes cycles
-                colour = mem.u16(BASE + f - 18)
+            if mem.has(BASE + f):                       # the beam's, which animate_shapes cycles
+                colour = mem.u16(BASE + f)
             f += 18
             nvi, nei = hdr[7], hdr[8]
             idx = [prg.s16(f + 2 * j) for j in range(nvi + nei)]

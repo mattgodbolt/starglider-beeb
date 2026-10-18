@@ -154,7 +154,7 @@ ASSERT irq_handler < &3000
 .erased
     JSR draw_begin
     JSR view_under
-    JSR draw_objects
+    JSR view_objects
     JSR draw_end
     JSR panel_draw                              ; (cockpit.6502)
     LDA #&FF : STA frame_drawn

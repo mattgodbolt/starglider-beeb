@@ -228,7 +228,18 @@ full).
   x 16-303, take picture rows (10+$27C).. onward; rows 131−$27C..130 are
   filled with 0. $27C goes &70→0 by 8 a frame: 14 frames of the picture
   sliding down. It closes the same way when $276 < &F.
-- **3D.** Drawn only when $27C = 0, clipped to x 80-239, y 16-(112−$27C).
+- **3D.** Drawn only when $27C = 0: while the window moves &053C0 skips
+  the lists, the dots and the draw loop, so the window shows the picture
+  alone. Once it's open, from the missile's place ($26A-$26E) and angles
+  (each object's pitch and heading plus $270 and $272, its roll −$274),
+  clipped to $2A0-$2A6, x 80-239, y 16-112, which &0539E puts in
+  $146-$14C; the projection's centre stays (143, 68). [code; measured
+  2026-10-18 with `tests/st/missile.txt`, whose MVIEW records see every
+  missile-view frame: no line in any frame the window moved, and every
+  line of the open frames `tools/st_render.py`'s, with the missile's
+  camera and this window]
+- **The pace.** With only the picture to copy, a frame of the slide takes 2
+  VBLs, where an open frame takes 5 or more [measured, the same capture].
 - **The bar** (open only). 17−n blocks, n = (($276−&F) asr 4) & 15
   (st-logic.md says 16−n; the dbra makes it 17−n). Each block is 4×4 at
   x_k−2..x_k+1, y 118-121, colour 7, ORed over the picture's yellow pips

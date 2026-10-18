@@ -37,7 +37,7 @@ HATARI_TOS ?= ../hatari/emutos/emutos-256k-1.3/etos256uk.img
 ST_DISC  = original/st/Starglider (1987)(Rainbird).st
 ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
-SCENES   = flight towers docked
+SCENES   = flight towers docked missile
 SOURCES  = $(wildcard src/*.6502 src/logic/*.6502)
 GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/sight.6502 build/gen/ground.6502 build/gen/window.6502 build/gen/panel.6502
 

@@ -35,6 +35,18 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 .spike_done
     RTS
 
+\ spike_missile: render's camera, in the missile view, the missile's and
+\ back (mview.6502's camera_swap), round its lists, as world_lists'
+\ missile_lists makes them.
+.spike_missile
+{
+    BANK_ANDY BANK_PIC
+    LDA mv_render : BEQ done
+    JMP camera_swap
+.done
+    RTS
+}
+
 \ spike_logic: logic_call's routine, with logic_bank paged, for
 \ tools/logicrun.mjs.
 .spike_logic
@@ -83,6 +95,20 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
     LDA log_base : STA log_ptr : LDA log_base+1 : STA log_ptr+1
     BANK_ANDY BANK_LOGIC                        ; (as frame_show calls view_overlays)
     JMP over_draw
+
+\ spike_objects: logic_call's routine (world_lists, which makes the lists
+\ and the camera), then the draw list's objects as the disc's frame draws
+\ them (code.6502's view_objects), each line logged as render logs them,
+\ for tools/viewrun.mjs.
+.spike_objects
+    ZA_ENTRY
+    LDA logic_bank : STA bank_now : STA romsel
+    JSR logic_jump
+    STZ log_n : STZ log_n+1
+    LDA log_base : STA log_ptr : LDA log_base+1 : STA log_ptr+1
+    JSR draw_begin
+    JSR view_objects
+    JMP draw_end
 
 \ spike_sines: sincos at every angle, the sine and cosine (4 bytes) for
 \ each into the log's bank in turn, for tools/sinecheck.py.

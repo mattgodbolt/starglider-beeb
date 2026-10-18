@@ -13,7 +13,8 @@
 \ ***************************************************************************
 
 \ The window, the projection's centre and its shift: the ST's colour-mode
-\ values ($146-$14C, $1FC, $1FE, $212; &08CA0).
+\ values ($146-$14C, $1FC, $1FE, $212; &08CA0). (The missile view clips
+\ to a window of its own: CLIP_SITES, below.)
 VIEW_XMIN = 16
 VIEW_XMAX = 303
 VIEW_YMIN = 10
@@ -29,11 +30,13 @@ IF DEFINED(SPIKE)
 .render
     STZ log_n : STZ log_n+1
     LDA log_base : STA log_ptr : LDA log_base+1 : STA log_ptr+1
+    JSR spike_missile
     BANK BANK_WORLD
     JSR camera
 .render_lists
     JSR coarse_list
     JSR rotate_lists
+    JSR spike_missile
 .render_objects
     JSR draw_phase
 .render_done
@@ -63,7 +66,7 @@ ENDIF
 IF DEFINED(SPIKE)
 .draw_phase
     JSR draw_begin
-    JSR draw_objects
+    JSR view_objects
     JMP draw_end
 ENDIF
 
@@ -330,7 +333,8 @@ OM_SIZE = 6 + 18
 \ draw_objects (&05108): the draw list read from its top. Each object's
 \ matrix takes the player's pitch and heading added to its own, and the
 \ player's roll negated (the ST's sum of angles, not a product of
-\ matrices).
+\ matrices). In the missile view the missile's stand in (L_05248's loop,
+\ &0545A: code.6502's view_objects).
 .draw_objects
 {
     ZA_AUTO1 list_i
@@ -833,14 +837,39 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     INC pq : BNE r_ok
     INC pq+1
 .r_ok
+    \ (each edge's low byte is the window's, patched: CLIP_SITES)
     LDA sc_x0 : SEC : SBC pq : STA d : LDA sc_x0+1 : SBC pq+1 : STA d+1
-    CMPS16 d, #VIEW_XMIN - VIEW_CX : BMI outside
+    SEC : LDA d
+.in_left
+    SBC #LO(VIEW_XMIN - VIEW_CX)
+    LDA d+1 : SBC #HI(VIEW_XMIN - VIEW_CX)
+    BVC left : EOR #&80
+.left
+    BMI outside
     LDA sc_x0 : CLC : ADC pq : STA d : LDA sc_x0+1 : ADC pq+1 : STA d+1
-    CMPS16 d, #VIEW_XMAX - VIEW_CX + 1 : BPL outside
+    SEC : LDA d
+.in_right
+    SBC #LO(VIEW_XMAX - VIEW_CX + 1)
+    LDA d+1 : SBC #HI(VIEW_XMAX - VIEW_CX + 1)
+    BVC right : EOR #&80
+.right
+    BPL outside
     LDA sc_y0 : SEC : SBC pq : STA d : LDA sc_y0+1 : SBC pq+1 : STA d+1
-    CMPS16 d, #VIEW_YMIN - VIEW_CY : BMI outside
+    SEC : LDA d
+.in_top
+    SBC #LO(VIEW_YMIN - VIEW_CY)
+    LDA d+1 : SBC #HI(VIEW_YMIN - VIEW_CY)
+    BVC top : EOR #&80
+.top
+    BMI outside
     LDA sc_y0 : CLC : ADC pq : STA d : LDA sc_y0+1 : ADC pq+1 : STA d+1
-    CMPS16 d, #VIEW_YMAX - VIEW_CY + 1 : BPL outside
+    SEC : LDA d
+.in_bottom
+    SBC #LO(VIEW_YMAX - VIEW_CY + 1)
+    LDA d+1 : SBC #HI(VIEW_YMAX - VIEW_CY + 1)
+    BVC bottom : EOR #&80
+.bottom
+    BPL outside
     LDA #&80 : STA far_inside
 .outside
     RTS
@@ -902,18 +931,26 @@ MACRO TO_PIXELS q, centre, lo, hi
 ENDMACRO
 
 \ VERTEX_CODE: A = the window's outcode of vertex Y on the screen (v_sx,
-\ v_sy), as OUTCODE makes it; X is lost.
-ASSERT VIEW_XMIN < 256 AND HI(VIEW_XMAX + 1) = 1
-ASSERT VIEW_YMIN < 256 AND VIEW_YMAX < 255
+\ v_sy), as OUTCODE makes it; X is lost. Its edges are patched
+\ (CLIP_SITES), at the offsets VC_* from its first byte, which it asserts.
 MACRO VERTEX_CODE
+.start
     LDA v_sxhi,Y : BNE x_high
-    LDA v_sxlo,Y : CMP #VIEW_XMIN
-    LDA #0 : BCS x_done
+    LDA v_sxlo,Y
+.xmin
+    CMP #VIEW_XMIN
+    LDA #0
+.low
+    BCS x_done                              ; (to low_right in a window below x 256)
     BCC x_left
 .x_high
     BMI x_left
+.xhi
     CMP #HI(VIEW_XMAX + 1) : BNE x_right
-    LDA v_sxlo,Y : CMP #LO(VIEW_XMAX + 1)
+.low_right
+    LDA v_sxlo,Y
+.xlo
+    CMP #LO(VIEW_XMAX + 1)
     LDA #0 : BCC x_done
 .x_right
     LDA #8 : BRA x_done
@@ -921,7 +958,10 @@ MACRO VERTEX_CODE
     LDA #2
 .x_done
     LDX v_syhi,Y : BNE y_high
-    LDX v_sylo,Y : CPX #VIEW_YMIN : BCC y_above
+    LDX v_sylo,Y
+.ymin
+    CPX #VIEW_YMIN : BCC y_above
+.ymax
     CPX #VIEW_YMAX + 1 : BCC y_done
 .y_below
     ORA #4 : BRA y_done
@@ -930,7 +970,12 @@ MACRO VERTEX_CODE
 .y_above
     ORA #1
 .y_done
+    ASSERT xmin + 1 - start = VC_XMIN AND low + 1 - start = VC_LOW AND xhi + 1 - start = VC_XHI
+    ASSERT xlo + 1 - start = VC_XLO AND ymin + 1 - start = VC_YMIN AND ymax + 1 - start = VC_YMAX
+    ASSERT x_done - (low + 2) = VC_TO_DONE AND low_right - (low + 2) = VC_TO_RIGHT
 ENDMACRO
+VC_XMIN = 9 : VC_LOW = 13 : VC_XHI = 19 : VC_XLO = 26 : VC_YMIN = 46 : VC_YMAX = 50
+VC_TO_DONE = 23 : VC_TO_RIGHT = 8
 
 \ vertex_far: vertex Y of a far object onto the screen, and its outcode
 \ unless the object is inside the window; the caller makes it once an
@@ -958,6 +1003,7 @@ ENDMACRO
     TO_PIXELS sc_acc, VIEW_CX, v_sxlo, v_sxhi
     TO_PIXELS sc_acc+2, VIEW_CY, v_sylo, v_syhi
     BIT far_inside : BMI inside
+.code
     VERTEX_CODE : STA v_code,Y
 .inside
     RTS
@@ -1202,6 +1248,7 @@ ENDMACRO
     LDY vtx
     LDA pq : CLC : ADC #LO(VIEW_CY) : STA v_sylo,Y
     LDA pq+1 : ADC #HI(VIEW_CY) : STA v_syhi,Y
+.code
     VERTEX_CODE : STA v_code,Y
     RTS
 }
@@ -1517,20 +1564,30 @@ ASSERT NEAR_Z > 0 AND NEAR_Z < 256
 }
 
 \ OUTCODE x, y: A = the window's outcode of the point (x, y), words: 8
-\ right, 4 below, 2 left, 1 above (&0A174). Y is lost. The window spans
-\ x's high bytes 0 and 1 and lies in y's 0, so a high byte settles most
-\ points alone.
-ASSERT VIEW_XMIN < 256 AND HI(VIEW_XMAX + 1) = 1
-ASSERT VIEW_YMIN < 256 AND VIEW_YMAX < 255
+\ right, 4 below, 2 left, 1 above (&0A174). Y is lost. The window's left
+\ edge and its y lie in their low bytes, so a high byte settles most
+\ points alone. Its edges are patched (CLIP_SITES), at the offsets OC_*
+\ from its first byte, which it asserts: the view's right edge lies in x's
+\ high byte 1, the missile view's in 0, where low's branch goes on to
+\ low_right.
 MACRO OUTCODE x, y
+.start
     LDA x+1 : BNE x_high
-    LDA x : CMP #VIEW_XMIN
-    LDA #0 : BCS x_done
+    LDA x
+.xmin
+    CMP #VIEW_XMIN
+    LDA #0
+.low
+    BCS x_done                              ; (to low_right in a window below x 256)
     BCC x_left
 .x_high
     BMI x_left
+.xhi
     CMP #HI(VIEW_XMAX + 1) : BNE x_right
-    LDA x : CMP #LO(VIEW_XMAX + 1)
+.low_right
+    LDA x
+.xlo
+    CMP #LO(VIEW_XMAX + 1)
     LDA #0 : BCC x_done
 .x_right
     LDA #8 : BRA x_done
@@ -1538,7 +1595,10 @@ MACRO OUTCODE x, y
     LDA #2
 .x_done
     LDY y+1 : BNE y_high
-    LDY y : CPY #VIEW_YMIN : BCC y_above
+    LDY y
+.ymin
+    CPY #VIEW_YMIN : BCC y_above
+.ymax
     CPY #VIEW_YMAX + 1 : BCC y_done
 .y_below
     ORA #4 : BRA y_done
@@ -1547,7 +1607,12 @@ MACRO OUTCODE x, y
 .y_above
     ORA #1
 .y_done
+    ASSERT xmin + 1 - start = OC_XMIN AND low + 1 - start = OC_LOW AND xhi + 1 - start = OC_XHI
+    ASSERT xlo + 1 - start = OC_XLO AND ymin + 1 - start = OC_YMIN AND ymax + 1 - start = OC_YMAX
+    ASSERT x_done - (low + 2) = OC_TO_DONE AND low_right - (low + 2) = OC_TO_RIGHT
 ENDMACRO
+OC_XMIN = 7 : OC_LOW = 11 : OC_XHI = 17 : OC_XLO = 23 : OC_YMIN = 41 : OC_YMAX = 45
+OC_TO_DONE = 22 : OC_TO_RIGHT = 8
 
 \ BYTE_MAG w, far: A = |w| if it's under 256, and otherwise to far.
 MACRO BYTE_MAG w, far
@@ -1625,17 +1690,23 @@ ENDMACRO
     STZ code1                           ; point 1 is now the one inside
 .cut
     \ the window's first edge that point 0 is outside: above, left, below,
-    \ right, by code0's bits from the bottom
+    \ right, by code0's bits from the bottom (each patched: CLIP_SITES)
     LSR code0 : BCC not_top
+.edge_top
     LDA #VIEW_YMIN : BRA cut_y
 .not_top
     LSR code0 : BCC not_left
+.edge_left
     LDX #LO(VIEW_XMIN) : LDA #HI(VIEW_XMIN) : BRA cut_x
 .not_left
     LSR code0 : BCC not_bottom
+.edge_bottom
     LDA #VIEW_YMAX : BRA cut_y
 .not_bottom
-    LDX #LO(VIEW_XMAX) : LDA #HI(VIEW_XMAX)
+.edge_right
+    LDX #LO(VIEW_XMAX)
+.edge_right_hi
+    LDA #HI(VIEW_XMAX)
 .cut_x
     \ y0 += (edge - x0)(y1 - y0) / (x1 - x0), x0 = edge
     STX edge : STA edge+1
@@ -1698,12 +1769,15 @@ ENDMACRO
     LDA num : STA pq : STY pq+1
     RTS
 \ clamp_y, clamp_x: the word at clip_pts + X into the window's y or x
-\ range, below first (&0A2F8, &0A330).
+\ range, below first (&0A2F8, &0A330). The edges are patched (CLIP_SITES),
+\ and in a window below x 256, x_byte's branch goes on to byte_right.
 .clamp_y
     LDA clip_pts+1,X : ZA_INDEXEDBY {2, 6}
     BMI y_low : BNE y_high
     LDA clip_pts,X : ZA_INDEXEDBY {2, 6}
+.y_min
     CMP #VIEW_YMIN : BCC y_low
+.y_max
     CMP #VIEW_YMAX + 1 : BCC clamped
 .y_high
     LDA #VIEW_YMAX
@@ -1718,16 +1792,23 @@ ENDMACRO
 .clamp_x
     LDA clip_pts+1,X : ZA_INDEXEDBY {0, 4}
     BMI x_low : BEQ x_byte
+.x_hi
     CMP #HI(VIEW_XMAX + 1) : BNE x_high
+.byte_right
     LDA clip_pts,X : ZA_INDEXEDBY {0, 4}
+.x_lo
     CMP #LO(VIEW_XMAX + 1) : BCC clamped
 .x_high
     LDA #LO(VIEW_XMAX) : STA clip_pts,X : ZA_INDEXEDBY {0, 4}
+.x_high_hi
     LDA #HI(VIEW_XMAX) : STA clip_pts+1,X : ZA_INDEXEDBY {0, 4}
     RTS
 .x_byte
     LDA clip_pts,X : ZA_INDEXEDBY {0, 4}
-    CMP #VIEW_XMIN : BCS clamped
+.x_min
+    CMP #VIEW_XMIN
+.x_in
+    BCS clamped                         ; (to byte_right in a window below x 256)
 .x_low
     LDA #VIEW_XMIN : STA clip_pts,X : ZA_INDEXEDBY {0, 4}
     STZ clip_pts+1,X : ZA_INDEXEDBY {0, 4}
@@ -1762,3 +1843,44 @@ ENDIF
 .draw
     JMP line_plot                       ; (its ends are cx0, cy0, cx1, cy1)
 }
+
+\ ---------------------------------------------------------------------------
+\ The window's clip, patched (mview.6502's clip_window): each site's
+\ operand for a window, as clip_values makes them. The view's is the
+\ assembled one; the missile view's is the ST's $2A0-$2A6 (&08CF4), which
+\ L_05248 puts in $146-$14C while it draws, the projection's centre left
+\ the view's. A window's left edge and its y lie in their low bytes, and
+\ its right edge either below x 256 (then the low branches go on to the
+\ right edge's test) or in the high byte 1.
+MV_XMIN = &50
+MV_XMAX = &EF
+MV_YMIN = &10
+MV_YMAX = &70
+CLIP_SITES = FLATTEN({
+    far_setup.in_left + 1, far_setup.in_right + 1, far_setup.in_top + 1, far_setup.in_bottom + 1,
+    vertex_far.code + {VC_XMIN, VC_LOW, VC_XHI, VC_XLO, VC_YMIN, VC_YMAX},
+    vertex.code + {VC_XMIN, VC_LOW, VC_XHI, VC_XLO, VC_YMIN, VC_YMAX},
+    clip_line.again + {OC_XMIN, OC_LOW, OC_XHI, OC_XLO, OC_YMIN, OC_YMAX},
+    clip_line.again0 + {OC_XMIN, OC_LOW, OC_XHI, OC_XLO, OC_YMIN, OC_YMAX},
+    clip_line.edge_top + 1, clip_line.edge_left + 1, clip_line.edge_bottom + 1,
+    clip_line.edge_right + 1, clip_line.edge_right_hi + 1,
+    clip_line.y_min + 1, clip_line.y_max + 1, clip_line.y_high + 1, clip_line.y_low + 1,
+    clip_line.x_hi + 1, clip_line.x_lo + 1, clip_line.x_high + 1, clip_line.x_high_hi + 1,
+    clip_line.x_min + 1, clip_line.x_in + 1, clip_line.x_low + 1})
+FUNCTION clip_low(x1, to_done, to_right) = LO(to_right + (x1 >= 255) * (to_done - to_right))
+FUNCTION clip_values(x0, x1, y0, y1) = FLATTEN({
+    LO(x0 - VIEW_CX), LO(x1 - VIEW_CX + 1), LO(y0 - VIEW_CY), LO(y1 - VIEW_CY + 1),
+    REPEATED(2, {x0, clip_low(x1, VC_TO_DONE, VC_TO_RIGHT), HI(x1 + 1), LO(x1 + 1), y0, y1 + 1}),
+    REPEATED(2, {x0, clip_low(x1, OC_TO_DONE, OC_TO_RIGHT), HI(x1 + 1), LO(x1 + 1), y0, y1 + 1}),
+    y0, LO(x0), y1, LO(x1), HI(x1),
+    y0, y1 + 1, y1, y0,
+    HI(x1 + 1), LO(x1 + 1), LO(x1), HI(x1),
+    x0, clip_low(x1, clip_line.clamped - (clip_line.x_in + 2), clip_line.byte_right - (clip_line.x_in + 2)), x0})
+CLIP_N = SHAPE(CLIP_SITES)[0]
+ASSERT SHAPE(clip_values(VIEW_XMIN, VIEW_XMAX, VIEW_YMIN, VIEW_YMAX))[0] = CLIP_N
+FOR w = {{VIEW_XMIN, VIEW_XMAX, VIEW_YMIN, VIEW_YMAX}, {MV_XMIN, MV_XMAX, MV_YMIN, MV_YMAX}}
+    ASSERT w[0] < 256 AND w[2] < 256 AND w[3] < 255 AND (w[1] < 255 OR HI(w[1] + 1) = 1)
+    \ (only the low bytes are patched where they're relative to the centre)
+    ASSERT HI(w[0] - VIEW_CX) = HI(VIEW_XMIN - VIEW_CX) AND HI(w[1] - VIEW_CX + 1) = HI(VIEW_XMAX - VIEW_CX + 1)
+    ASSERT HI(w[2] - VIEW_CY) = HI(VIEW_YMIN - VIEW_CY) AND HI(w[3] - VIEW_CY + 1) = HI(VIEW_YMAX - VIEW_CY + 1)
+NEXT

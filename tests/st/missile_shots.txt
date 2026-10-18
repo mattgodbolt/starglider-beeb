@@ -1,0 +1,51 @@
+# The missile view on the ST's screen (tools/st_hatari.py, no breakpoints):
+# screenshots through the window's opening, open, and through its
+# closing, its life cut to 60.
+wait 38
+key 57
+wait 3
+key 57 3
+wait 4
+key l 0.2
+debug w w $5c176 60
+shot open00
+shot open01
+shot open02
+shot open03
+shot open04
+shot open05
+shot open06
+shot open07
+shot open08
+shot open09
+shot open10
+shot open11
+shot open12
+shot open13
+wait 2
+shot view0
+down 0x4b
+wait 1
+shot view1
+wait 1
+shot view2
+up 0x4b
+wait 1.6
+shot close00
+shot close01
+shot close02
+shot close03
+shot close04
+shot close05
+shot close06
+shot close07
+shot close08
+shot close09
+shot close10
+shot close11
+shot close12
+shot close13
+shot close14
+shot close15
+wait 2
+quit
