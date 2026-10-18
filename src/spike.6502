@@ -13,12 +13,14 @@ INCLUDE "zp.6502"
 
 SECTION Spike, org = &0E00, filename = "SPIKE", guard = LOG, cmos = TRUE
 .spike_init
+    ZA_ENTRY
     JSR mul_init
     JSR line_draw
     JSR screen_mode
     RTS
 
 .spike_frame
+    ZA_ENTRY
     JSR render
 .spike_done
     RTS

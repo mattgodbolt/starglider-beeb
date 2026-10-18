@@ -112,12 +112,14 @@ for v, kind in (("tr", "steep_r"), ("tl", "steep_l"), ("sr", "shallow_r"), ("sl"
             emit(f"    STA {v}_adc{p}+1")
         emit("    LSR A : STA line_errs")
         emit(f"    SEC : JMP ({v}_entry,X)")
+        emit(f"    ZA_CANJUMP {v}_s0, {v}_s1, {v}_s2, {v}_s3")
         emit(f".{v}_single                       ; vertical: one virtual step after dy rows")
         emit("    LDA #1")
         for p in range(4):
             emit(f"    STA {v}_sbc{p}+1")
         emit("    STA line_cnt : STA line_ls")
         emit(f"    LDA line_dy : SEC : JMP ({v}_entry,X)")
+        emit(f"    ZA_CANJUMP {v}_s0, {v}_s1, {v}_s2, {v}_s3")
     else:
         for p in range(4):
             emit(f"    STA {v}_adc{p}+1")
@@ -129,12 +131,14 @@ for v, kind in (("tr", "steep_r"), ("tl", "steep_l"), ("sr", "shallow_r"), ("sl"
         emit("    LDA #2 : STA line_ls")
         emit("    LDA line_dx : LSR A : STA line_errs")
         emit(f"    SEC : JMP ({v}_entry,X)")
+        emit(f"    ZA_CANJUMP {v}_s0, {v}_s1, {v}_s2, {v}_s3")
         emit(f".{v}_single                       ; horizontal: one virtual step after dx pixels")
         emit("    LDA #1")
         for p in range(4):
             emit(f"    STA {v}_sbc{p}+1")
         emit("    STA line_cnt : STA line_ls")
         emit(f"    LDA line_dx : SEC : JMP ({v}_entry,X)")
+        emit(f"    ZA_CANJUMP {v}_s0, {v}_s1, {v}_s2, {v}_s3")
     emit()
 
 # ---- steep blocks ------------------------------------------------------------

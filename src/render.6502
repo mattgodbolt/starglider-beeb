@@ -80,6 +80,14 @@ MACRO MOVW r, a
     LDA a : STA r : LDA a+1 : STA r+1
 ENDMACRO
 
+\ Working variables several routines (and the macros) share.
+ZA_AUTO2 acc                ; a row's sum
+ZA_AUTO 6, vw               ; a vertex's coordinates, x y z words
+ZA_AUTO2 m_idx, m_sin, m_cos  ; sincos's index and results
+ZA_AUTO1 ocolour            ; the object's colour, the ST's number
+ZA_AUTO 6, ep               ; an edge's ends in camera space, x y z words
+ZA_AUTO 6, eq
+
 \ VROW r, t, out: out = (the sum of mat's row r times vw) asr 4, plus t.
 MACRO VROW r, t, out
     LDA mat+r : STA mul_x : LDA mat+r+1 : STA mul_x+1
@@ -96,6 +104,20 @@ MACRO VROW r, t, out
     STA acc+1
     LDA acc : CLC : ADC t : STA out
     LDA acc+1 : ADC t+1 : STA out+1
+ENDMACRO
+
+\ CLAMP v, lo, hi: the word v into lo..hi, below first (&0A2F8, &0A330).
+MACRO CLAMP v, lo, hi
+    CMPS16 v, #lo : BPL not_low
+    LDA #LO(lo) : STA v : LDA #HI(lo) : STA v+1
+    BRA done
+.not_low
+    SEC : LDA #LO(hi) : SBC v : LDA #HI(hi) : SBC v+1
+    BVC ok : EOR #&80
+.ok
+    BPL done
+    LDA #LO(hi) : STA v : LDA #HI(hi) : STA v+1
+.done
 ENDMACRO
 
 MACRO BANK n
@@ -127,8 +149,10 @@ ENDMACRO
     LDA #0 : SBC pl_roll+1 : STA ang_r+1
     JSR build_matrix
     LDX #17
+    ZA_DISCARD cam
 .camera_copy
-    LDA mat,X : STA cam,X
+    LDA mat,X : ZA_INDEXEDBY 0..17
+    STA cam,X : ZA_INDEXEDBY 0..17
     DEX : BPL camera_copy
     STZ mat_valid                       ; mat no longer holds an object's
     RTS
@@ -136,6 +160,8 @@ ENDMACRO
 \ sincos: m_sin, m_cos = the sine table at m_idx (0-4095) and 1024 on.
 \ The sine bank must be paged.
 .sincos
+{
+    ZA_AUTO2 m_ptr
     LDA m_idx : STA m_ptr
     LDA m_idx+1 : CLC : ADC #HI(sine_lo) : STA m_ptr+1
     LDA (m_ptr) : STA m_sin
@@ -146,22 +172,26 @@ ENDMACRO
     LDA m_ptr+1 : CLC : ADC #HI(SINE_ENTRIES) : STA m_ptr+1
     LDA (m_ptr) : STA m_cos+1
     RTS
+}
 
 \ build_matrix (&04114): mat from ang_p, ang_h, ang_r (pitch, heading,
 \ roll), as rows x', y', z' of coefficients on x, y, z. The ST keeps the
 \ last object's matrix when the angles haven't changed, and so does this.
 .build_matrix
 {
+    ZA_AUTO2 m_s1, m_c1, m_s2, m_c2, m_s3, m_c3, m_d6, m_d7, m_t
     LDA mat_valid : BEQ build
     LDX #5
 .same
-    LDA ang_p,X : CMP mat_angles,X : BNE build
+    LDA ang,X : ZA_INDEXEDBY 0..5
+    CMP mat_angles,X : BNE build
     DEX : BPL same
     RTS
 .build
     LDX #5
 .keep
-    LDA ang_p,X : STA mat_angles,X
+    LDA ang,X : ZA_INDEXEDBY 0..5
+    STA mat_angles,X
     DEX : BPL keep
     LDA #&FF : STA mat_valid
     BANK BANK_SINE
@@ -200,6 +230,7 @@ ENDMACRO
 \ Each slot's list flags are cleared, as the ST clears them.
 .coarse_list
 {
+    ZA_AUTO2 dx, dz
     STZ coarse_n
     LDA docked : BEQ open
     LDA #SLOT_TUNNEL : STA coarse_slots
@@ -242,6 +273,9 @@ ENDMACRO
 \ pushed in that order.
 .rotate_lists
 {
+    ZA_AUTO1 list_i, row_i
+    ZA_AUTO2 dx, dy, dz, cx, cy, cz, z2, nz2, t16
+    ZA_AUTO 18, rx              ; x', y', z' at +0, +6, +12
     STZ near_n : STZ draw_n
     LDX coarse_n : BNE each
     RTS
@@ -259,24 +293,31 @@ ENDMACRO
     LDY #OB_Z : LDA (rec),Y : SEC : SBC pl_z : STA dz
     INY : LDA (rec),Y : SBC pl_z+1 : STA dz+1
     \ x' = cam_xx dx + cam_xy dy + cam_xz dz, and so on
+    ZA_DISCARD rx
     LDX #0
 .row
     STX row_i
-    LDA cam,X : STA mul_x : LDA cam+1,X : STA mul_x+1
+    LDA cam,X : ZA_INDEXEDBY {0, 6, 12}
+    STA mul_x : LDA cam+1,X : ZA_INDEXEDBY {0, 6, 12}
+    STA mul_x+1
     MOVW mul_y, dx : JSR fmul16 : MOVW acc, mul_r
     LDX row_i
-    LDA cam+2,X : STA mul_x : LDA cam+3,X : STA mul_x+1
+    LDA cam+2,X : ZA_INDEXEDBY {0, 6, 12}
+    STA mul_x : LDA cam+3,X : ZA_INDEXEDBY {0, 6, 12}
+    STA mul_x+1
     MOVW mul_y, dy : JSR fmul16 : ADDW acc, mul_r
     LDX row_i
-    LDA cam+4,X : STA mul_x : LDA cam+5,X : STA mul_x+1
+    LDA cam+4,X : ZA_INDEXEDBY {0, 6, 12}
+    STA mul_x : LDA cam+5,X : ZA_INDEXEDBY {0, 6, 12}
+    STA mul_x+1
     MOVW mul_y, dz : JSR fmul16 : ADDW acc, mul_r
     LDX row_i
-    LDA acc : STA rx,X : LDA acc+1 : STA rx+1,X     ; rx, ry, rz: a word each, 6 apart
+    LDA acc : STA rx,X : ZA_INDEXEDBY {0, 6, 12}
+    LDA acc+1 : STA rx+1,X : ZA_INDEXEDBY {0, 6, 12}
     TXA : CLC : ADC #6 : TAX
     CPX #18 : BEQ rows_done
     JMP row
 .rows_done
-    \ rx at +0, ry at +6, rz at +12 of rx's block
     LDY #OB_CX : LDA rx : STA (rec),Y : INY : LDA rx+1 : STA (rec),Y
     LDY #OB_CY : LDA rx+6 : STA (rec),Y : INY : LDA rx+7 : STA (rec),Y
     LDY #OB_CZ : LDA rx+12 : STA (rec),Y : INY : LDA rx+13 : STA (rec),Y
@@ -318,6 +359,7 @@ ENDMACRO
 \ matrices).
 .draw_objects
 {
+    ZA_AUTO1 list_i
     LDX draw_n : BNE each
     RTS
 .each
@@ -349,6 +391,8 @@ ENDMACRO
 \ space, its angles in ang_p, ang_h, ang_r.
 .draw_shape
 {
+    ZA_AUTO1 shape, nmove, nturn, row_i
+    ZA_AUTO2 hdr, fr, fr_k, t16
     LDX otype
     LDA type_shape,X : CMP #SHAPES : BCC known
     RTS
@@ -359,8 +403,9 @@ ENDMACRO
     LDX shape
     LDA shape_lo,X : STA hdr : LDA shape_hi,X : STA hdr+1
     LDY #HDR_BYTES + HDR_WORDS * 2 - 1
+    ZA_DISCARD sh
 .header
-    LDA (hdr),Y : STA sh_nverts,Y
+    LDA (hdr),Y : STA sh,Y : ZA_INDEXEDBY 0..HDR_BYTES + HDR_WORDS * 2 - 1
     DEY : BPL header
     \ The frame: the animation's, by shape.
     LDX shape : LDA anim_frame,X : ASL A : TAY
@@ -390,20 +435,27 @@ ENDMACRO
     AND #15 : STA ocolour : TAX
     LDA colour_map,X : JSR set_colour
     \ The camera in object space, in world units: c = -(mat transposed) t.
+    ZA_DISCARD objc
     LDX #0
 .cam_axis
     STX row_i
-    LDA mat,X : STA mul_x : LDA mat+1,X : STA mul_x+1
+    LDA mat,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x : LDA mat+1,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x+1
     MOVW mul_y, tx : JSR fmul16 : MOVW acc, mul_r
     LDX row_i
-    LDA mat+6,X : STA mul_x : LDA mat+7,X : STA mul_x+1
+    LDA mat+6,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x : LDA mat+7,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x+1
     MOVW mul_y, ty : JSR fmul16 : ADDW acc, mul_r
     LDX row_i
-    LDA mat+12,X : STA mul_x : LDA mat+13,X : STA mul_x+1
+    LDA mat+12,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x : LDA mat+13,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_x+1
     MOVW mul_y, tz : JSR fmul16 : ADDW acc, mul_r
     LDX row_i
-    LDA #0 : SEC : SBC acc : STA objc,X
-    LDA #0 : SBC acc+1 : STA objc+1,X
+    LDA #0 : SEC : SBC acc : STA objc,X : ZA_INDEXEDBY {0, 2, 4}
+    LDA #0 : SBC acc+1 : STA objc+1,X : ZA_INDEXEDBY {0, 2, 4}
     INX : INX : CPX #6 : BEQ axes_done
     JMP cam_axis
 .axes_done
@@ -423,6 +475,9 @@ ENDMACRO
 \ camera on its outer side, n.c > 4K.
 .faces
 {
+    ZA_AUTO1 face_i, row_i, count
+    ZA_AUTO 3, nrm              ; the face's normal, x y z
+    ZA_AUTO 4, dot, kk
     STZ face_i
 .each
     LDY face_i : CPY sh_nfaces : BCC test
@@ -432,22 +487,25 @@ ENDMACRO
     JMP visible
 .tested
     CPY sh_nrigid : BCS turning
-    LDA (sh_nx),Y : STA nx : LDA (sh_ny),Y : STA ny : LDA (sh_nz),Y : STA nz
+    LDA (sh_nx),Y : STA nrm : LDA (sh_ny),Y : STA nrm+1 : LDA (sh_nz),Y : STA nrm+2
     BRA normal
 .turning
-    LDA (fr_nx),Y : STA nx : LDA (fr_ny),Y : STA ny : LDA (fr_nz),Y : STA nz
+    LDA (fr_nx),Y : STA nrm : LDA (fr_ny),Y : STA nrm+1 : LDA (fr_nz),Y : STA nrm+2
 .normal
     \ dot = n.c, 32 bits
     STZ dot : STZ dot+1 : STZ dot+2 : STZ dot+3
     LDX #0
 .axis
     STX row_i
-    LDA nx,X : STA mul_x : LDA #0 : BIT mul_x : BPL npos
+    LDA nrm,X : ZA_INDEXEDBY 0..2
+    STA mul_x : LDA #0 : BIT mul_x : BPL npos
     LDA #&FF
 .npos
     STA mul_x+1
     TXA : ASL A : TAX
-    LDA objc,X : STA mul_y : LDA objc+1,X : STA mul_y+1
+    LDA objc,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_y : LDA objc+1,X : ZA_INDEXEDBY {0, 2, 4}
+    STA mul_y+1
     JSR smul16
     CLC
     LDA dot : ADC mul_p : STA dot
@@ -507,6 +565,9 @@ ENDMACRO
 \ of the near plane, projected; once an object.
 .vertex
 {
+    ZA_AUTO1 vtx, row_i
+    ZA_AUTO 3, kv               ; the vertex's k, x y z
+    ZA_AUTO2 t16, cvx, cvy, cvz
     TAX
     LDA vert_mark,X : CMP stamp : BNE new
     RTS
@@ -521,10 +582,12 @@ ENDMACRO
     LDA (fr_vx),Y : STA kv : LDA (fr_vy),Y : STA kv+1 : LDA (fr_vz),Y : STA kv+2
 .got
     \ The ST's coordinate: k times the shape's g (32 x scale).
+    ZA_DISCARD vw
     LDX #2
 .coord
     STX row_i
-    LDA kv,X : BPL kpos
+    LDA kv,X : ZA_INDEXEDBY 0..2
+    BPL kpos
     EOR #&FF : CLC : ADC #1
 .kpos
     TAY : LDA sh_scale : MUL_SET : MUL8 t16 : STA t16+1
@@ -534,11 +597,13 @@ ENDMACRO
     ASL A : ROL t16+1 : DEX : BNE shift
     STA t16
     LDX row_i
-    LDA kv,X : BPL vpos
+    LDA kv,X : ZA_INDEXEDBY 0..2
+    BPL vpos
     LDA #0 : SEC : SBC t16 : STA t16 : LDA #0 : SBC t16+1 : STA t16+1
 .vpos
     TXA : ASL A : TAX
-    LDA t16 : STA vw,X : LDA t16+1 : STA vw+1,X
+    LDA t16 : STA vw,X : ZA_INDEXEDBY {0, 2, 4}
+    LDA t16+1 : STA vw+1,X : ZA_INDEXEDBY {0, 2, 4}
     LDX row_i : DEX : BPL coord
     \ each axis: the matrix's row by the coordinate, asr 4, plus the position
     VROW 0, tx, cvx
@@ -588,6 +653,7 @@ ENDMACRO
 \ crosses the plane, projected and clipped to the window.
 .edge
 {
+    ZA_AUTO1 code
     LDX va : LDY vb
     LDA v_zlo,X : STA ep+4 : LDA v_zhi,X : STA ep+5
     LDA v_zlo,Y : STA eq+4 : LDA v_zhi,Y : STA eq+5
@@ -632,6 +698,7 @@ ENDMACRO
 \ quotient used as if it had 15 bits, and 0 when divs overflows.
 .clip_near
 {
+    ZA_AUTO1 row_i
 .again
     CMPS16 ep+4, #NEAR_Z : BMI clip
     CMPS16 eq+4, #NEAR_Z : BMI swap
@@ -639,7 +706,11 @@ ENDMACRO
 .swap
     LDX #5
 .swap1
-    LDA ep,X : PHA : LDA eq,X : STA ep,X : PLA : STA eq,X
+    LDA ep,X : ZA_INDEXEDBY 0..5
+    PHA
+    LDA eq,X : ZA_INDEXEDBY 0..5
+    STA ep,X : ZA_INDEXEDBY 0..5
+    PLA : STA eq,X : ZA_INDEXEDBY 0..5
     DEX : BPL swap1
     BRA again
 .clip
@@ -660,14 +731,20 @@ ENDMACRO
     BRA again
 .cut_axis
     STX row_i
-    LDA eq,X : SEC : SBC ep,X : STA mul_x
-    LDA eq+1,X : SBC ep+1,X : STA mul_x+1
+    LDA eq,X : ZA_INDEXEDBY {0, 2}
+    SEC : SBC ep,X : ZA_INDEXEDBY {0, 2}
+    STA mul_x
+    LDA eq+1,X : ZA_INDEXEDBY {0, 2}
+    SBC ep+1,X : ZA_INDEXEDBY {0, 2}
+    STA mul_x+1
     MOVW mul_y, div_q
     JSR smul16
     ASL mul_p+1 : ROL mul_p+2 : ROL mul_p+3
     LDX row_i
-    LDA ep,X : CLC : ADC mul_p+2 : STA ep,X
-    LDA ep+1,X : ADC mul_p+3 : STA ep+1,X
+    LDA ep,X : ZA_INDEXEDBY {0, 2}
+    CLC : ADC mul_p+2 : STA ep,X : ZA_INDEXEDBY {0, 2}
+    LDA ep+1,X : ZA_INDEXEDBY {0, 2}
+    ADC mul_p+3 : STA ep+1,X : ZA_INDEXEDBY {0, 2}
     RTS
 }
 
@@ -677,6 +754,7 @@ ENDMACRO
 \ is logged and drawn. cx0, cy0, cx1, cy1 are consecutive words.
 .clip_line
 {
+    ZA_AUTO1 code0, code1
 .again
     MOVW px, cx0 : MOVW pz, cy0 : JSR outcode : STA code0
     MOVW px, cx1 : MOVW pz, cy1 : JSR outcode : STA code1
@@ -688,20 +766,23 @@ ENDMACRO
 .crossing
     LDA cx1 : CMP cx0 : BNE not_vertical
     LDA cx1+1 : CMP cx0+1 : BNE not_vertical
-    LDX #cy0 : JSR clamp_y
-    LDX #cy1 : JSR clamp_y
-    BRA again
+    CLAMP cy0, VIEW_YMIN, VIEW_YMAX
+    CLAMP cy1, VIEW_YMIN, VIEW_YMAX
+    JMP again
 .not_vertical
     LDA cy1 : CMP cy0 : BNE slanted
     LDA cy1+1 : CMP cy0+1 : BNE slanted
-    LDX #cx0 : JSR clamp_x
-    LDX #cx1 : JSR clamp_x
-    BRA again
+    CLAMP cx0, VIEW_XMIN, VIEW_XMAX
+    CLAMP cx1, VIEW_XMIN, VIEW_XMAX
+    JMP again
 .slanted
     LDA code0 : BNE cut
     LDX #3
 .swap
-    LDA cx0,X : LDY cx1,X : STA cx1,X : STY cx0,X
+    LDA clip_pts,X : ZA_INDEXEDBY 0..3
+    LDY clip_pts+4,X : ZA_INDEXEDBY 0..3
+    STA clip_pts+4,X : ZA_INDEXEDBY 0..3
+    STY clip_pts,X : ZA_INDEXEDBY 0..3
     DEX : BPL swap
     LDA code1 : STA code0
 .cut
@@ -785,6 +866,7 @@ ENDMACRO
 \ 1 above (&0A174).
 .outcode
 {
+    ZA_AUTO1 code
     STZ code
     CMPS16 px, #VIEW_XMAX + 1 : BMI c1
     LDA #8 : TSB code
@@ -799,42 +881,5 @@ ENDMACRO
     LDA #1 : TSB code
 .c4
     LDA code
-    RTS
-}
-
-\ clamp_y, clamp_x: the word at zero page X into the window's rows or
-\ columns (&0A2F8, &0A330).
-.clamp_y
-{
-    SEC : LDA 0,X : SBC #LO(VIEW_YMIN) : LDA 1,X : SBC #HI(VIEW_YMIN)
-    BVC v1 : EOR #&80
-.v1
-    BPL not_low
-    LDA #LO(VIEW_YMIN) : STA 0,X : LDA #HI(VIEW_YMIN) : STA 1,X
-    RTS
-.not_low
-    SEC : LDA #LO(VIEW_YMAX) : SBC 0,X : LDA #HI(VIEW_YMAX) : SBC 1,X
-    BVC v2 : EOR #&80
-.v2
-    BPL done
-    LDA #LO(VIEW_YMAX) : STA 0,X : LDA #HI(VIEW_YMAX) : STA 1,X
-.done
-    RTS
-}
-.clamp_x
-{
-    SEC : LDA 0,X : SBC #LO(VIEW_XMIN) : LDA 1,X : SBC #HI(VIEW_XMIN)
-    BVC v1 : EOR #&80
-.v1
-    BPL not_low
-    LDA #LO(VIEW_XMIN) : STA 0,X : LDA #HI(VIEW_XMIN) : STA 1,X
-    RTS
-.not_low
-    SEC : LDA #LO(VIEW_XMAX) : SBC 0,X : LDA #HI(VIEW_XMAX) : SBC 1,X
-    BVC v2 : EOR #&80
-.v2
-    BPL done
-    LDA #LO(VIEW_XMAX) : STA 0,X : LDA #HI(VIEW_XMAX) : STA 1,X
-.done
     RTS
 }
