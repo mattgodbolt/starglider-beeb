@@ -6,11 +6,13 @@ isn't here yet.
 
 **[Run it in jsbeeb](https://bbc.xania.org/?autoboot&model=Master&disc1=github:mattgodbolt/starglider-beeb/starglider.ssd)**
 (a Master 128), or write `starglider.ssd` to a disc and SHIFT-BREAK a
-Master. For now the disc shows the renderer: the ST's own models turning
-one after another, as the ST's Interrogate screen shows them, drawn in
-MODE 1 at the ST's 320 x 200.
+Master. For now the disc shows the engine the game will run on: the ST's
+own models turning one after another in the cockpit's window, as the
+ST's Interrogate screen shows them, drawn in MODE 1 at the ST's 320 x 200
+with the cockpit's own colours below the view, double-buffered at 12.5
+frames a second, and the disc read in the background as it goes.
 
-![The drone, an energy tower, a walker and the armoured transport, on the disc](docs/images/disc_models.png)
+![A walker in the cockpit's window, on the disc](docs/images/disc_cockpit.png)
 
 ## How it's being made
 
