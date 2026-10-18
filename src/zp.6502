@@ -90,7 +90,7 @@ cx0 = clip_pts
 cy0 = clip_pts + 2
 cx1 = clip_pts + 4
 cy1 = clip_pts + 6
-ZA_AUTO2 px, pz, pq         ; project's and outcode's operands
+ZA_AUTO2 px, pz, pq         ; project's operands
 
 \ The line drawer (line.6502)
 ZA_AUTO2 line_x0, line_x1, line_scr, line_mx

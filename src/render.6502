@@ -622,9 +622,9 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 \ camera on its outer side, n.c > 4K.
 .faces
 {
-    ZA_AUTO1 face_i, row_i, count, psign, ph
+    ZA_AUTO1 face_i, count
     ZA_AUTO 3, nrm              ; the face's normal, x y z
-    ZA_AUTO 3, dot, kk, pp
+    ZA_AUTO 3, dot, pp
     STZ face_i
 .each
     LDY face_i : CPY sh_nfaces : BCC test
@@ -633,65 +633,56 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     LDA (sh_fflags),Y : ORA all_faces : BPL tested
     JMP visible
 .tested
+    \ dot = 4K - n.c, 24 bits: negative if the face is visible (as n.c - 4K
+    \ > 0 is, but for -2^23, far beyond any object near enough to draw)
+    LDX #0
+    LDA (fr_khi),Y : BPL kpos
+    DEX
+.kpos
+    STX dot+2 : STA dot+1
+    LDA (fr_klo),Y
+    ASL A : ROL dot+1 : ROL dot+2
+    ASL A : ROL dot+1 : ROL dot+2
+    STA dot
     CPY sh_nrigid : BCS turning
     LDA (sh_nx),Y : STA nrm : LDA (sh_ny),Y : STA nrm+1 : LDA (sh_nz),Y : STA nrm+2
     BRA normal
 .turning
     LDA (fr_nx),Y : STA nrm : LDA (fr_ny),Y : STA nrm+1 : LDA (fr_nz),Y : STA nrm+2
 .normal
-    \ dot = n.c, 24 bits: each component's |n| |c| added or taken away
-    STZ dot : STZ dot+1 : STZ dot+2
-    LDX #0
-.axis
-    LDA nrm,X : ZA_INDEXEDBY 0..2
-    BEQ axis_next                       ; nothing on this axis
-    STX row_i
-    EOR objc_sign,X : ZA_INDEXEDBY 0..2
-    STA psign
-    LDA nrm,X : ZA_INDEXEDBY 0..2
+    \ each component's |n| |c| taken away, or added if n c is negative
+FOR i = 0..2
+    LDA nrm+i : BEQ axis_done           ; nothing on this axis
     BPL n_pos
-    EOR #&FF : CLC : ADC #1
+    EOR #&FF : INC A
 .n_pos
     MUL_SET
-    TXA : ASL A : TAX
-    LDY objc_mag,X : ZA_INDEXEDBY {0, 2, 4}
-    MUL8 pp : STA pp+1
-    LDY objc_mag+1,X : ZA_INDEXEDBY {0, 2, 4}
-    MUL8 ph : CLC : ADC #0 : STA pp+2           ; ph: its low byte
-    LDA pp+1 : CLC : ADC ph : STA pp+1
-    BCC carried
+    LDY objc_mag+2*i : MUL8 pp : STA pp+1
+    LDY objc_mag+2*i+1 : BEQ small
+    SEC
+    LDA (m_sqlo),Y : SBC (m_nglo),Y : TAX
+    LDA (m_sqhi),Y : SBC (m_nghi),Y : STA pp+2
+    TXA : CLC : ADC pp+1 : STA pp+1
+    BCC got
     INC pp+2
-.carried
-    BIT psign : BMI subtract
-    CLC
-    LDA dot : ADC pp : STA dot
-    LDA dot+1 : ADC pp+1 : STA dot+1
-    LDA dot+2 : ADC pp+2 : STA dot+2
-    BRA added
-.subtract
+.got
+    LDA nrm+i : EOR objc_sign+i : BMI add
     SEC
     LDA dot : SBC pp : STA dot
     LDA dot+1 : SBC pp+1 : STA dot+1
     LDA dot+2 : SBC pp+2 : STA dot+2
-.added
-    LDX row_i
-.axis_next
-    INX : CPX #3 : BNE axis
-    \ visible if dot - 4K > 0
-    LDY face_i
-    LDA (fr_klo),Y : STA kk : LDA (fr_khi),Y : STA kk+1
-    LDA #0 : BIT kk+1 : BPL kpos
-    LDA #&FF
-.kpos
-    STA kk+2
-    ASL kk : ROL kk+1 : ROL kk+2
-    ASL kk : ROL kk+1 : ROL kk+2
-    SEC
-    LDA dot : SBC kk : STA dot
-    LDA dot+1 : SBC kk+1 : STA dot+1
-    LDA dot+2 : SBC kk+2 : STA dot+2
-    BMI next
-    ORA dot : ORA dot+1 : BEQ next              ; zero: on the plane
+    BRA axis_done
+.small
+    STZ pp+2                            ; |c| < 256
+    BRA got
+.add
+    CLC
+    LDA dot : ADC pp : STA dot
+    LDA dot+1 : ADC pp+1 : STA dot+1
+    LDA dot+2 : ADC pp+2 : STA dot+2
+.axis_done
+NEXT
+    LDA dot+2 : BPL next
 .visible
     LDY face_i
     LDA (sh_fedges),Y : TAY
@@ -893,31 +884,31 @@ ZA_AUTO1 proj_shift
 
 \ edge (&04D66): the edge from vertex va to vb, clipped at z = 2 if it
 \ crosses the plane, projected and clipped to the window.
+ASSERT NEAR_Z > 0 AND NEAR_Z < 256
 .edge
 {
-    ZA_AUTO1 code
+    \ each end in front if z >= NEAR_Z, which its high byte mostly settles
     LDX va : LDY vb
-    LDA v_zlo,X : STA ep+4 : LDA v_zhi,X : STA ep+5
-    LDA v_zlo,Y : STA eq+4 : LDA v_zhi,Y : STA eq+5
-    STZ code                            ; bit 1: p in front, bit 0: q
-    CMPS16 ep+4, #NEAR_Z : BMI p_behind
-    LDA #2 : TSB code
+    LDA v_zhi,X : BMI p_behind : BNE p_front
+    LDA v_zlo,X : CMP #NEAR_Z : BCC p_behind
+.p_front
+    LDA v_zhi,Y : BMI crosses : BNE in_front
+    LDA v_zlo,Y : CMP #NEAR_Z : BCS in_front
+    BRA crosses
 .p_behind
-    CMPS16 eq+4, #NEAR_Z : BMI q_behind
-    LDA #1 : TSB code
-.q_behind
-    LDA code : CMP #3 : BEQ in_front
-    CMP #0 : BNE crosses
-    RTS                                 ; both behind
+    LDA v_zhi,Y : BMI both_behind : BNE crosses
+    LDA v_zlo,Y : CMP #NEAR_Z : BCS crosses
+.both_behind
+    RTS
 .in_front
-    LDX va : LDY vb
     LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
     LDA v_sylo,X : STA cy0 : LDA v_syhi,X : STA cy0+1
     LDA v_sxlo,Y : STA cx1 : LDA v_sxhi,Y : STA cx1+1
     LDA v_sylo,Y : STA cy1 : LDA v_syhi,Y : STA cy1+1
     JMP clip_line
 .crosses
-    LDX va : LDY vb
+    LDA v_zlo,X : STA ep+4 : LDA v_zhi,X : STA ep+5
+    LDA v_zlo,Y : STA eq+4 : LDA v_zhi,Y : STA eq+5
     LDA v_xlo,X : STA ep : LDA v_xhi,X : STA ep+1
     LDA v_ylo,X : STA ep+2 : LDA v_yhi,X : STA ep+3
     LDA v_xlo,Y : STA eq : LDA v_xhi,Y : STA eq+1
@@ -992,6 +983,39 @@ ZA_AUTO1 proj_shift
     RTS
 }
 
+\ OUTCODE x, y: A = the window's outcode of the point (x, y), words: 8
+\ right, 4 below, 2 left, 1 above (&0A174). Y is lost. The window spans
+\ x's high bytes 0 and 1 and lies in y's 0, so a high byte settles most
+\ points alone.
+ASSERT VIEW_XMIN < 256 AND HI(VIEW_XMAX + 1) = 1
+ASSERT VIEW_YMIN < 256 AND VIEW_YMAX < 255
+MACRO OUTCODE x, y
+    LDA x+1 : BNE x_high
+    LDA x : CMP #VIEW_XMIN
+    LDA #0 : BCS x_done
+    LDA #2 : BRA x_done
+.x_high
+    BMI x_left
+    CMP #HI(VIEW_XMAX + 1) : BNE x_right
+    LDA x : CMP #LO(VIEW_XMAX + 1)
+    LDA #0 : BCC x_done
+.x_right
+    LDA #8 : BRA x_done
+.x_left
+    LDA #2
+.x_done
+    LDY y+1 : BNE y_high
+    LDY y : CPY #VIEW_YMIN : BCC y_above
+    CPY #VIEW_YMAX + 1 : BCC y_done
+.y_below
+    ORA #4 : BRA y_done
+.y_high
+    BPL y_below
+.y_above
+    ORA #1
+.y_done
+ENDMACRO
+
 \ clip_line (&0A170): Cohen-Sutherland to the window, as the ST clips: a
 \ vertical or horizontal line is clamped; otherwise point 0 is cut, the
 \ points swapped first (and left so) when point 0 is inside. Then the line
@@ -1000,9 +1024,10 @@ ZA_AUTO1 proj_shift
 {
     ZA_AUTO1 code0, code1
 .again
-    MOVW px, cx0 : MOVW pz, cy0 : JSR outcode : STA code0
-    MOVW px, cx1 : MOVW pz, cy1 : JSR outcode : STA code1
-    ORA code0 : BNE outside
+    OUTCODE cx1, cy1 : STA code1
+.again0                                 ; only point 0 moved
+    OUTCODE cx0, cy0 : STA code0
+    ORA code1 : BNE outside
     JMP accept
 .outside
     LDA code0 : AND code1 : BEQ crossing
@@ -1029,6 +1054,7 @@ ZA_AUTO1 proj_shift
     STY clip_pts,X : ZA_INDEXEDBY 0..3
     DEX : BPL swap
     LDA code1 : STA code0
+    STZ code1                           ; point 1 is now the one inside
 .cut
     LSR code0 : BCC not_top
     \ above: x0 += (ymin - y0)(x1 - x0) / (y1 - y0), y0 = ymin
@@ -1036,7 +1062,7 @@ ZA_AUTO1 proj_shift
     JSR dx_dy
     ADDW cx0, pq
     LDA #LO(VIEW_YMIN) : STA cy0 : LDA #HI(VIEW_YMIN) : STA cy0+1
-    JMP again
+    JMP again0
 .not_top
     LSR code0 : BCC not_left
     \ left: y0 += (xmin - x0)(y1 - y0) / (x1 - x0), x0 = xmin
@@ -1044,20 +1070,20 @@ ZA_AUTO1 proj_shift
     JSR dy_dx
     ADDW cy0, pq
     LDA #LO(VIEW_XMIN) : STA cx0 : LDA #HI(VIEW_XMIN) : STA cx0+1
-    JMP again
+    JMP again0
 .not_left
     LSR code0 : BCC not_bottom
     LDA #LO(VIEW_YMAX) : SEC : SBC cy0 : STA mul_x : LDA #HI(VIEW_YMAX) : SBC cy0+1 : STA mul_x+1
     JSR dx_dy
     ADDW cx0, pq
     LDA #LO(VIEW_YMAX) : STA cy0 : LDA #HI(VIEW_YMAX) : STA cy0+1
-    JMP again
+    JMP again0
 .not_bottom
     LDA #LO(VIEW_XMAX) : SEC : SBC cx0 : STA mul_x : LDA #HI(VIEW_XMAX) : SBC cx0+1 : STA mul_x+1
     JSR dy_dx
     ADDW cy0, pq
     LDA #LO(VIEW_XMAX) : STA cx0 : LDA #HI(VIEW_XMAX) : STA cx0+1
-    JMP again
+    JMP again0
 \ dx_dy, dy_dx: pq = mul_x (x1 - x0) / (y1 - y0), or with x and y the
 \ other way: muls then divs, and on overflow the product's low word.
 .dx_dy
@@ -1107,26 +1133,4 @@ ENDIF
     MOVW line_x0, cx0 : LDA cy0 : STA line_y0
     MOVW line_x1, cx1 : LDA cy1 : STA line_y1
     JMP line_plot
-}
-
-\ outcode: A = the window's outcode of (px, pz): 8 right, 4 below, 2 left,
-\ 1 above (&0A174).
-.outcode
-{
-    ZA_AUTO1 code
-    STZ code
-    CMPS16 px, #VIEW_XMAX + 1 : BMI c1
-    LDA #8 : TSB code
-.c1
-    CMPS16 pz, #VIEW_YMAX + 1 : BMI c2
-    LDA #4 : TSB code
-.c2
-    CMPS16 px, #VIEW_XMIN : BPL c3
-    LDA #2 : TSB code
-.c3
-    CMPS16 pz, #VIEW_YMIN : BPL c4
-    LDA #1 : TSB code
-.c4
-    LDA code
-    RTS
 }
