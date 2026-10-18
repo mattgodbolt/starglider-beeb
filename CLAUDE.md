@@ -8,6 +8,9 @@ their tools and docs are the model.
 
 - `docs/brief.md`: the brief the port starts from: every version of the
   original, how it works, and the decisions to make first.
+- `docs/plan.md`: the plan after the speed spike: what the rest of the
+  game costs in time and memory, the memory map and the frame, the order
+  of work.
 - `docs/journal.md`: how it got here, in order. Add to it as you go.
 - `docs/research/*.md`: the reverse engineering, one file per version.
 - `docs/decisions.md`: every call the port makes that the original
@@ -72,6 +75,8 @@ says how):
   build/scenes/X ...` captures scenes (each frame's state and its lines);
   `st_render.py PRG SCENES` is the renderer modelled exactly, checked
   against them: the port's drawing is checked against the model.
+  `st_profile.py run tests/st/profile_flight.txt DIR` profiles the ST and
+  splits its time by area (it needs the patched Hatari: research/st.md).
 - **The Spectrum 128K**: `tools/zx.py`, nm's harness on SkoolKit.
 - **The CPC**: `tools/cpc_emu.py` on the Caprice32 in `../caprice32`.
 - **The C64**: `tools/c64_unfreeze.py` and `tools/c64_run.py` on py65.

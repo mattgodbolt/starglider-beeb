@@ -261,6 +261,27 @@ What the figures show [measured] from the table:
   finished in under a VBL would take 1; a sampling profile in Hatari,
   `profile on`, would split it].
 
+### Where the time goes
+
+Hatari's profiler, by area [measured 2026-10-18: `tools/st_profile.py`
+on `tests/st/profile_flight.txt` (33 s) and `profile_towers.txt` (8 s)]:
+
+| | Flight | The towers |
+|---|---|---|
+| Drawing: lists, transforms, back-face tests, faces, projection, clips, lines, the clear | 68.0% | 76.9% |
+| Ground dots (&047AA's set-up, `dot_colour`) | 8.7% | 6.4% |
+| Waiting for the raster, swapping | 8.7% | 6.7% |
+| Logic: flight, handlers, collisions, docking, the laser, random numbers | 6.4% | 4.2% |
+| Printing the score and messages (reprinted every frame) | 3.7% | 2.6% |
+| Panel: waveforms, gauges, scanner | 3.6% | 2.5% |
+| Other | 0.8% | 0.8% |
+
+Within drawing in flight: the transform and matrix 16.7%, the back-face
+test's vertices 11.5%, `draw_shape`'s faces and edges 11.9%, projecting
+edges 8.1%, clearing the view 6.5%, the lists 5.6%, the line drawer 3.4%.
+The gunsight's bitmap is 2.2%; the handlers' loop over 140 objects, most
+calling the handler that does nothing, about 2%.
+
 ### Coordinates and fixed point
 
 - **World**: x, y, z are signed 16-bit and wrap; y is negative upwards
@@ -754,6 +775,11 @@ shot docked
 ```
 
 - Use the `.stx`: the TOSEC `.st` halts at the protection check.
+- **Profiling** (`tools/st_profile.py`): Hatari's `profile save` writes
+  nothing when sent through the command FIFO, because only entering the
+  debugger processes the profile. The Hatari in `../hatari` is patched to
+  process it on saving: in `src/debug/profile.c`, `Profile_Save` calls
+  `Profile_CpuStop()` before writing a CPU profile.
 - `--fastfdc off` (the driver's default) is needed for the STX.
 - Fast-forward skips rendering, so screenshots come out black; the driver
   runs in real time.

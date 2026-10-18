@@ -170,3 +170,33 @@ The first run left trails on the shadow screen only.
 looks at what's left: the shadow screen was erasing the main screen's
 lines, because `line_erase` uses X and the frame was still holding the
 screen's number in it.
+
+### The step back
+
+Before the agents' optimisation pass, a step back to size the rest of
+the game, so the pass works within budgets rather than spending bytes the
+game will need. `docs/plan.md` is the result.
+
+- **The ST's frame, profiled.** Hatari's CPU profiler counts cycles at
+  every address, but a profile saved through the command FIFO came out
+  empty: only entering the debugger processes the data, and remote
+  commands never do. A one-line patch to the Hatari in `../hatari`
+  processes it on saving. `tools/st_profile.py` runs a profiling script
+  (`tests/st/profile_*.txt`) and splits the time by area: in flight 68%
+  drawing, 9% ground dots, 9% waiting for the raster, 6% logic, 4%
+  printing, 4% panel.
+- **The Master's whole frame**, reckoned from that and the measured
+  renderer: about 6.5 frames a second at the ST's pace now, about 9 after
+  the optimisation pass, against the ST's 12.5.
+- **Memory is the harder limit.** The game as the ST has it wants about
+  117K on the Master and about 96K is there. A compact sine table, an
+  object table of only the fields the port uses, and the front end loaded
+  from disc close the gap, just.
+- **The co-processor** would bring the ST's speed and end the squeeze, so
+  the plan builds the engine around a display list, decision 8's seam,
+  with the single-processor game first.
+
+The plan's order: an engine skeleton (the memory map with `ASSERT`ed
+budgets, the list and draw phases, the interrupts and the fixed step),
+then the agents' pass, then the layers. Four calls for Matt are in its
+section 7.

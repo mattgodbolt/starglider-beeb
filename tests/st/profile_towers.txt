@@ -1,0 +1,13 @@
+# Profile the energy-tower group in view, 3,000 units off (x &1EC0,
+# z &1308, heading 0).
+wait 38
+key 57
+wait 4
+debug w w $5c02e $1ec0 $ffd0 $1308
+debug w w $5c03c 0
+wait 0.5
+debug profile on
+wait 8
+debug profile save {out}/profile.txt
+wait 3
+quit
