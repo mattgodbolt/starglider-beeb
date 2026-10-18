@@ -550,9 +550,8 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     RTS
 .test
     LDA edge_mark,Y : CMP stamp : BNE next
-    LDA (sh_ev0),Y : STA va
     LDA (sh_ev1),Y : STA vb
-    LDA va : JSR vertex_far
+    LDA (sh_ev0),Y : STA va : JSR vertex_far
     LDA vb : JSR vertex_far
     LDX va : LDY vb
     LDA v_sxlo,X : STA cx0 : LDA v_sxhi,X : STA cx0+1
@@ -710,9 +709,8 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
     RTS
 .test
     LDA edge_mark,Y : CMP stamp : BNE next
-    LDA (sh_ev0),Y : STA va
     LDA (sh_ev1),Y : STA vb
-    LDA va : JSR vertex
+    LDA (sh_ev0),Y : STA va : JSR vertex
     LDA vb : JSR vertex
     JSR edge
 .next
@@ -1029,6 +1027,17 @@ MACRO OUTCODE x, y
 .y_done
 ENDMACRO
 
+\ BYTE_MAG w, far: A = |w| if it's under 256, and otherwise to far.
+MACRO BYTE_MAG w, far
+    LDA w+1 : BEQ positive
+    INC A : BNE far                     ; the high byte wasn't &FF
+    SEC : SBC w : BEQ far               ; -256 is too far
+    BRA done
+.positive
+    LDA w
+.done
+ENDMACRO
+
 \ clip_line (&0A170): Cohen-Sutherland to the window, as the ST clips: a
 \ vertical or horizontal line is clamped; otherwise point 0 is cut, the
 \ points swapped first (and left so) when point 0 is inside. Then the line
@@ -1036,6 +1045,9 @@ ENDMACRO
 .clip_line
 {
     ZA_AUTO1 code0, code1
+    ZA_AUTO2 edge                       ; the window's edge a cut is to
+    ZA_AUTO2 num                        ; muldiv's product, then quotient
+    ZA_AUTO1 den                        ; ... and its divisor
 .again
     OUTCODE cx1, cy1 : STA code1
 .again0                                 ; only point 0 moved
@@ -1069,33 +1081,33 @@ ENDMACRO
     LDA code1 : STA code0
     STZ code1                           ; point 1 is now the one inside
 .cut
+    \ the window's first edge that point 0 is outside: above, left, below,
+    \ right, by code0's bits from the bottom
     LSR code0 : BCC not_top
-    \ above: x0 += (ymin - y0)(x1 - x0) / (y1 - y0), y0 = ymin
-    LDA #LO(VIEW_YMIN) : SEC : SBC cy0 : STA mul_x : LDA #HI(VIEW_YMIN) : SBC cy0+1 : STA mul_x+1
-    JSR dx_dy
-    ADDW cx0, pq
-    LDA #LO(VIEW_YMIN) : STA cy0 : LDA #HI(VIEW_YMIN) : STA cy0+1
-    JMP again0
+    LDA #VIEW_YMIN : BRA cut_y
 .not_top
     LSR code0 : BCC not_left
-    \ left: y0 += (xmin - x0)(y1 - y0) / (x1 - x0), x0 = xmin
-    LDA #LO(VIEW_XMIN) : SEC : SBC cx0 : STA mul_x : LDA #HI(VIEW_XMIN) : SBC cx0+1 : STA mul_x+1
-    JSR dy_dx
-    ADDW cy0, pq
-    LDA #LO(VIEW_XMIN) : STA cx0 : LDA #HI(VIEW_XMIN) : STA cx0+1
-    JMP again0
+    LDX #LO(VIEW_XMIN) : LDA #HI(VIEW_XMIN) : BRA cut_x
 .not_left
     LSR code0 : BCC not_bottom
-    LDA #LO(VIEW_YMAX) : SEC : SBC cy0 : STA mul_x : LDA #HI(VIEW_YMAX) : SBC cy0+1 : STA mul_x+1
-    JSR dx_dy
-    ADDW cx0, pq
-    LDA #LO(VIEW_YMAX) : STA cy0 : LDA #HI(VIEW_YMAX) : STA cy0+1
-    JMP again0
+    LDA #VIEW_YMAX : BRA cut_y
 .not_bottom
-    LDA #LO(VIEW_XMAX) : SEC : SBC cx0 : STA mul_x : LDA #HI(VIEW_XMAX) : SBC cx0+1 : STA mul_x+1
+    LDX #LO(VIEW_XMAX) : LDA #HI(VIEW_XMAX)
+.cut_x
+    \ y0 += (edge - x0)(y1 - y0) / (x1 - x0), x0 = edge
+    STX edge : STA edge+1
+    TXA : SEC : SBC cx0 : STA mul_x : LDA edge+1 : SBC cx0+1 : STA mul_x+1
     JSR dy_dx
     ADDW cy0, pq
-    LDA #LO(VIEW_XMAX) : STA cx0 : LDA #HI(VIEW_XMAX) : STA cx0+1
+    MOVW cx0, edge
+    JMP again0
+.cut_y
+    \ x0 += (edge - y0)(x1 - x0) / (y1 - y0), y0 = edge
+    STA edge
+    SEC : SBC cy0 : STA mul_x : LDA #0 : SBC cy0+1 : STA mul_x+1
+    JSR dx_dy
+    ADDW cx0, pq
+    LDA edge : STA cy0 : STZ cy0+1
     JMP again0
 \ dx_dy, dy_dx: pq = mul_x (x1 - x0) / (y1 - y0), or with x and y the
 \ other way: muls then divs, and on overflow the product's low word.
@@ -1106,7 +1118,8 @@ ENDMACRO
 .dy_dx
     LDA cy1 : SEC : SBC cy0 : STA mul_y : LDA cy1+1 : SBC cy0+1 : STA mul_y+1
     LDA cx1 : SEC : SBC cx0 : STA div_d : LDA cx1+1 : SBC cx0+1 : STA div_d+1
-.muldiv
+    BRA muldiv
+.by_words
     JSR smul16
     JSR sdiv32
     BCS overflow
@@ -1114,6 +1127,32 @@ ENDMACRO
     RTS
 .overflow
     MOVW pq, mul_p
+    RTS
+\ muldiv: mul_x mul_y / div_d as muls and divs make it. In nearly every
+\ cut all three are within a byte, and as |mul_x| <= |div_d| the quotient
+\ is too: then it's worked in bytes, a product and 8 steps of division.
+.muldiv
+    BYTE_MAG mul_x, by_words : MUL_SET
+    BYTE_MAG mul_y, by_words : TAY
+    MUL8 num : STA num+1
+    BYTE_MAG div_d, by_words : STA den
+    LDA num+1 : CMP den : BCS by_words  ; more than 8 bits
+    LDX #8
+.step
+    ASL num : ROL A : BCS step_sub      ; num's top bit into the remainder
+    CMP den : BCC step_next
+.step_sub
+    SBC den : INC num                   ; C = 1: a quotient bit
+.step_next
+    DEX : BNE step
+    \ truncated towards zero, so the sign follows
+    LDY #0
+    LDA mul_x+1 : EOR mul_y+1 : EOR div_d+1 : BPL signed
+    LDA #0 : SEC : SBC num : STA num
+    BEQ signed
+    DEY
+.signed
+    LDA num : STA pq : STY pq+1
     RTS
 \ clamp_y, clamp_x: the word at clip_pts + X into the window's y or x
 \ range, below first (&0A2F8, &0A330).
