@@ -48,6 +48,9 @@ const ROUTINES = {
     mine: { from: "mine", to: "mined", call: "mine_proximity", bank: "BANK_LOGIC", x: true },
     level: { from: "level", to: "next:top", call: "level_start", bank: "BANK_LOGIC", d0: true },
     newgame: { from: "newgame", to: "level", call: "new_game", bank: "BANK_LOGIC" },
+    // a whole step as the disc takes it (src/step.6502), the keys as
+    // read_keys found them
+    step: { from: "top", to: "next:top", call: "spike_step", bank: "BANK_WORLD", inputs: "render" },
 };
 
 const args = process.argv.slice(2);

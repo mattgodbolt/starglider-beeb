@@ -747,3 +747,61 @@ it is left out.
 | Camera and lists | 34,574 → 31,105 | 16,114 → 15,668 | 1,283 → 1,260 |
 | Objects | 99,226 → 97,997 | 163,400 → 162,542 | 128,303 → 128,341 |
 
+### The game on the disc
+
+The disc plays now. After loading, a new game starts at level 1, as the
+ST's title starts one, and every step runs the ST's frame in its order
+(`src/step.6502`): world_lists, the frame drawn on the last step due,
+world_after, read_keys, player_flight, object_handlers, animate_shapes,
+collisions, level_message and frame_end's logic, then the post-frame
+tests, going on to level_start. At a game over it goes straight to the
+next game until the front end is in. The model viewer is gone.
+
+- **A whole step checked.** The spike includes the step too
+  (`spike_step`, with the controls and the frame's showing stubbed), and
+  `tools/logicrun.mjs`'s `step` runs it from each frame's top to the next
+  frame's. Every capture's 2,022 steps match the ST's in everything the
+  map holds, level changes included (checked 2026-10-18). So the routines
+  are right in the order and the banks the disc runs them in, not only
+  one at a time.
+- **The frame waits for its logic.** A frame is still drawn between its
+  step's lists and logic, but shown only after the logic and
+  `view_overlays`, so the enemies' lasers, the mines' messages and the
+  bolt go on the frame they belong to (decision 16).
+- **The keys** (decision 6) are the ST's. The vertical sync's interrupt
+  reads the BBC's matrix into the ST's key states and its one-byte
+  latch, as the ST's keyboard interrupt writes them. It reads them only
+  when the keyboard's auto-scan has seen a key since the last read, or
+  one was held then (the OS's own trigger, CA2): about a hundred cycles a
+  field with none held, about 1,100 with one. Where the BBC lacks the
+  ST's key, the nearest: COPY for Insert, the Master's keypad RETURN for
+  keypad Enter, DELETE for Backspace. The logic never reads Help.
+- **The joystick** is the ST's mouse. Each step adds the stick's move
+  since the last into the accumulators the mouse moves. Its fire button
+  is the mouse's left button (the laser), and the second joystick's is
+  the right (while it's held, the stick's climb sets the speed). Its
+  travel from centre to either end is the turn's clamp and the climb's,
+  so a stick kept within its ends comes back to level flight, and a
+  count's move is noise. `tools/inputcheck.mjs` checks the stick, every
+  key and both buttons. The Master's ADC is at &FE18, not the Model B's
+  &FEC0, which cost a hang at start.
+- **Zero page.** On the disc the drawing and the logic share one call
+  graph, and the step is a loop. So anything baron thinks a step reads
+  before writing is kept from one step to the next, through everything.
+  The dots' tests made five such (values made on paths the carry
+  chooses), and the pool ran out; discarding them per dot fixed it. They
+  were found by discarding every global at the step's top, which fit,
+  then every one but one.
+- **One mine routine.** The handlers and the collisions had each
+  transcribed the mines' proximity (&07B28). The disc reached only the
+  handlers' copy, and the build warned of the other as dead code. The
+  handler now calls collide.6502's, which flags the mine's text.
+- **The cost.** Flying straight at the level's start: 8.5 frames a second
+  at 12.6 steps (`make fps`). A step's logic takes about 34,000 cycles,
+  three quarters of it object_handlers' walk of the slots, and
+  world_lists 36,000. In a hard turn the camera's matrix is full and
+  changes every step: world_lists takes 112,000 (the dots 42,000, the
+  rotations 49,000) and a step 146,000. The frame rate falls to 2.7, and
+  decision 14's cap slows the game to 10.6 steps a second (measured
+  2026-10-18, before decision 21's saving in the rotations).
+

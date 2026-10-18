@@ -48,10 +48,11 @@ make disc       # the disc from a clean tree, as starglider.ssd: the
 make spike      # the spike on every captured scene: checked against the
                 # ST's renderer, and timed (tools/scenecheck.py)
 make check      # sincos against the ST's sine table at every angle, make spike, the
-                # disc's erasing (tools/erasecheck.mjs) and its own disc reader
-                # (tools/disccheck.mjs)
+                # disc's erasing (tools/erasecheck.mjs), its own disc reader
+                # (tools/disccheck.mjs) and its controls (tools/inputcheck.mjs)
 make logic      # the port's game logic against the ST's, routine by routine
-                # (tools/logicrun.mjs, on the captures make steps makes)
+                # and a whole step (tools/logicrun.mjs, on the captures make
+                # steps makes)
 make memory     # what each region of the memory map holds (src/memory.6502)
 make fps        # the disc's frames and steps a second
 make scenes     # capture the scenes in Hatari (slow; needs ../hatari)
@@ -75,6 +76,12 @@ the lists and objects at the top of main RAM, the list phase and the sine
 table in the world's bank (5, `src/world.6502`), the shapes in bank 4,
 the erase lists in shadow RAM below the shadow screen. `src/engine.6502`
 is the frame: the interrupt, the fixed step, the flip (decision 14).
+`src/step.6502` is a step of the game in the ST's order (`step_lists`,
+`step_logic`), which `make logic` checks whole against the ST's too;
+`src/input.6502` is the controls (decision 6): the
+vertical sync's interrupt reads the keys into the ST's `key_state` and
+`key_latch`, and each step adds the joystick's move to the accumulators
+the ST's mouse moves.
 
 - The MOS's IRQ entry keeps A at &FC, so baron's pool stops at &FB, and
   the interrupt handler ends `LDA &FC : RTI`. It must lie below &3000.
@@ -166,6 +173,12 @@ says how):
 - Generated code with patched operands: assert that each copy's labels
   sit at the same offsets (`mkrotate.py`) when one routine patches them
   all through a pointer.
+- The engine's step is a loop, so a variable baron thinks a step might
+  read before writing (a value made only on paths a flag or the carry
+  chooses) is kept from step to step, through the drawing and all the
+  logic, and the pool runs out. Find it (discard every global at the
+  step's top, then all but one) and `ZA_DISCARD` it where it really dies,
+  as `ground_dots` does.
 
 ## House rules
 

@@ -10,9 +10,13 @@
 \ its drawing, since the logic reads the lists; the last step before a
 \ frame draws it between the two, which is the ST's own order (its
 \ world_render, then the logic), so a frame shows what the ST drew at that
-\ step.
+\ step. What the ST's logic draws into that frame as it runs (the enemies'
+\ lasers, the mines' messages, the player's bolt) goes on after the
+\ step's logic (call 2, option B: in force until Matt says otherwise), so
+\ the frame is shown only then (frame_show).
 \
-\ The game supplies step_logic.
+\ The game supplies step_lists and step_logic, which calls frame_show once
+\ its frame's logic is done.
 \ ***************************************************************************
 
 STEP_FIELDS = 4                     ; decision 4: 12.5 steps a second
@@ -59,9 +63,10 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
     RTS
 
 \ irq_handler: the split, when T1 comes; at each vertical sync the view's
-\ colours back, T1 started, the field counted, and a frame drawn shown from
+\ colours back, T1 started, the field counted, a frame drawn shown from
 \ it, by ACCCON's D (TSB and TRB, which the line drawer's X changes can't
-\ split). It must lie below &3000, which X moves to shadow RAM.
+\ split), and the controls read (input.6502). It must lie below &3000,
+\ which X moves to shadow RAM.
 .irq_handler
 {
     ZA_INTERRUPT
@@ -81,14 +86,16 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
         LDA #ula_entry(e, VIEW_COLOUR_3) : STA ula_pal
     NEXT
     INC fields
-    LDA frame_ready : BEQ done
+    LDA frame_ready : BEQ shown
     STZ frame_ready
     LDA #ACCCON_D
     LDX draw_buffer : BEQ show_main
     TSB acccon
-    BRA done
+    BRA shown
 .show_main
     TRB acccon
+.shown
+    JSR input_irq
 .done
     PLA : TAX
     LDA &FC                                     ; the interrupted A, which the OS kept
@@ -100,7 +107,6 @@ ASSERT irq_handler < &3000
 \ a frame. The fields counter wraps; a frame is far shorter than 256 fields.
 .engine_run
 {
-    ZA_AUTO1 due
 .wait
     JSR disc_step                               ; a read goes on while it waits
     LDA fields : SEC : SBC stepped
@@ -112,24 +118,23 @@ ASSERT irq_handler < &3000
     LDA fields : SEC : SBC #MAX_STEPS * STEP_FIELDS : STA stepped
     LDA #MAX_STEPS
 .counted
-    STA due
+    STA steps_due
 .step
     LDA stepped : CLC : ADC #STEP_FIELDS : STA stepped
-    BANK BANK_WORLD
-    JSR list_phase
-    DEC due : BNE logic
+    JSR step_lists
+    DEC steps_due : BNE logic
     JSR frame                                   ; the last step's frame
 .logic
     JSR step_logic
     INC steps : BNE counted_step
     INC steps+1
 .counted_step
-    LDA due : BNE step
+    LDA steps_due : BNE step
     BRA wait
 }
 
-\ frame: the lists' objects drawn into the screen not shown, which the
-\ next vertical sync shows.
+\ frame: the lists' objects drawn into the screen not shown, for
+\ frame_show to show.
 .frame
 {
 .shown
@@ -140,11 +145,23 @@ ASSERT irq_handler < &3000
     JSR erase_screen
 .erased
     JSR draw_phase
-    LDA #1 : STA frame_ready
-    INC frames : BNE counted
-    INC frames+1
-.counted
+    LDA #&FF : STA frame_drawn
     RTS
 .buffer_bank
     EQUB 0, ACCCON_X                            ; main RAM's screen, shadow's
+}
+
+\ frame_show: the frame this step drew, if it drew one, with what the
+\ step's logic draws on it (view_overlays: draw_buffer and draw_bank name
+\ its screen), shown from the next vertical sync.
+.frame_show
+{
+    LDA frame_drawn : BEQ done
+    STZ frame_drawn
+    JSR view_overlays
+    LDA #1 : STA frame_ready
+    INC frames : BNE done
+    INC frames+1
+.done
+    RTS
 }

@@ -37,7 +37,7 @@ for (let f = 0; f < frames; f++) {
       const a = sym.SCREEN + (y >> 3) * 640 + (y & 7) + (sym.WINDOW_COL0 + c) * 8;
       if (ram[base + a]) lit++;
     }
-  if (lit) { bad++; if (bad < 8) console.log(`frame ${f} buffer ${buf}: ${lit} bytes left, model ${ram[sym.model_i]} t ${ram[sym.model_t]}`); }
+  if (lit) { bad++; if (bad < 8) console.log(`frame ${f} buffer ${buf}: ${lit} bytes left, step ${ram[sym.steps] | (ram[sym.steps + 1] << 8)}`); }
 }
 console.log(`erasecheck: ${frames} frames, ${bad} with something left`);
 process.exit(bad ? 1 : 0);

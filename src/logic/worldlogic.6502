@@ -160,6 +160,10 @@ PROJ_SHIFT = 7
     STZ sines
     LDX #0
 .each
+    \ (each dot's tests make these before they read them, on the paths
+    \ the carry and A choose, which baron can't follow: without this it
+    \ keeps them from one dot to the next, and so from step to step)
+    ZA_DISCARD rot_acc, dot_k, dot_ez, dot_mu, dot_esum
     STX dot
     JSR dot_cached : BCC in_view
     LDA dot_x_lo,X : SEC : SBC pl_x : STA rot_d
