@@ -290,8 +290,8 @@ ENDMACRO
     TXA : LDY nears : STA near_slots,Y
     INC nears
 .far_off
-    LDA ob_exact,X : BEQ next
-    \ The draw list: z up to &2000, not wholly behind (z > -size) and
+    \ The draw list, for an object rotated exactly (the others have their
+    \ own way to next): z up to &2000, not wholly behind (z > -size) and
     \ |x|, |y| <= 2z. A negative z leaves nothing between -2z and 2z, and
     \ no size is negative, so only z = 0 needs the size.
     LDA rot_acc+5 : BMI next
@@ -319,11 +319,17 @@ ENDMACRO
     RTS
 .relevance
     RELEVANT exactly
-    \ Approximately: x' and z' kept for the scanner, never drawn (decisions
-    \ 11 and 21).
+    \ Approximately: x' and z' kept for the scanner, and the near list
+    \ unless it's exploding, but never drawn (decisions 11 and 21). Not by
+    \ the draw list's test, which reads y': so Baron sees no y' read here.
     LDX slot
     STZ ob_exact,X
     LDA rot_acc : STA ob_cx_lo,X : LDA rot_acc+1 : STA ob_cx_hi,X
     LDA rot_acc+4 : STA ob_cz_lo,X : LDA rot_acc+5 : STA ob_cz_hi,X
-    JMP stored
+    LDA ob_exploding,X : BNE approximated
+    LDA #&FF : STA ob_near,X
+    TXA : LDY nears : STA near_slots,Y
+    INC nears
+.approximated
+    JMP next
 }
