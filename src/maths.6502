@@ -34,60 +34,64 @@ MACRO MUL8 lo
     LDA (m_sqhi),Y : SBC (m_nghi),Y
 ENDMACRO
 
-\ umul16: mul_p (4 bytes) = mul_x * mul_y, both unsigned 16-bit.
+\ umul16: mul_p (4 bytes) = mul_x * mul_y, both unsigned 16-bit. The
+\ middle byte's carries go into x1 y0's high byte, which they can't
+\ overflow: it's at most &FE, and &FE only when its low byte is 1.
 .umul16
 {
+    ZA_AUTO1 c0
     LDA mul_x : MUL_SET
-    LDY mul_y : MUL8 mul_p : STA mul_p+1
-    LDY mul_y+1 : MUL8 mul_t : STA mul_p+2
-    LDA mul_t : CLC : ADC mul_p+1 : STA mul_p+1
-    BCC no1
-    INC mul_p+2
-.no1
+    LDY mul_y : MUL8 mul_p : STA mul_p+1        ; x0 y0
+    LDY mul_y+1 : MUL8 mul_t : STA mul_p+2      ; x0 y1
     LDA mul_x+1 : MUL_SET
-    LDY mul_y : MUL8 mul_t : STA mul_t+1
-    LDY mul_y+1 : MUL8 mul_p+3 : TAX
-    LDA mul_t : CLC : ADC mul_p+1 : STA mul_p+1
-    LDA mul_t+1 : ADC mul_p+2 : STA mul_p+2
-    BCC no2
+    MUL8 mul_t+1 : STA mul_p+3                  ; x1 y1
+    LDY mul_y : MUL8 c0 : TAX                   ; x1 y0
+    LDA mul_p+1 : CLC : ADC mul_t : BCC n1
+    INX : CLC
+.n1
+    ADC c0 : STA mul_p+1 : BCC n2
     INX
-.no2
-    LDA mul_p+3 : CLC : ADC mul_p+2 : STA mul_p+2
-    TXA : ADC #0 : STA mul_p+3
-    RTS
-}
-
-\ smul16: mul_p = mul_x * mul_y, signed 16-bit to 32 (the 68000's muls).
-.smul16
-{
-    LDA mul_x+1 : EOR mul_y+1 : STA mul_sign
-    LDA mul_x+1 : BPL xpos
-    LDA #0 : SEC : SBC mul_x : STA mul_x
-    LDA #0 : SBC mul_x+1 : STA mul_x+1
-.xpos
-    LDA mul_y+1 : BPL ypos
-    LDA #0 : SEC : SBC mul_y : STA mul_y
-    LDA #0 : SBC mul_y+1 : STA mul_y+1
-.ypos
-    JSR umul16
-    BIT mul_sign : BPL done
-    LDA #0 : SEC : SBC mul_p : STA mul_p
-    LDA #0 : SBC mul_p+1 : STA mul_p+1
-    LDA #0 : SBC mul_p+2 : STA mul_p+2
-    LDA #0 : SBC mul_p+3 : STA mul_p+3
+.n2
+    TXA : CLC : ADC mul_p+2 : BCC n3
+    INC mul_p+3 : CLC
+.n3
+    ADC mul_t+1 : STA mul_p+2 : BCC done
+    INC mul_p+3
 .done
     RTS
 }
+
+\ SIGNED: mul_p, umul16's product, made mul_x * mul_y signed (the 68000's
+\ muls): the unsigned product of the two's complement words, less 2^16 y
+\ if x is negative and 2^16 x if y is.
+MACRO SIGNED
+    BIT mul_x+1 : BPL x_pos
+    LDA mul_p+2 : SEC : SBC mul_y : STA mul_p+2
+    LDA mul_p+3 : SBC mul_y+1 : STA mul_p+3
+.x_pos
+    BIT mul_y+1 : BPL y_pos
+    LDA mul_p+2 : SEC : SBC mul_x : STA mul_p+2
+    LDA mul_p+3 : SBC mul_x+1 : STA mul_p+3
+.y_pos
+ENDMACRO
+
+\ smul16: mul_p = mul_x * mul_y, signed 16-bit to 32 (the 68000's muls).
+.smul16
+    JSR umul16
+    SIGNED
+    RTS
 
 \ fmul16: mul_r = the 68000's `muls; asl.l #2; swap` of mul_x and mul_y:
 \ floor(x * y / 16384), wrapped to 16 bits. Two's complement shifts round
 \ down, so the floor comes free.
 .fmul16
-    JSR smul16
-    ASL mul_p+1 : ROL mul_p+2 : ROL mul_p+3
-    ASL mul_p+1 : ROL mul_p+2 : ROL mul_p+3
+    JSR umul16
+    SIGNED
     LDA mul_p+2 : STA mul_r
     LDA mul_p+3 : STA mul_r+1
+    LDA mul_p+1
+    ASL A : ROL mul_r : ROL mul_r+1
+    ASL A : ROL mul_r : ROL mul_r+1
     RTS
 
 \ sdiv32: the 68000's divs. mul_p (32-bit signed) / div_d (16-bit signed):
@@ -113,17 +117,31 @@ ENDMACRO
     \ must be below the divisor.
     LDA div_n+2 : CMP div_u : LDA div_n+3 : SBC div_u+1
     BCS overflow
-    \ 16 steps of shift and subtract: the remainder in div_n+2..3, the
-    \ quotient shifting into div_n..1.
+    \ 16 steps of shift and subtract: the remainder in div_n+2 and A, the
+    \ quotient shifting into div_n..1. When the remainder a byte on is
+    \ still below the divisor, the quotient's top byte is 0, and the
+    \ first 8 steps are a byte's move.
     LDX #16
+    LDA div_n+3 : BNE steps
+    LDA div_n+1 : CMP div_u : LDA div_n+2 : SBC div_u+1
+    BCS steps
+    LDA div_n+2 : STA div_n+3
+    LDA div_n+1 : STA div_n+2
+    LDA div_n : STA div_n+1
+    STZ div_n
+    LDX #8
+.steps
+    LDA div_n+3
 .step
-    ASL div_n : ROL div_n+1 : ROL div_n+2 : ROL div_n+3
+    ASL div_n : ROL div_n+1 : ROL div_n+2 : ROL A
     BCS sub                             ; the remainder passed 16 bits
-    LDA div_n+2 : CMP div_u : LDA div_n+3 : SBC div_u+1
-    BCC next
+    CMP div_u+1 : BCC next
+    BNE sub
+    LDY div_n+2 : CPY div_u : BCC next
 .sub
+    TAY                                 ; (C = 1 on every way here)
     LDA div_n+2 : SBC div_u : STA div_n+2
-    LDA div_n+3 : SBC div_u+1 : STA div_n+3
+    TYA : SBC div_u+1
     INC div_n                           ; the quotient's bit
 .next
     DEX : BNE step

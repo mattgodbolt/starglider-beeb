@@ -27,6 +27,11 @@ MACRO FMUL a, b
     LDA b : STA mul_y : LDA b+1 : STA mul_y+1
     JSR fmul16
 ENDMACRO
+\ FMUL_BY b: mul_r = fmul16(mul_x, b), mul_x as the last product left it.
+MACRO FMUL_BY b
+    LDA b : STA mul_y : LDA b+1 : STA mul_y+1
+    JSR fmul16
+ENDMACRO
 
 \ ADDW r, a / SUBW r, a: r = r + a, r - a (words).
 MACRO ADDW r, a
