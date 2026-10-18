@@ -147,8 +147,7 @@ ENDMACRO
 \ record on by its five more.
 .set_up
     LDA ob_type,X : ASL A : TAX
-    JMP (set_ups,X)
-    ZA_CANJUMP set_none, set_walker, set_pyramid, set_box, set_towers, set_5, set_silo, set_drone, set_atv, set_tank, set_bute, set_diamond, set_stomper, set_skim, set_17, set_juno, set_lotus, set_glider
+    JMP set_up_dispatch                 ; (logic/arith.6502)
 .set_ups
     EQUW set_none, set_walker, set_pyramid, set_box, set_towers, set_5, set_silo, set_drone
     EQUW set_atv, set_tank, set_none, set_none, set_none, set_bute, set_diamond, set_stomper
@@ -373,6 +372,7 @@ ENDMACRO
     STZ missile_view : STZ mv_render : STZ docked
     LDA #&FF : STA enemies_active
     STZ cheat_mode
+    STZ shot_n                          ; (the drawing's: no shots carried into a game)
     JMP panel_new_game
 }
 

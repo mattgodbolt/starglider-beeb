@@ -14,7 +14,8 @@
 \ turning), and then everything made from them is too: the rotations'
 \ patched code stands as it is, and the matrix and ground_matrix's
 \ constants, which zero page doesn't keep from one step to the next, come
-\ back from the copies kept below.
+\ back from the copies kept below. In a steady turn only the heading
+\ changes, and then so do only its sines and the products they're in.
 .camera
 {
     MOVW ang_p, pl_pitch
@@ -29,6 +30,16 @@ FOR i = 0..5
 NEXT
     JMP same
 .build
+    \ the pitch and roll the last build's? then the rest of what it made
+    \ from them is kept: their sines, their entries alone and the ground
+    \ objects' constants
+    LDA cam_valid : BEQ full
+    LDA ang_p : CMP cam_angles : BNE full
+    LDA ang_p+1 : CMP cam_angles+1 : BNE full
+    LDA ang_r : CMP cam_angles+4 : BNE full
+    LDA ang_r+1 : CMP cam_angles+5 : BNE full
+    JMP turned
+.full
     LDX #5
 .angles
     LDA ang,X : ZA_INDEXEDBY 0..5
@@ -36,9 +47,14 @@ NEXT
     DEX : BPL angles
     LDA #&FF : STA cam_valid
     JSR build_matrix                    ; a full build: its sines are wanted below
+    MOVW cam_s1, build_matrix.m_s1 : MOVW cam_c1, build_matrix.m_c1
+    MOVW cam_s3, build_matrix.m_s3 : MOVW cam_c3, build_matrix.m_c3
+    MOVW cam_d6, build_matrix.m_d6
     \ The ground objects' constants (ground_matrix): their pitch and roll
     \ are the camera's.
-    FMUL build_matrix.m_s1, build_matrix.m_c3
+    MOVW mul_x, build_matrix.m_s1
+    MOVW mul_y, build_matrix.m_c3
+    JSR fmul_trig
     MOVW kconst+2, mul_r
     MOVW kconst, build_matrix.m_d6
     MOVW kconst+4, build_matrix.m_c1
@@ -65,6 +81,7 @@ NEXT
     LDA kmag+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8}
     STA kmag_kept+1,X
     DEX : DEX : BPL kconst_mag
+.made
     LDX #17
     ZA_DISCARD cam
 .camera_copy
@@ -78,6 +95,7 @@ NEXT
 FOR i = 0..17
     LDA cam_kept+i : STA cam+i
 NEXT
+.ground_kept
 FOR i = 0..9
     LDA kmag_kept+i : STA kmag+i
 NEXT
@@ -85,14 +103,35 @@ FOR i = 0..4
     LDA ksign_kept+i : STA ksign+i
 NEXT
     RTS
+.turned
+    \ the heading's sines (as build_matrix makes them), the rest kept
+    MOVW cam_angles+2, ang_h
+    LDA ang_h : STA m_idx : LDA ang_h+1 : AND #&0F : STA m_idx+1
+    JSR sincos
+    MOVW build_matrix.m_s2, m_sin : MOVW build_matrix.m_c2, m_cos
+    MOVW build_matrix.m_s1, cam_s1 : MOVW build_matrix.m_c1, cam_c1
+    MOVW build_matrix.m_s3, cam_s3 : MOVW build_matrix.m_c3, cam_c3
+    MOVW build_matrix.m_d6, cam_d6
+    MOVW mat+2, cam_kept+2 : MOVW mat+8, cam_kept+8 : MOVW mat+14, cam_kept+14
+    MOVW mul_x, build_matrix.m_c1
+    JSR matrix_heading
+    JSR ground_kept
+    JMP made
 }
 \ the angles the camera was last built for (once cam_valid is set), and
-\ what was made from them that zero page doesn't keep
+\ what was made from them that zero page doesn't keep: the matrix, the
+\ ground objects' constants, and the pitch's and roll's sines and their
+\ product
 .cam_valid  EQUB 0
 .cam_angles SKIP 6
 .cam_kept   SKIP 18
 .kmag_kept  SKIP 10
 .ksign_kept SKIP 5
+.cam_s1     SKIP 2
+.cam_c1     SKIP 2
+.cam_s3     SKIP 2
+.cam_c3     SKIP 2
+.cam_d6     SKIP 2
 
 \ ---------------------------------------------------------------------------
 \ coarse_list (&05750): every object within &2020 of the player in z, or
@@ -184,20 +223,25 @@ ENDMACRO
 \ RELEVANT yes (decision 11): on to yes if an object at rot_acc, rotated
 \ approximately (within ROT_SLACK), could be drawn or meet the player:
 \ in front, short of &2000 and within the view's pyramid across, or within
-\ NEAR_BOX in x and z (the largest collision box is 2000). Only those
-\ need the exact rotation: nothing else the game decides reads the rest.
-\ The approximation has no y' (decision 21), so neither test has it: the
-\ collisions test y only once x and z are in the box. (rotate_lists' z2
-\ and t16 are its workings.)
-ROT_SLACK = 512
-NEAR_BOX = 2000 + ROT_SLACK
+\ NEAR_BOX in x and z (the largest collision box). Only those need the
+\ exact rotation: nothing else the game decides reads the rest. The checks
+\ take an object as near when the ST's own x' and z' are within NEAR_BOX
+\ (decision 31), so the approximation's are tested ROT_SLACK wider
+\ (NEAR_TEST) to be sure of every one. The approximation has no y'
+\ (decision 21), so neither test has it: the collisions test y only once x
+\ and z are in the box. (rotate_lists' z2 and t16 are its workings.)
+ROT_SLACK = 444                         ; decision 32
+ASSERT ROT_SLACK >= ROT_BOUND           ; (rotate.6502's, the approximation's)
+NEAR_BOX = SIZE_Z_MAX
+NEAR_TEST = NEAR_BOX + ROT_SLACK
 MACRO RELEVANT yes
     LDA rot_acc+5 : BPL ahead
     \ behind the player: below -3 slack / 2 the pyramid is empty, and only
-    \ NEAR_BOX can catch it; above, so it is if it's wholly behind the view,
-    \ z <= -(size + slack)
+    \ NEAR_TEST can catch it (tested by the high byte, which rounds that
+    \ down: the pyramid's own test takes the few between); above, so it is
+    \ if it's wholly behind the view, z <= -(size + slack)
     CMP #HI(-3 * ROT_SLACK / 2) : BCS just_behind
-    ASSERT LO(-3 * ROT_SLACK / 2) = 0 AND -3 * ROT_SLACK / 2 > -NEAR_BOX
+    ASSERT -3 * ROT_SLACK / 2 > -NEAR_TEST
     JMP near_test
 .just_behind
     LDX slot : LDY ob_type,X
@@ -211,8 +255,8 @@ MACRO RELEVANT yes
     \ ahead of &2000 (with the slack), it's neither drawn nor near
     CMP #HI(&2000 + ROT_SLACK) : BCC pyramid
     BNE not
-    LDA rot_acc+4 : BNE not
-    ASSERT LO(&2000 + ROT_SLACK) = 0
+    LDA rot_acc+4 : CMP #LO(&2000 + ROT_SLACK) + 1 : BCS not
+    ASSERT LO(&2000 + ROT_SLACK) < &FF AND &2000 + ROT_SLACK > NEAR_TEST
 .pyramid
     \ in the view's pyramid across, with the slack: |x| <= 2z + 3 slack,
     \ which is no pyramid if that's negative
@@ -223,11 +267,21 @@ MACRO RELEVANT yes
     WITHIN rot_acc, z2, near_test
     JMP yes
 .near_test
-    \ within NEAR_BOX in z and x? (z first: most behind are far behind)
-    WITHIN rot_acc+4, #NEAR_BOX, no
-    WITHIN rot_acc, #NEAR_BOX, no
+    \ within NEAR_TEST in z and x? (z first: most behind are far behind)
+    WITHIN rot_acc+4, #NEAR_TEST, no
+    WITHIN rot_acc, #NEAR_TEST, no
     JMP yes
 .no
+ENDMACRO
+
+\ OFFSET: rot_d, the offset from the player of the object in slot X.
+MACRO OFFSET
+    LDA ob_x_lo,X : SEC : SBC pl_x : STA rot_d
+    LDA ob_x_hi,X : SBC pl_x+1 : STA rot_d+1
+    LDA ob_y_lo,X : SEC : SBC pl_y : STA rot_d+2
+    LDA ob_y_hi,X : SBC pl_y+1 : STA rot_d+3
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA rot_d+4
+    LDA ob_z_hi,X : SBC pl_z+1 : STA rot_d+5
 ENDMACRO
 
 \ rotate_lists (&057B8): the coarse list read from its top, each object
@@ -236,10 +290,20 @@ ENDMACRO
 \ pushed in that order.
 .rotate_lists
 {
-    ZA_AUTO1 list_i, as_is, nears, draws
+    ZA_AUTO1 list_i, nears, draws
     ZA_AUTO2 z2, t16
     STZ nears : STZ draws
-    LDA rot_identity : STA as_is
+    \ each object's way, by the camera's matrix: unrotated if it's the
+    \ identity, exactly if it has no products (as cheap), and otherwise
+    \ approximately first (decision 11), unless it was relevant at the last
+    \ step (decision 33)
+    LDA #LO(approximately) : LDY #HI(approximately)
+    BIT rot_exactly : BPL way
+    LDA #LO(offset_exactly) : LDY #HI(offset_exactly)
+    BIT rot_identity : BPL way
+    LDA #LO(unrotated) : LDY #HI(unrotated)
+.way
+    STA live+1 : STY live+2
     LDX coarse_n : BNE each
     STZ near_n : STZ draw_n
     RTS
@@ -248,6 +312,9 @@ ENDMACRO
     LDA coarse_slots,X : STA slot : TAX
     LDA ob_type,X : BNE live
     JMP next
+.live
+    JMP approximately                       ; patched: the camera's way
+    ZA_CANJUMP unrotated, offset_exactly, approximately
 .unrotated
     \ the identity: camera space is the offset itself
     LDA ob_x_lo,X : SEC : SBC pl_x : STA rot_acc : STA ob_cx_lo,X
@@ -258,21 +325,35 @@ ENDMACRO
     LDA ob_z_hi,X : SBC pl_z+1 : STA rot_acc+5 : STA ob_cz_hi,X
     LDA #1 : STA ob_exact,X
     JMP stored
-.live
-    BIT as_is : BMI unrotated
-    LDA ob_x_lo,X : SEC : SBC pl_x : STA rot_d
-    LDA ob_x_hi,X : SBC pl_x+1 : STA rot_d+1
-    LDA ob_y_lo,X : SEC : SBC pl_y : STA rot_d+2
-    LDA ob_y_hi,X : SBC pl_y+1 : STA rot_d+3
-    LDA ob_z_lo,X : SEC : SBC pl_z : STA rot_d+4
-    LDA ob_z_hi,X : SBC pl_z+1 : STA rot_d+5
-    BIT rot_exactly : BMI exactly           ; no products: as cheap as approximately
-    JSR rotate_approx
-    JMP relevance
-.exactly
+.approximately
+    \ ob_exact &FF: relevant at the last step, and so likely at this one
+    LDA ob_exact,X : BMI carried
+    OFFSET
+    JMP rotate_approx                       ; (on to relevance)
+.carried
+    \ exactly at once, and relevant at the next step too if it's near or
+    \ drawn (the draw list marks it): an exact position needs no slack
+    OFFSET
     JSR rotate_exact
     LDX slot
-    LDA #1 : STA ob_exact,X
+    WITHIN rot_acc+4, #NEAR_BOX, lapsed
+    WITHIN rot_acc, #NEAR_BOX, lapsed
+    BRA store
+.lapsed
+    LDA #1
+    BRA exact
+.offset_exactly
+    OFFSET
+    JSR rotate_exact
+    LDA #1                                  ; (relevant if the draw list marks it)
+    BRA exact
+.exactly
+    \ relevant: exactly, and at once at the next step
+    JSR rotate_exact
+    LDA #&FF
+.exact
+    LDX slot
+    STA ob_exact,X
 .store
     \ the camera-space position, and the near list unless it's exploding
     LDA rot_acc : STA ob_cx_lo,X : LDA rot_acc+1 : STA ob_cx_hi,X
@@ -302,6 +383,7 @@ ENDMACRO
     WITHIN rot_acc, z2, next
     WITHIN rot_acc+2, z2, next
     LDA #&FF : STA ob_drawn,X
+    STA ob_exact,X                          ; (relevant: decision 33)
     TXA : LDY draws : STA draw_slots,Y
     INC draws
 .next
@@ -326,6 +408,42 @@ ENDMACRO
     INC nears
 .approximated
     JMP next
+}
+
+\ ---------------------------------------------------------------------------
+\ fmul_trig: fmul16 for build_matrix (render.6502), whose factors are
+\ sines, cosines and their products: a factor of 0 or +-16384 makes the
+\ product 0, the other or its negation, exactly, without the multiply. A
+\ level pitch, its sine 0 and its cosine 16384, gives most of them one.
+.fmul_trig
+{
+    LDA mul_y : BNE x_test
+    LDA mul_y+1 : BEQ zero
+    CMP #HI(16384) : BEQ by_x
+    CMP #HI(-16384) : BEQ by_neg_x
+.x_test
+    LDA mul_x : BNE full
+    LDA mul_x+1 : BEQ zero
+    CMP #HI(16384) : BEQ by_y
+    CMP #HI(-16384) : BNE full
+    LDA #0 : SEC : SBC mul_y : STA mul_r
+    LDA #0 : SBC mul_y+1 : STA mul_r+1
+    RTS
+.full
+    JMP fmul16
+.by_y
+    MOVW mul_r, mul_y
+    RTS
+.by_neg_x
+    LDA #0 : SEC : SBC mul_x : STA mul_r
+    LDA #0 : SBC mul_x+1 : STA mul_r+1
+    RTS
+.by_x
+    MOVW mul_r, mul_x
+    RTS
+.zero
+    STZ mul_r : STZ mul_r+1
+    RTS
 }
 
 \ ---------------------------------------------------------------------------

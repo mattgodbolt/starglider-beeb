@@ -886,3 +886,150 @@ below `world_list_end`, the build ran out of zero page for routines that
 never meet it. The picture now goes first, so the code starts past the
 rotations' chain.
 
+### Eight more calls
+
+Building the flight layer left eight more choices the ST doesn't settle
+for a four-colour screen, a different keyboard and a slower machine. They
+went to Matt as a second page, and Matt took every recommendation
+(2026-10-18): decisions 23 to 30. Matt has no joystick, so the keyboard
+is the controls that must feel right. Three change code: the flash
+written at the flip (24), the panel's animations per step (25) and every
+shot since the last frame (30).
+
+Decisions 24 and 25 are built. Each step's flash leaves its colour
+pending, which a later step's black doesn't undo, and the interrupt
+writes it to logical 0 as it shows the frame. So a flash on a step whose
+frame was dropped still shows, and it lands as the ST's does. The panel
+steps the waveforms and the energy bar's dimming once for each frame
+count since its last draw (`panel_steps`), the ST's per-frame rule run
+for every step, and `make panel`'s model does the same.
+
+### The camera and the rotations in a turn
+
+Holding a hard turn, the camera's matrix is full and changes every step,
+and the camera and the rotations took 54,000 cycles of world_lists'
+105,000 (measured in jsbeeb on main, 2026-10-18). Now they take 41,000.
+
+- **The approximation on bytes.** Decision 11's approximate rotation makes
+  each term from one byte product: the matrix entry to 8 bits (|m| / 64,
+  rounded) by the offset's high byte, taken as the middle of the 256
+  offsets it stands for. Taking the middle halves the error the high byte
+  alone made, which leaves room for the 8-bit entry: within 418 of the
+  ST's, where decision 11 allows 444 (`tools/mkrotate.py` derives it). On
+  the captures the worst is 238, where it was 408. An object's
+  approximation takes 259 cycles, not 395. Column y's offset is mostly
+  within 256 of 0 (the ground is flat and the player near it), and then
+  its products are the same for every object, so the rows' constants take
+  them: one set for a high byte of 0 and one for -1.
+- **Only what changed.** In a steady turn the pitch and roll stay. So the
+  camera keeps their sines, the products of them alone and the ground
+  objects' constants, and makes only the heading's sines and the eleven
+  products they're in, through a new entry into build_matrix. A product by
+  a sine of 0 or a cosine of 16384, as a level pitch makes most of them, is
+  taken as it is (`fmul_trig`). rotate_setup patches only the entries that
+  changed (six of nine in a steady turn), and links the chains again only
+  when an entry's kind or sign changes. The camera falls from 12,300
+  cycles to 6,300.
+- **The exact rotation** keeps its four byte products a term, with one
+  SEC where there were four (a byte product never borrows) and a carry
+  added straight into the next sum: 1,370 cycles, not 1,460.
+- **The near box.** The checks call an approximated object near when the
+  ST's own x' and z' are within NEAR_BOX, and the port tested its
+  approximation against the same box, so any error at that edge could
+  fail them. The old approximation's errors fell inward on the captures by
+  luck; the new one's didn't, on three flight frames. The near test now
+  allows another ROT_SLACK (NEAR_TEST), which rotates 0.3 to 0.4 more
+  objects a step exactly.
+- **The cost.** Holding a hard turn, world_lists takes 91,500 cycles a
+  step (the camera 6,300, the rotations 34,800, the dots 43,300
+  untouched): 3.2 frames a second at 11.7 steps. Flying straight, 8.4 at
+  12.6 (measured 2026-10-18, before the view's drawing was merged).
+- **Baron.** With the logic bank three bytes further on, its `JMP
+  (set_ups,X)` sat at the address of a `BMI climbed` in player_flight in
+  the world bank. The branch took on the jump's targets (baron#29 reaches
+  conditional branches too), and baron warned that the level's set-up
+  read init_objects' `record` unset.
+
+Matt can't judge calls like these until the game can be played, so until
+then they're Claude's to make (Matt, 2026-10-18), recorded as decisions
+like any other, for Matt to revisit. Decisions 31 to 33 are the first:
+the rotations' near box and slack, and carrying relevance over.
+
+### The handlers' cost
+
+object_handlers was three quarters of a step's logic: about 25,000 cycles
+a step on the disc at level 1's start, 33,000 at most. It is now 18,800,
+and 24,200 at most (measured 2026-10-18). With it the disc draws 5.47
+frames a second flying straight, holding 12.5 steps (`make fps`, from
+5.10). Every routine still matches the ST on every capture.
+
+- **The walk skips what does nothing.** The handler by type is now a gate
+  (`tools/mkhandlers.py`): none for the types whose ST handler does
+  nothing the port keeps. For the five whose first test is the near or
+  draw list's flag, the walk tests the flag itself, so most slots cost no
+  call. The call is one JMP (abs,X) in main RAM. The ST clears the homing
+  request after every slot; here the three handlers that make one clear
+  it, and one left at the start is cleared after the first slot, as the
+  ST's is. The walk stops at the slot past its last, made to look
+  exploding until then, so only an exploding slot tests for the end.
+- **random32 in zero page.** The handlers draw dozens of numbers a step,
+  so the walk copies random32's state into zero page for its own copy of
+  the routine.
+- **angle_to_player's quotient in 8 bits.** Away from dx 0 and the
+  -32768s, only the quotient's low byte matters, since from 256 up the
+  clamp is decided. So eight steps of shift and subtract make it, instead
+  of the 68000's divs. The arctan tables keep their low bytes alone;
+  their high bytes are steps, counted by generated code.
+- **set_velocity by bytes.** Every speed the game sets is below 512, so
+  speed times a sine fits 23 bits, made from two 8-bit products each.
+
+A differential test ran the port's old routines against the new ones from
+the same states: the handlers on capture states perturbed with homing
+requests, launchers near the player, and random types, flags and
+explosions; angle_to_player on every dz for twelve pairs of dx and the
+reverse; set_velocity on every heading for every speed from -600 to 600.
+No case differed.
+
+Decision 30 is built. The handlers' shot records now last until a frame
+draws them, so a frame shows every shot its steps fired, each from the
+attacker's place at its own step, and a new game starts with none. There
+is room for four a step over a frame's most steps (`SHOTS`, `ASSERT`ed
+against `MAX_STEPS`).
+
+### The near box, the slack and carried relevance
+
+Decisions 31 to 33 were built on 2026-10-18.
+
+- **The near box** (31). The checks now call an approximated object near
+  when the ST's own x' and z' are within the largest collision box,
+  NEAR_BOX, which the build takes from STAR.PRG's box table (the beam's).
+  The port tests its approximation one slack wider.
+- **The slack** (32) is 444, `ASSERT`ed to cover ROT_BOUND, the most the
+  approximation can be off the ST's, which `tools/mkrotate.py` now
+  computes from its own derivation. The checks hold the approximation to
+  ROT_BOUND rather than the slack, so a slip in the derivation would fail
+  them, and `make rot` holds the ST's own matrices to it too. The test's
+  edge ahead compares the low byte as well, since the slack is no longer
+  a multiple of 256.
+- **Carried relevance** (33). An object relevant at the last step is
+  rotated exactly at once. For one rotated exactly then, relevant means
+  drawn or within NEAR_BOX: an exact position needs no slack. In a hard
+  turn 8.9 objects a step are carried, so as many fewer are approximated,
+  for 0.2 more exact rotations. The first build kept an object carried
+  while the relevance test, run again on its exact result, held. That
+  saved less: the test, and a flag on every approximation to tell the
+  paths apart, cost more than they kept.
+- **Both checks take the carried path.** `scenerun.mjs` carries ob_exact
+  from frame to frame, as the disc carries it from step to step. A carried
+  path made to skip its rotation fails both.
+- **build_matrix's products with the heading** moved to the world bank's
+  end (`src/matrix.6502`), past the logic bank's code. build_matrix pages
+  that bank for its sines anyway, and it frees about 290 bytes of main
+  RAM, the region every layer wants.
+
+A hard turn's rotations fell from 34,700 cycles a step to 31,800 and its
+approximations from 40.9 to 32.0 a step; flying straight, 9,900 to 9,700
+(measured 2026-10-18). The list phase now ends a few bytes short of the
+sine table, which is aligned to 1K: much more code there would move the
+table, and everything after it, 1K on.
+

@@ -277,6 +277,7 @@ class Model {
         this.wl = 0;
         this.wr = 0;
         this.dim = 2;
+        this.fc = 0;
     }
     frame(n, s, f) {
         const px = this.buf[n];
@@ -287,13 +288,18 @@ class Model {
         };
         const text = (x, y, str, c) => [...str].forEach((ch, i) => cell(x + 8 * i, y, ch, c));
         const P = panel.places;
-        // waveforms (&05872)
-        this.wl = (this.wl + 1) & 15;
-        this.wr = (this.wr + 1) & 15;
+        // waveforms (&05872) and the energy's dimming (&0597E), stepped for
+        // each frame count since the last drawn, as the ST steps them each
+        // frame (decision 25: the port's panel_steps)
+        while (this.fc !== s.frameCount) {
+            this.fc = (this.fc + 1) & 0xffff;
+            this.wl = (this.wl + 1) & 15;
+            this.wr = (this.wr + 1) & 15;
+            if ((this.fc & 2) === 0) this.dim ^= 2;
+        }
         for (const [k, [x0, y0]] of [[panel.wave_order.left[this.wl], P.wave_left], [panel.wave_order.right[this.wr], P.wave_right]])
             for (let r = 0; r < 8; r++)
                 for (let i = 0; i < 16; i++) set(x0 + i, y0 + r, (panel.waves[k][r][i >> 2] >> (3 - (i & 3))) & 1 ? E.wave : 0);
-        if ((s.frameCount & 2) === 0) this.dim ^= 2;
         // altitude (&05994)
         const d = ((-s.y & 0xffff) >> 6) & 31;
         if (d > 28) throw new Error(`altitude ${d}: past what the logic allows`);
@@ -564,6 +570,9 @@ for (const file of captures) {
             model.wl = ram[need("wave_left_n")] = v[0x267] & 15;
             model.wr = ram[need("wave_right_n")] = v[0x269] & 15;
             model.dim = ram[need("energy_dim")] = v[0x27f] & 2;
+            model.fc = (st.frameCount - 1) & 0xffff;
+            ram[need("wave_fc")] = model.fc & 0xff;
+            ram[need("wave_fc") + 1] = model.fc >> 8;
         }
         ram[need("world_text")] = flags.world;
         ram[need("kill_shown")] = flags.kill & 0xff;

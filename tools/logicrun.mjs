@@ -299,14 +299,14 @@ for (const f of map.objects) {
 }
 // The camera-space positions of the objects the list phase rotated
 // approximately (decision 11, ob_exact 0) are the ST's only to within the
-// approximation's slack in x and z, and only for an object the ST neither
-// drew nor had within reach of the player in x and z (tools/scenecheck.py's
-// rule): a slot that keeps to that is taken as matching. Their y' isn't
-// made at all (decision 21). Drawn is the ST's draw list at the exit, not
-// the record's flag: the silo's two records keep what TOS left in theirs,
-// which nothing clears.
-const ROT_SLACK = 512;
-const NEAR_BOX = 2000 + ROT_SLACK;
+// approximation's bound in x and z (ROT_BOUND, tools/mkrotate.py's), and
+// only for an object the ST neither drew nor had within NEAR_BOX of the
+// player in x and z (decision 31; tools/scenecheck.py's rule): a slot that
+// keeps to that is taken as matching. Their y' isn't made at all (decision
+// 21). Drawn is the ST's draw list at the exit, not the record's flag: the
+// silo's two records keep what TOS left in theirs, which nothing clears.
+const ROT_BOUND = need("ROT_BOUND");
+const NEAR_BOX = need("NEAR_BOX");
 const exactAt = need("ob_exact");
 const drawList = items.find((it) => it.name === "st_draw_list");
 const camera = ["ob_cx", "ob_cy", "ob_cz"].map((n) => items.find((it) => it.name === n));
@@ -322,7 +322,7 @@ for (const it of camera)
             const st = [camera[0], camera[2]].map((c) => s16(c.want(exit)[s]));
             const drawn = drawList.want(exit).slice(1).some((ptr) => slotOf(ptr) === s);
             const off = Math.abs(s16((got[s] - want[s]) & 0xffff));
-            if (off <= ROT_SLACK && !drawn && !st.every((c) => Math.abs(c) <= NEAR_BOX)) got[s] = want[s];
+            if (off <= ROT_BOUND && !drawn && !st.every((c) => Math.abs(c) <= NEAR_BOX)) got[s] = want[s];
         }
     };
 

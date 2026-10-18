@@ -47,7 +47,8 @@ FIELDS = [  # (name, ST offset or None, kind, where, what)
     ("cz", 0x2C, "word", "main", ""),
     ("proof", 0x2E, "byte", "andy", "non-zero: lasers can't hurt it"),
     ("hits", 0x30, "word", "andy", "hits left"),
-    ("exact", None, "port", "main", "1 if the list phase rotated it exactly this frame (decision 11)"),
+    ("exact", None, "port", "main", "non-zero if the list phase rotated it exactly this step (decision 11); "
+     "&FF if it was relevant then, so it's rotated exactly at once at the next (decision 33)"),
 ]
 
 

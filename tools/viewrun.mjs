@@ -746,6 +746,7 @@ for (const stepsPath of args) {
             }
             putState(steps, flight);
             setD0(fr, "flight");
+            ram[need("shot_n")] = 0;                    // (this step's shots alone: a frame draws them all since the last)
             callIn("object_handlers", "BANK_WORLD");
             await run(need("spike_logic"));
             clearScreen();

@@ -28,12 +28,6 @@ import sys
 from pathlib import Path
 
 
-# decision 11: the approximate rotation's bound, and the collision boxes'
-# reach with it (render.6502's ROT_SLACK and NEAR_BOX)
-ROT_SLACK = 512
-NEAR_BOX = 2000 + ROT_SLACK
-
-
 def to_segment(p, a, b):
     """The distance from point p to the segment a-b."""
     dx, dy = b[0] - a[0], b[1] - a[1]
@@ -58,6 +52,10 @@ def main():
     scenes = json.loads(Path(args.scenes).read_text())["frames"]
     run = json.loads(Path(args.run).read_text())
     first = run.get("first", 0)
+    # decisions 11 and 31: the most the build's approximation can be off the
+    # ST's (tools/mkrotate.py's ROT_BOUND), and the box an approximated
+    # object must be outside (world.6502's NEAR_BOX, the largest collision box)
+    rot_bound, near_box = run["rot_bound"], run["near_box"]
     st = {k: 0 for k in ("frames", "list_bad", "rel_bad", "rel_approx", "edges_both", "edges_moved",
                           "only_st", "only_port", "erase_left")}
     worst = 0
@@ -95,13 +93,13 @@ def main():
                     show(f"frame {n}: slot {slot} camera-space {g} on the port, {v} on the ST")
                 continue
             # rotated approximately (decision 11): x' and z' within the
-            # slack (there's no y': decision 21), and neither drawn by the ST
+            # bound (there's no y': decision 21), and neither drawn by the ST
             # nor near enough in x and z to meet the player
             st["rel_approx"] += 1
             xz = ((g[0], v[0]), (g[2], v[2]))
             off = max(min(abs(a - b), 65536 - abs(a - b)) for a, b in xz)   # words wrap
             worst_approx = max(worst_approx, off)
-            if off > ROT_SLACK or int(slot) in drawn or all(abs(v[i]) <= NEAR_BOX for i in (0, 2)):
+            if off > rot_bound or int(slot) in drawn or all(abs(v[i]) <= near_box for i in (0, 2)):
                 st["rel_bad"] += 1
                 show(f"frame {n}: slot {slot} approximated as {g}, the ST's {v}")
         port = {}

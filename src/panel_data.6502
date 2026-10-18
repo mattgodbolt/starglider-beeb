@@ -46,6 +46,7 @@ SECTION PanelAndy, org = logic_andy_end, guard = ANDY_TOP, virtual = TRUE
 .wave_left_n  SKIP 1        ; each waveform's step, 0-15
 .wave_right_n SKIP 1
 .energy_dim   SKIP 1        ; 2: the low energy bar dimmed (colour 10); 0: not
+.wave_fc      SKIP 2        ; the frame count they were last stepped for
     \ the heading in degrees, for the angle it was last worked out for
 .head_for     SKIP 2
 .head_deg     SKIP 2

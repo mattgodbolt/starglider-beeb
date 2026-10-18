@@ -150,6 +150,7 @@ ASSERT LO(edge_mark) = 0 AND LO(v_xlo) = 0
 .draw_buffer SKIP 1
 .frame_drawn SKIP 1         ; non-zero: this step's frame is drawn, not yet ready
 .frame_ready SKIP 1
+.flash_pending SKIP 1       ; colour 0 for the frame to show, from its steps' flashes (0: black)
 .stepped    SKIP 1          ; the field count the steps taken have reached
 .steps_due  SKIP 1          ; the steps still to take before waiting again
 .frames     SKIP 2          ; frames drawn

@@ -1,0 +1,36 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - build_matrix's products with the heading
+\ (render.6502), in the world's bank
+\
+\ build_matrix lives in main RAM, which every part of the game wants more
+\ of, and pages this bank (its sines and fmul_trig are here) before its
+\ products, so the larger part of them, those with the heading, can be
+\ here. Its callers, main RAM's object_matrix and this bank's camera, each
+\ take this bank paged on its return; nothing in the logic's bank calls it.
+\ ***************************************************************************
+
+\ matrix_heading (&04190's rest): mat's entries with the heading's sines in
+\ them, from build_matrix's sines and products of the pitch and roll alone,
+\ mul_x c1 on the way in. Jumped to by build_matrix; called by the camera
+\ (world.6502) in a steady turn, when only the heading changes.
+.matrix_heading
+    TRIG_BY build_matrix.m_c2 : MOVW mat+16, mul_r                  ; z' on z
+    TRIG_BY build_matrix.m_s2 : MOVW mat+12, mul_r                  ; z' on x
+    MOVW mul_x, build_matrix.m_s3
+    TRIG_BY build_matrix.m_c2
+    LDA #0 : SEC : SBC mul_r : STA mat+6 : LDA #0 : SBC mul_r+1 : STA mat+7
+    TRIG_BY build_matrix.m_s2 : MOVW mat+10, mul_r
+    MOVW mul_x, build_matrix.m_s2
+    TRIG_BY build_matrix.m_d6 : MOVW mat+0, mul_r
+    TRIG_BY build_matrix.m_s1 : MOVW build_matrix.m_t, mul_r
+    TRIG_BY build_matrix.m_c3
+    LDA #0 : SEC : SBC mul_r : STA mat+4 : LDA #0 : SBC mul_r+1 : STA mat+5
+    MOVW mul_x, build_matrix.m_c2
+    TRIG_BY build_matrix.m_c3 : MOVW build_matrix.m_d7, mul_r
+    ADDW mat+0, mul_r                                               ; x' on x
+    TRIG_BY build_matrix.m_d6 : ADDW mat+4, mul_r                   ; x' on z
+    MOVW mul_x, build_matrix.m_c3
+    TRIG_BY build_matrix.m_t : ADDW mat+6, mul_r                    ; y' on x
+    MOVW mul_x, build_matrix.m_s1
+    TRIG_BY build_matrix.m_d7 : ADDW mat+10, mul_r                  ; y' on z
+    RTS

@@ -50,7 +50,8 @@ make spike      # the spike on every captured scene: checked against the
 make check      # sincos against the ST's sine table at every angle, make spike, the
                 # disc's erasing (tools/erasecheck.mjs), its own disc reader
                 # (tools/disccheck.mjs), its controls (tools/inputcheck.mjs)
-                # make panel and make view
+                # make panel, make view and make rot (the rotations against
+                # the ST's exact one and the approximation's model)
 make logic      # the port's game logic against the ST's, routine by routine
                 # and a whole step (tools/logicrun.mjs, on the captures make
                 # steps makes)
@@ -123,12 +124,18 @@ the ST's mouse moves.
   ANDY what its panel shows, so only changes are drawn. What the ST
   prints, the logic records in flags of the port's own (`world_text`,
   `level_text`, `mine_text`, `dock_text`), which the panel draws.
+- object_handlers' walk (`src/logic/handlers.6502`) ends at the slot past
+  its last, made to look exploding while it runs: no handler may read
+  another slot's exploding byte. And it copies random32's state into zero
+  page for its own `h_random32`: anything the handlers call takes numbers
+  from that, never from random32 or rng32 directly.
 - Code that sets ACCCON's X from main RAM must lie below &3000
   (`src/cockpit.6502`, the interrupt handler): `ASSERT` it. Code in a
   bank may set it too (the panel), but mustn't read &3000-&7FFF meanwhile:
   the objects and lists are there.
 `node tools/scenerun.mjs SCENES OUT --profile 37` samples where the cycles
-go.
+go. On the disc, `tools/listprof.mjs` splits world_lists into its parts and
+`tools/stepprof.mjs` times named routines a step, both holding keys.
 
 `tools/fat12.py IMAGE [OUTDIR]` lists or extracts an ST (or PC) floppy,
 `tools/adf.py IMAGE [OUTDIR]` an Amiga one.
@@ -223,4 +230,7 @@ says how):
   touches, never by time. Use they/them for Matt.
 - Before committing, run `make check` on its own and look at its exit
   status: piped through grep in an `&&` chain, a failure goes unseen.
+- Agents keep every file they make inside their own worktree, scratch
+  under its `build/`, with no symlinks out of it: a path that resolves
+  outside stops the run for a permission prompt, and nobody is watching.
 - Every agent brief carries these rules.
