@@ -12,7 +12,8 @@ their tools and docs are the model.
   game costs in time and memory, the memory map and the frame, the order
   of work.
 - `docs/journal.md`: how it got here, in order. Add to it as you go.
-- `docs/research/*.md`: the reverse engineering, one file per version.
+- `docs/research/*.md`: the reverse engineering, one file per version;
+  `st-logic.md` is the ST's game logic, inventoried for transcription.
 - `docs/decisions.md`: every call the port makes that the original
   didn't, numbered, with the reason. Nothing changes quietly.
 

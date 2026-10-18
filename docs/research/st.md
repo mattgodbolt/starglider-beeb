@@ -487,6 +487,11 @@ tunnel, the collision code's type 6 for the silo, the screenshots).
 
 ## The game
 
+*`st-logic.md` (and `st-logic.json`) is the full inventory of the game's
+logic, routine by routine, with every variable and object field and the
+corrections to what follows here; where they disagree, it's the later
+reading, and the more careful.*
+
 ### The world
 
 - 16-bit coordinates wrap in x and z: a torus of 65,536 units, which at
