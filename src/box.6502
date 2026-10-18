@@ -34,7 +34,7 @@
 \ box_end: the object just drawn, its entries from box_start on, erased by
 \ its box if that's the cheaper. The box is its vertices' within the window
 \ (render.6502's BOX_Y and box_x; a far object inside the window has every
-\ vertex in it, by far_setup's reach), taken to the window's edges any
+\ vertex in it, by far_place's reach), taken to the window's edges any
 \ vertex is past (each edge patched: CLIP_SITES), so it holds every line
 \ the object drew. The cheaper is by erase_box's cycles for H lines of W
 \ columns, about (H + 3)(W + 3) units, and a line's drawn again, about
