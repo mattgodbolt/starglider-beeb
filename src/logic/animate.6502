@@ -5,8 +5,11 @@
 \ last; then the energy beam's colour one on (its face's colour on the ST,
 \ which the scanner's dot for the beam copies). Once a step, as the ST's
 \ is once a frame. The lists are the ST's (tools/mkshapes.py's
-\ anim_shape, anim_also and anim_last).
+\ anim_shape, anim_also and anim_last), here in the world's bank with it,
+\ as nothing else reads them.
 \ ***************************************************************************
+
+INCLUDE "../../build/gen/anim.6502"
 
 .animate_shapes
 {

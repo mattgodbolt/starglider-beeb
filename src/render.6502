@@ -293,35 +293,6 @@ OM_SIZE = 6 + 18
 .om_n       EQUB 0                  ; offsets: the end of those kept ...
 .om_next    EQUB 0                  ; ... and the next to fill
 
-\ ground_camera: objc, the camera in the object's space, for an object
-\ with no pitch of its own. Its matrix is the camera's turned by its own
-\ heading h, so the camera is the object's offset from the player turned
-\ back by h alone and negated: x -(cos h dx + sin h dz), y -dy, z sin h
-\ dx - cos h dz. From the world's positions, it takes four products where
-\ the rotated position and the matrix take nine.
-.ground_camera
-{
-    ZA_AUTO2 dx, dz
-    BANK BANK_WORLD
-    LDX slot
-    LDA ob_heading_lo,X : STA m_idx : LDA ob_heading_hi,X : AND #&0F : STA m_idx+1
-    JSR sincos
-    LDX slot
-    LDA ob_x_lo,X : SEC : SBC pl_x : STA dx : LDA ob_x_hi,X : SBC pl_x+1 : STA dx+1
-    LDA pl_y : SEC : SBC ob_y_lo,X : STA objc+2 : LDA pl_y+1 : SBC ob_y_hi,X : STA objc+3
-    LDA ob_z_lo,X : SEC : SBC pl_z : STA dz : LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
-    \ (fmul16 leaves its operands as they were, so each is set once)
-    MOVW mul_x, m_cos : MOVW mul_y, dx : JSR fmul16
-    LDA #0 : SEC : SBC mul_r : STA objc : LDA #0 : SBC mul_r+1 : STA objc+1
-    MOVW mul_y, dz : JSR fmul16
-    LDA #0 : SEC : SBC mul_r : STA objc+4 : LDA #0 : SBC mul_r+1 : STA objc+5
-    MOVW mul_x, m_sin : JSR fmul16
-    SUBW objc, mul_r
-    MOVW mul_y, dx : JSR fmul16
-    ADDW objc+4, mul_r
-    RTS
-}
-
 \ ---------------------------------------------------------------------------
 \ draw_objects (&05108): the draw list read from its top. Each object's
 \ matrix takes the player's pitch and heading added to its own, and the
@@ -391,6 +362,7 @@ OM_SIZE = 6 + 18
     LDA ang_p : CMP pl_pitch : BNE pitched
     LDA ang_p+1 : CMP pl_pitch+1 : BNE pitched
     JSR ground_matrix
+    BANK BANK_WORLD                     ; (ground_camera's: matrix.6502)
     JSR ground_camera
     JMP got_camera
 .pitched

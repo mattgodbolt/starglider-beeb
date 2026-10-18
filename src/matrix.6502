@@ -1,12 +1,15 @@
 \ ***************************************************************************
-\ STARGLIDER for the BBC Master - build_matrix's products with the heading
-\ (render.6502), in the world's bank
+\ STARGLIDER for the BBC Master - the drawing's matrices' work in the
+\ world's bank: build_matrix's products with the heading (render.6502),
+\ and ground_camera
 \
 \ build_matrix lives in main RAM, which every part of the game wants more
 \ of, and pages this bank (its sines and fmul_trig are here) before its
 \ products, so the larger part of them, those with the heading, can be
 \ here. Its callers, main RAM's object_matrix and this bank's camera, each
 \ take this bank paged on its return; nothing in the logic's bank calls it.
+\ ground_camera wants the bank for its sines alone, so draw_shape pages it
+\ to call it here, as ground_camera paged it itself in main RAM.
 \ ***************************************************************************
 
 \ matrix_heading (&04190's rest): mat's entries with the heading's sines in
@@ -34,3 +37,32 @@
     MOVW mul_x, build_matrix.m_s1
     TRIG_BY build_matrix.m_d7 : ADDW mat+10, mul_r                  ; y' on z
     RTS
+
+\ ground_camera: objc, the camera in the object's space, for an object
+\ with no pitch of its own (render.6502's draw_shape). Its matrix is the
+\ camera's turned by its own heading h, so the camera is the object's
+\ offset from the player turned back by h alone and negated: x -(cos h dx
+\ + sin h dz), y -dy, z sin h dx - cos h dz. From the world's positions,
+\ it takes four products where the rotated position and the matrix take
+\ nine.
+.ground_camera
+{
+    ZA_AUTO2 dx, dz
+    LDX slot
+    LDA ob_heading_lo,X : STA m_idx : LDA ob_heading_hi,X : AND #&0F : STA m_idx+1
+    JSR sincos
+    LDX slot
+    LDA ob_x_lo,X : SEC : SBC pl_x : STA dx : LDA ob_x_hi,X : SBC pl_x+1 : STA dx+1
+    LDA pl_y : SEC : SBC ob_y_lo,X : STA objc+2 : LDA pl_y+1 : SBC ob_y_hi,X : STA objc+3
+    LDA ob_z_lo,X : SEC : SBC pl_z : STA dz : LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
+    \ (fmul16 leaves its operands as they were, so each is set once)
+    MOVW mul_x, m_cos : MOVW mul_y, dx : JSR fmul16
+    LDA #0 : SEC : SBC mul_r : STA objc : LDA #0 : SBC mul_r+1 : STA objc+1
+    MOVW mul_y, dz : JSR fmul16
+    LDA #0 : SEC : SBC mul_r : STA objc+4 : LDA #0 : SBC mul_r+1 : STA objc+5
+    MOVW mul_x, m_sin : JSR fmul16
+    SUBW objc, mul_r
+    MOVW mul_y, dx : JSR fmul16
+    ADDW objc+4, mul_r
+    RTS
+}
