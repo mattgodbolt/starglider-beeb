@@ -111,6 +111,22 @@ ZA_AUTO1 line_dx, line_dy, line_cnt, line_ls, line_errs, line_err
 WORK = &0400
 NMI_PAGE = &0D00
 SECTION Work, org = WORK, guard = NMI_PAGE, virtual = TRUE
+    \ the vertices and marks, by vertex and edge number, first, so that no
+    \ index into one crosses a page
+.edge_mark  SKIP 256
+.vert_mark  SKIP 256
+.v_xlo      SKIP 128
+.v_xhi      SKIP 128
+.v_ylo      SKIP 128
+.v_yhi      SKIP 128
+.v_zlo      SKIP 128
+.v_zhi      SKIP 128
+.v_sxlo     SKIP 128
+.v_sxhi     SKIP 128
+.v_sylo     SKIP 128
+.v_syhi     SKIP 128
+.v_code     SKIP 128        ; the window's outcode of each vertex on the screen
+ASSERT LO(edge_mark) = 0 AND LO(v_xlo) = 0
     \ the lists' lengths (the lists: memory.6502)
 .coarse_n   SKIP 1
 .near_n     SKIP 1
@@ -149,20 +165,6 @@ DISC_MAX = 8
     \ by shape and colour
 .anim_frame SKIP 32         ; each shape's animation frame, as its list numbers them
 .colour_map SKIP 16         ; the ST's colours to the screen's bytes (&00, &0F, &F0, &FF)
-    \ the vertices and marks, by vertex and edge number
-.edge_mark  SKIP 256
-.vert_mark  SKIP 256
-.v_xlo      SKIP 128
-.v_xhi      SKIP 128
-.v_ylo      SKIP 128
-.v_yhi      SKIP 128
-.v_zlo      SKIP 128
-.v_zhi      SKIP 128
-.v_sxlo     SKIP 128
-.v_sxhi     SKIP 128
-.v_sylo     SKIP 128
-.v_syhi     SKIP 128
-.v_code     SKIP 128        ; the window's outcode of each vertex on the screen
 .work_end                   ; (a build's own workspace can follow)
 ENDSECTION
 
