@@ -172,18 +172,35 @@ PROJ_SHIFT = 7
 \ here (dot_cx and on).
 .ground_dots
 {
-    ZA_AUTO1 dot, sines
+    ZA_AUTO1 dot, sines, shift
     LDA #&FF : STA dots_ran
     JSR dot_setup
     STZ sines
+    STZ shift
     LDX #0
 .each
     \ (each dot's tests make these before they read them, on the paths
     \ the carry and A choose, which baron can't follow: without this it
     \ keeps them from one dot to the next, and so from step to step)
     ZA_DISCARD rot_acc, dot_mu
+    \ still surely in view: kept, where it was kept, and its margin not yet
+    \ spent by the drift since
+    LDA dot_rem_hi,X : BMI unkept
+    LDY dot_cls,X
+    LDA dot_rem_lo,X : SEC : SBC dot_drift_lo,Y : STA dot_rem_lo,X
+    LDA dot_rem_hi,X : SBC dot_drift_hi,Y : STA dot_rem_hi,X : BMI spent
+    LDA dot_x_lo,X : CMP dot_at_xlo,X : BNE spent
+    LDA dot_x_hi,X : CMP dot_at_xhi,X : BNE spent
+    LDA dot_z_lo,X : CMP dot_at_zlo,X : BNE spent
+    LDA dot_z_hi,X : CMP dot_at_zhi,X : BNE spent
+    LDA #DOT_KEPT : STA dot_seen,X
+    STA shift                           ; (d0 the projection's shift, before it's read)
+    INX : CPX #40 : BNE each
+    JMP shifted
+.spent
+    LDA #&FF : STA dot_rem_hi,X         ; (no longer kept)
+.unkept
     STX dot
-    JSR dot_cached : BCC kept
     LDA dot_x_lo,X : SEC : SBC pl_x : STA rot_d
     LDA dot_x_hi,X : SBC pl_x+1 : STA rot_d+1
     LDA dot_z_lo,X : SEC : SBC pl_z : STA rot_d+4
@@ -209,12 +226,9 @@ PROJ_SHIFT = 7
     LDA rot_acc : STA dot_cx_lo,X : LDA rot_acc+1 : STA dot_cx_hi,X
     LDA rot_acc+2 : STA dot_cy_lo,X : LDA rot_acc+3 : STA dot_cy_hi,X
     LDA rot_acc+4 : STA dot_cz_lo,X : LDA rot_acc+5 : STA dot_cz_hi,X
-    BRA in_view
-.kept
-    LDA #DOT_KEPT : STA dot_seen,X
-.in_view
-    \ projected: d0 takes the projection's shift (&0480A)
-    LDA #PROJ_SHIFT : STA rng_d0 : STZ rng_d0+1
+    \ projected: d0 takes the projection's shift (&0480A), made so before
+    \ it's next read
+    LDA #&FF : STA shift
     BRA next
 .outside
     LDX dot : STZ dot_seen,X
@@ -222,32 +236,21 @@ PROJ_SHIFT = 7
     INC sines
     JSR respawn_sines
 .placed
+    JSR shifted
     LDX dot
     JSR respawn
 .next
-    LDX dot : INX : CPX #40 : BEQ done
+    LDX dot : INX : CPX #40 : BEQ ended
     JMP each
-.done
+.ended
+\ shifted: d0 the projection's shift if a dot was projected since it was
+\ last made.
+.shifted
+    LDA shift : BEQ unshifted
+    LDA #PROJ_SHIFT : STA rng_d0 : STZ rng_d0+1
+    STZ shift
+.unshifted
     RTS
-}
-
-\ dot_cached: C clear if dot X is still surely in view: kept, where it was
-\ kept, and its margin not yet spent by the drift since. Otherwise it's no
-\ longer kept.
-.dot_cached
-{
-    LDA dot_rem_hi,X : BMI no
-    LDY dot_cls,X
-    LDA dot_rem_lo,X : SEC : SBC dot_drift_lo,Y : STA dot_rem_lo,X
-    LDA dot_rem_hi,X : SBC dot_drift_hi,Y : STA dot_rem_hi,X : BMI no
-    LDA dot_x_lo,X : CMP dot_at_xlo,X : BNE no
-    LDA dot_x_hi,X : CMP dot_at_xhi,X : BNE no
-    LDA dot_z_lo,X : CMP dot_at_zlo,X : BNE no
-    LDA dot_z_hi,X : CMP dot_at_zhi,X : BNE no
-    CLC : RTS
-.no
-    LDA #&FF : STA dot_rem_hi,X
-    SEC : RTS
 }
 
 \ dot_keep: dot X, surely in view with margin dot_mu (the least that z' -
@@ -311,32 +314,33 @@ ZA_AUTO2 dot_dy                         ; |dy|, the frame's
     BPL dy_pos
     LDA #0 : SEC : SBC dot_dy : STA dot_dy : LDA #0 : SBC dot_dy+1 : STA dot_dy+1
 .dy_pos
-    \ beyond 16384: below &C000, or above &4000
-    STZ dot_wide
-    LDX #5
+    \ beyond 16384: below &C000, or above &4000 (any entry for the drift,
+    \ the x and z columns' for the rotation)
+    STZ dot_wide : STZ dot_wide_any
+    LDX #16
 .entries
-    LDY dot_xz,X
-    LDA cam+1,Y : ZA_INDEXEDBY {0, 4, 6, 10, 12, 16}
+    LDA cam+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
     BPL m_pos
     CMP #&C0 : BCS m_in
     BCC m_wide
 .m_pos
     CMP #&40 : BCC m_in
     BNE m_wide
-    LDA cam,Y : ZA_INDEXEDBY {0, 4, 6, 10, 12, 16}
+    LDA cam,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
     BEQ m_in
 .m_wide
-    LDA #&FF : STA dot_wide
+    LDA #&FF : STA dot_wide_any
+    CPX #2 : BEQ m_in
+    CPX #8 : BEQ m_in
+    CPX #14 : BEQ m_in
+    STA dot_wide
 .m_in
-    DEX : BPL entries
+    DEX : DEX : BPL entries
     JSR dot_drift
     BIT dot_same : BMI made
     JMP ground_make
 .made
     RTS
-\ the x and z columns' entries, by their offset in cam
-.dot_xz
-    EQUB 0, 4, 6, 10, 12, 16
 }
 
 \ dot_rotate: rot_acc = the dot's camera-space position by the ground's
@@ -373,8 +377,9 @@ DOT_CLASSES = 25                        ; (dot_keep's: 1 to 24, from v and mu un
     ZA_AUTO 4, br                       ; base, then r
     base = br
     r = br + 2
-    ZA_AUTO1 wide
+    ZA_AUTO1 still
     STZ dot_same
+    STZ still
     LDA dot_valid : BNE known
 .forget
     LDX #39
@@ -386,8 +391,21 @@ DOT_CLASSES = 25                        ; (dot_keep's: 1 to 24, from v and mu un
     JMP keep_camera
 .known
     LDA mv_render : CMP dot_mv_was : BNE forget
-    \ each entry's change, and whether any entry is beyond 16384
-    STZ wide
+    \ the matrix the last frame's: no entry moved
+    LDX #17
+.holding
+    LDA cam,X : ZA_INDEXEDBY 0..17
+    CMP dot_cam_was,X : BNE turned
+    DEX : BPL holding
+    DEC still
+    STZ r : STZ r+1
+    LDA pl_y : CMP dot_p_was+2 : BNE climbed
+    LDA pl_y+1 : CMP dot_p_was+3 : BNE climbed
+    LDA #&FF : STA dot_same
+.climbed
+    JMP moves
+.turned
+    \ each entry's change
     STZ dot_moved
     LDX #16
 .entries
@@ -402,19 +420,6 @@ DOT_CLASSES = 25                        ; (dot_keep's: 1 to 24, from v and mu un
     STA dot_dm+1,X
     LDA t : STA dot_dm,X
     ORA dot_dm+1,X : TSB dot_moved
-    \ beyond 16384: below &C000, or above &4000
-    LDA cam+1,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
-    BPL m_pos
-    CMP #&C0 : BCS m_in
-    BCC m_wide
-.m_pos
-    CMP #&40 : BCC m_in
-    BNE m_wide
-    LDA cam,X : ZA_INDEXEDBY {0, 2, 4, 6, 8, 10, 12, 14, 16}
-    BEQ m_in
-.m_wide
-    LDA #&FF : STA wide
-.m_in
     DEX : DEX : BPL entries
     \ the ground's rotation stands if no entry moved and dy is the same
     LDA dot_moved : BNE rot_moved
@@ -439,6 +444,7 @@ DOT_CLASSES = 25                        ; (dot_keep's: 1 to 24, from v and mu un
     MOVW r, t
 .not_most
     DEX : DEX : BPL columns
+.moves
     \ dp, each of its terms under 4096
     STZ dp : STZ dp+1
     LDX #4
@@ -457,7 +463,7 @@ DOT_CLASSES = 25                        ; (dot_keep's: 1 to 24, from v and mu un
     \ base = 3 dp + 9 (+ dp if wide)
     LDA dp : ASL A : STA base : LDA dp+1 : ROL A : STA base+1
     ADDW base, dp
-    LDA wide : BEQ narrow
+    LDA dot_wide_any : BEQ narrow
     ADDW base, dp
 .narrow
     LDA base : CLC : ADC #9 : STA base
@@ -502,11 +508,13 @@ DOT_CLASSES = 25                        ; (dot_keep's: 1 to 24, from v and mu un
 .classed
     INX : CPX #DOT_CLASSES : BNE classes
 .keep_camera
+    LDA still : BNE kept_camera         ; (the same already)
     LDX #17
 .cam_copy
     LDA cam,X : ZA_INDEXEDBY 0..17
     STA dot_cam_was,X
     DEX : BPL cam_copy
+.kept_camera
     LDX #5
 .place
     LDA pl_x,X : STA dot_p_was,X
@@ -778,6 +786,7 @@ ENDIF
 .dot_same     SKIP 1                    ; bit 7: the camera and dy the last frame's
 .dot_moved    SKIP 1                    ; non-zero if an entry moved since the last frame
 .dot_wide     SKIP 1                    ; bit 7: an entry in the x or z column beyond 16384
+.dot_wide_any SKIP 1                    ; non-zero: any entry beyond 16384
 .dot_cam_was  SKIP 18
 .dot_p_was    SKIP 6
 .dot_dm       SKIP 18

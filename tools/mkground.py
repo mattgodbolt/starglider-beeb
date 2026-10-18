@@ -132,9 +132,25 @@ emit("""    LDX term
 }
 
 \\ ground_start: each row's constant begun with its column y's term,
-\\ floor(m dy / 16384) (the ST's), before ground_setup adds the rest.
+\\ floor(m dy / 16384) (the ST's), before ground_setup adds the rest: the
+\\ last ones made while column y and dy are what they were (a steady
+\\ turn's).
 .ground_start
 {
+    LDX #5
+.same
+    LDY gy_entry,X
+    LDA cam,Y : ZA_INDEXEDBY {2, 3, 8, 9, 14, 15}
+    CMP gy_was,X : BNE made
+    DEX : BPL same
+    LDA rot_d+2 : CMP gy_was+6 : BNE made
+    LDA rot_d+3 : CMP gy_was+7 : BNE made
+    LDX #5
+.kept
+    LDA gy_k,X : STA kacc,X
+    DEX : BPL kept
+    RTS
+.made
     LDX #4
 .each
     LDA gt_y_entry,X : TAY
@@ -145,10 +161,19 @@ emit("""    LDX term
     PHX
     JSR fmul16
     PLX
-    LDA mul_r : STA kacc,X
-    LDA mul_r+1 : STA kacc+1,X
+    LDA mul_r : STA kacc,X : STA gy_k,X
+    LDA mul_r+1 : STA kacc+1,X : STA gy_k+1,X
     DEX : DEX : BPL each
+    LDX #5
+.was
+    LDY gy_entry,X
+    LDA cam,Y : ZA_INDEXEDBY {2, 3, 8, 9, 14, 15}
+    STA gy_was,X
+    DEX : BPL was
+    LDA rot_d+2 : STA gy_was+6 : LDA rot_d+3 : STA gy_was+7
     RTS
+.gy_entry
+    EQUB 2, 3, 8, 9, 14, 15
 }
 """)
 emit("\\ by term: its entry of cam, its row's offset in rot_acc, and its code")
@@ -166,6 +191,11 @@ emit("    EQUB 2, 0, 8, 0, 14")
 emit("\\ the rows' constants as they're made (in the bank's own RAM: the draw")
 emit("\\ phase leaves zero page little room)")
 emit(".kacc SKIP 6")
+emit("\\ column y's terms as ground_start last made them, and its entries and")
+emit("\\ dy then (none at first: no column of a rotation is all -1)")
+emit(".gy_k SKIP 6")
+emit(".gy_was")
+emit("    EQUB &FF, &FF, &FF, &FF, &FF, &FF, &FF, &FF")
 emit()
 
 
