@@ -17,6 +17,8 @@
 #   make venv     the Python tools' environment (.venv: SkoolKit, Capstone,
 #                 Pillow, NumPy)
 
+# local.mk (not committed) can set BARON, as tools/worktree_setup.sh does.
+-include local.mk
 BARON   ?= $(firstword $(wildcard ../baron/build/src/baron) baron)
 # Baron, failing on a warning too.
 ASM      = BARON=$(BARON) tools/asm.sh
