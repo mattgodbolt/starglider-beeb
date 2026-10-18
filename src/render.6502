@@ -207,6 +207,69 @@ GM_N = 8
 .gm_pitch   EQUW 0                  ; the camera's pitch and roll they're for
 .gm_roll    EQUW 0
 
+\ object_matrix: build_matrix for an object with a pitch of its own, or
+\ the matrix it made last for the same angles. A matrix is its angles'
+\ alone, and an object that doesn't turn keeps them while the player's
+\ hold. The last OM_N made are kept, each its angles, then mat.
+OM_N = 2
+OM_SIZE = 6 + 18
+.object_matrix
+{
+    ZA_AUTO1 at
+    LDX om_n : BEQ build
+.find
+    TXA : SEC : SBC #OM_SIZE : STA at
+    CLC : ADC #5 : TAX
+    LDY #5
+.compare
+    LDA ang,Y : ZA_INDEXEDBY 0..5
+    CMP om_kept,X : BNE not_this
+    DEX : DEY : BPL compare
+    \ found: left as build_matrix leaves one it makes
+    TXA : CLC : ADC #1 + 6 + 17 : TAX
+    LDY #17
+    ZA_DISCARD mat
+.out
+    LDA om_kept,X : STA mat,Y : ZA_INDEXEDBY 0..17
+    DEX : DEY : BPL out
+    LDX #5
+.angles
+    LDA ang,X : ZA_INDEXEDBY 0..5
+    STA mat_angles,X
+    DEX : BPL angles
+    LDA #&FF : STA mat_valid
+    STZ ground_valid
+    RTS
+.not_this
+    LDX at : BNE find
+.build
+    JSR build_matrix
+    \ kept, over the oldest
+    LDA om_next : CLC : ADC #5 : TAX
+    LDY #5
+.angles_in
+    LDA ang,Y : ZA_INDEXEDBY 0..5
+    STA om_kept,X
+    DEX : DEY : BPL angles_in
+    TXA : CLC : ADC #1 + 6 + 17 : TAX
+    LDY #17
+.mat_in
+    LDA mat,Y : ZA_INDEXEDBY 0..17
+    STA om_kept,X
+    DEX : DEY : BPL mat_in
+    LDA om_next : CLC : ADC #OM_SIZE : CMP #OM_N * OM_SIZE : BCC next_ok
+    LDA #0
+.next_ok
+    STA om_next
+    LDA om_n : CMP #OM_N * OM_SIZE : BCS full
+    ADC #OM_SIZE : STA om_n
+.full
+    RTS
+}
+.om_kept    SKIP OM_N * OM_SIZE
+.om_n       EQUB 0                  ; offsets: the end of those kept ...
+.om_next    EQUB 0                  ; ... and the next to fill
+
 \ ground_camera: objc, the camera in the object's space, for an object
 \ with no pitch of its own. Its matrix is the camera's turned by its own
 \ heading h, so the camera is the object's offset from the player turned
@@ -366,7 +429,7 @@ ZA_AUTO 10, kp
     JSR ground_camera
     JMP got_camera
 .pitched
-    JSR build_matrix
+    JSR object_matrix
     \ The camera in object space, in world units: c = -(mat transposed) t.
     ZA_DISCARD objc
     LDX #0
@@ -393,25 +456,17 @@ ZA_AUTO 10, kp
     JMP cam_axis
 .got_camera
     \ as magnitudes and signs, for the faces' products
-    ZA_DISCARD objc_mag, objc_sign
-    LDX #0
-.c_mag
-    TXA : LSR A : TAY
-    LDA objc+1,X : ZA_INDEXEDBY {0, 2, 4}
-    AND #&80 : STA objc_sign,Y : ZA_INDEXEDBY 0..2
-    BMI c_neg
-    LDA objc,X : ZA_INDEXEDBY {0, 2, 4}
-    STA objc_mag,X : ZA_INDEXEDBY {0, 2, 4}
-    LDA objc+1,X : ZA_INDEXEDBY {0, 2, 4}
-    STA objc_mag+1,X : ZA_INDEXEDBY {0, 2, 4}
-    BRA c_next
-.c_neg
-    LDA #0 : SEC : SBC objc,X : ZA_INDEXEDBY {0, 2, 4}
-    STA objc_mag,X : ZA_INDEXEDBY {0, 2, 4}
-    LDA #0 : SBC objc+1,X : ZA_INDEXEDBY {0, 2, 4}
-    STA objc_mag+1,X : ZA_INDEXEDBY {0, 2, 4}
-.c_next
-    INX : INX : CPX #6 : BNE c_mag
+FOR i = 0..2
+    LDA objc + 2 * i + 1 : AND #&80 : STA objc_sign + i
+    BMI negative
+    LDA objc + 2 * i : STA objc_mag + 2 * i
+    LDA objc + 2 * i + 1 : STA objc_mag + 2 * i + 1
+    BRA done
+.negative
+    LDA #0 : SEC : SBC objc + 2 * i : STA objc_mag + 2 * i
+    LDA #0 : SBC objc + 2 * i + 1 : STA objc_mag + 2 * i + 1
+.done
+NEXT
     BANK BANK_SHAPES
     \ The header, two bytes a turn, from where it's patched in
     LDX shape
