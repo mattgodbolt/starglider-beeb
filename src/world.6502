@@ -119,6 +119,7 @@ NEXT
     LSR A : BCC even
     LDX #m_cos - m_sin
 .even
+    ZA_DISCARD m_sc                     ; (all four bytes are made below)
     LDY m_idx
     LDA (p),Y : STA m_sc,X : ZA_INDEXEDBY {0, 2}
     LDA p+1 : CLC : ADC #HI(SINE_QUARTER) : STA p+1
