@@ -697,9 +697,12 @@ ENDMACRO
     MUL_SET
 .same_row
     LDX term : LDY a_z,X
+    TYA : ASL A : TAX
+    LDA xf_amag,X : ZA_INDEXEDBY {12, 14, 16}
+    ORA xf_amag+1,X : ZA_INDEXEDBY {12, 14, 16}
+    BEQ no_z
     LDA xf_asign,Y : ZA_INDEXEDBY 6..8
     EOR xneg : STA pneg
-    TYA : ASL A : TAX
     LDA xs+1 : BNE wide
     LDY xf_amag,X : ZA_INDEXEDBY {12, 14, 16}
     MUL8 mul_p : STA mul_p+1
@@ -719,6 +722,20 @@ ENDMACRO
     INC mul_p+1 : BNE rounded
     INC mul_p+2
     BRA rounded
+.no_z
+    \ A_z = 0: no product, so d = A_row, and if that's 0 too, so is B
+    LDA term : ASL A : TAX
+    LDA xf_amag,X : ZA_INDEXEDBY 0..10
+    ORA xf_amag+1,X : ZA_INDEXEDBY 0..10
+    BEQ b_zero
+    STZ mul_p+1 : STZ mul_p+2 : STZ mul_p+3
+    BRA rounded
+.b_zero
+    STZ sc_bmag,X : ZA_INDEXEDBY 0..10
+    STZ sc_bmag+1,X : ZA_INDEXEDBY 0..10
+    LDX term
+    STZ sc_bsign,X : ZA_INDEXEDBY 0..5
+    JMP next_term
 .wide
     MOVW mul_x, xs
     LDA xf_amag,X : ZA_INDEXEDBY {12, 14, 16}
@@ -781,6 +798,7 @@ ENDMACRO
 .b_pos
     LDA pq : STA sc_bmag,X : ZA_INDEXEDBY 0..10
     LDA pq+1 : STA sc_bmag+1,X : ZA_INDEXEDBY 0..10
+.next_term
     INC term : LDA term : CMP #6 : BEQ terms_done
     JMP each_term
 .terms_done
