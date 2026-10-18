@@ -68,6 +68,10 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 .input_step
 .frame_show
     RTS
+\ (the engine's interrupt, which the speech's hands on to: the harness takes
+\ none)
+.irq_handler
+    RTI
 
 \ spike_erase: the last frame's lines and boxes erased (from its erase
 \ list) and its ground dots (from theirs), as the disc erases a screen
@@ -140,6 +144,7 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 
 INCLUDE "code.6502"
 INCLUDE "sound.6502"
+INCLUDE "speech.6502"
 ENDSECTION
 
 INCLUDE "banks.6502"

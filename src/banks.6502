@@ -50,7 +50,8 @@ ENDSECTION
 \ The draw phase's drawing besides the objects (view_under.6502), with
 \ the missile view's window (mview.6502) and the cockpit picture's part it
 \ copies, and the objects' boxes (box.6502), for the loading area's bank,
-\ past ANDY (they run with it paged)
+\ past ANDY (they run with it paged); and the speech's tick, its clips'
+\ starts and its third area (speech_tick.6502, which runs with ANDY out)
 \ and the spike's line log there: the picture first, so that the code lies
 \ past the world bank's list phase, as the logic bank's does (baron#29:
 \ see the logic bank below).
@@ -64,6 +65,7 @@ ENDIF
 INCLUDE "view_under.6502"
 INCLUDE "mview.6502"
 INCLUDE "box.6502"
+INCLUDE "speech_tick.6502"
 ENDSECTION
 
 \ The logic's bank: the rest of the game's logic, which needn't read the
@@ -72,9 +74,10 @@ ENDSECTION
 SECTION LogicBank, org = &8000, filename = "LOGIC", guard = &C000, cmos = TRUE
     EQUD 0, 0
     \ The bank's own first 4K, under ANDY, for what is read with ANDY
-    \ paged out: the sound effects' tables (sfx.6502).
+    \ paged out: the sound effects' tables (sfx.6502), then the speech's
+    \ clips by area and its second area (speech.6502), to ANDY's top.
 INCLUDE "../build/gen/sfx.6502"
-    SKIP ANDY_TOP - P%
+INCLUDE "../build/gen/speech.6502"
     \ Data from where ANDY ends; code past the world bank's list phase too:
     \ Baron matches its control-flow annotations to their jumps by address
     \ alone (waitingforvsync/baron#29), so a jump here at the address of one

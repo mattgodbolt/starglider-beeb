@@ -6,8 +6,8 @@ isn't here yet.
 
 **[Run it in jsbeeb](https://bbc.xania.org/?autoboot&model=Master&disc1=github:mattgodbolt/starglider-beeb/starglider.ssd)**
 (a Master 128), or write `starglider.ssd` to a disc and SHIFT-BREAK a
-Master. For now the disc plays the game's world with its panel and its
-sound effects, but not yet its speech or front end: after loading, a
+Master. For now the disc plays the game's world with its panel, its
+sound effects and its speech, but not yet its front end: after loading, a
 game starts at level 1, its logic
 the ST's transcribed exactly, drawn in MODE 1 at the ST's 320 x 200 with
 the cockpit's own colours below the view, double-buffered, the game
