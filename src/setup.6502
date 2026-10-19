@@ -12,17 +12,6 @@
     LDA #HI(neg_hi) : STA m_nghi+1
     RTS
 
-\ erase_init: both screens' windows to be cleared before they're first
-\ drawn, as if their erase lists had overflowed, neither showing the
-\ missile view's window (mview.6502); and the marks wiped (render.6502),
-\ as until the first frame their pages hold other things (start.6502's
-\ catalogue, screen_copy's pages).
-.erase_init
-    STZ erase_stop : STZ erase_stop+1
-    STZ dot_wipes : STZ dot_wipes+1
-    LDA #&FF : STA win_shown : STA win_shown+1
-    JMP marks_wipe
-
 \ screen_mode: MODE 1's CRTC cut to 25 character rows from SCREEN, its
 \ vertical sync moved to keep them central, not interlaced, so the sync,
 \ and the palette split timed from it, falls on the same scan line every

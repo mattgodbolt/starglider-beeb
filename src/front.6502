@@ -1,0 +1,1082 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the front end (decision 12): the title
+\ and the credits, the K screen, and the game's end (the pilot rating, the
+\ high scores, the end screen), as the ST has them (docs/research/
+\ st-logic.md, "The front end")
+\
+\ FRONT, in bank 7 out of play (front_main.6502 loads it and comes in at
+\ front_title or front_game_over), runs with the bank paged and ANDY out,
+\ so it reads its own data from &8000 up; it pages ANDY only for what the
+\ game keeps there, which its own copies, past &9000, take. It shows the
+\ shadow screen (ACCCON's D), which it writes with X set (nothing it runs
+\ or reads lies in &3000-&7FFF, where X moves): main RAM's screen keeps
+\ the cockpit for the next game. Its colours are the title's four, as the
+\ ST's texts are in white but for the K screen's, which it prints in the
+\ title's colours. The ST's waits count VBLs and end at the first past
+\ their count; these count fields.
+\ ***************************************************************************
+
+\ The ST's wait counts (&01EC2, &00BDA), as fields.
+TITLE_WAIT = &44C + 1
+KEY_WAIT   = &5DC + 1
+
+\ ---------------------------------------------------------------------------
+\ front_title (L_01E94): a fade out, the title's scene (sub_03B38), the
+\ title and credits passes counted from 0 and the last key forgotten; the
+\ title shown (sub_03B5A); then in turn the credits (sub_03B82) and the
+\ title again, each after TITLE_WAIT fields with no key, the song started
+\ at each if no sample plays. A key with a character: K the K screen, any
+\ other the game. (G opens the ST's model viewer in cheat mode, which the
+\ front end hasn't: G is any other key.)
+.front_title
+{
+    LDX #&FF : TXS
+    JSR fe_fade_out
+    LDA #&64 : STA pl_y : STZ pl_y+1            ; sub_03B38's scene
+    LDA #2 : JSR fe_frame_ends                  ; and sub_039A2's frames
+    STZ title_count
+    JSR fe_forget
+.show
+    JSR fe_title_show
+.pass
+    JSR song_if_quiet
+    INC title_count
+    JSR fe_wait_begin
+.poll
+    JSR fe_make : BCC none
+    TXA : BNE key
+.none
+    JSR fe_field
+    LDA #LO(TITLE_WAIT) : LDX #HI(TITLE_WAIT) : JSR fe_waited : BCC poll
+    LDA title_count : LSR A : BCC show          ; even: the title
+    JSR fe_credits
+    BRA pass
+.key
+    AND #&DF
+    CMP #'K' : BNE start
+    JMP fe_keys
+.start
+    JMP fe_start_game
+}
+
+\ fe_title_show (sub_03B5A): two frame_ends, the title on the screen, its
+\ colours faded in from black. (The ST shows it for a VBL in the colours
+\ before its fade sets black; here it's drawn on black.)
+.fe_title_show
+    LDA #2 : JSR fe_frame_ends
+    JSR fe_black
+    JSR fe_unpack
+    LDA #ACCCON_D : TSB acccon
+    LDA #LO(fe_colours) : LDX #HI(fe_colours)
+    JMP fe_fade_in
+
+\ fe_credits (sub_03B82): a fade out, the screen cleared, the credits in
+\ white (colour 15), faded in.
+.fe_credits
+    JSR fe_fade_out
+    JSR fe_cls
+    LDA #15 : JSR fe_colour
+    LDA #LO(tx_credits) : LDX #HI(tx_credits) : JSR fe_print
+    LDA #LO(fe_colours) : LDX #HI(fe_colours)
+    JMP fe_fade_in
+
+\ fe_start_game (L_01EFE): the song ended if it plays (sub_02A30), a fade
+\ out (sub_039B2's), and front_main.6502's game_start, which loads
+\ flight's files over this.
+.fe_start_game
+    JSR song_stop
+    JSR fe_fade_out
+    JMP game_start
+
+\ fe_frame_ends: A of the ST's frame_end calls, as the logic has them
+\ (logic/frame.6502's frame_end_logic): the frame count, and colour 0's
+\ flash taken, a black one, and gone.
+.fe_frame_ends
+{
+    CLC : ADC frame_count : STA frame_count
+    BCC same
+    INC frame_count+1
+.same
+    STZ flash0 : STZ flash0+1
+    STZ flash_shown : STZ flash_shown+1
+    RTS
+}
+
+\ song_start (the ST's sub_02290): the title song from its start, and
+\ song_stop (sub_02A30): its end. Decision 5 is to choose it by ear: for
+\ now they're silent. song_if_quiet: song_start if no sample plays,
+\ where the ST tests for one.
+.song_if_quiet
+    PHP : SEI
+    LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3
+    PLP : CMP #0 : BNE song_stop
+.song_start
+.song_stop
+    RTS
+
+\ ---------------------------------------------------------------------------
+\ fe_keys (L_022BA): the K screen, on the screen as the title left its
+\ colours: the six controls in the ST's order, each the next key made (no
+\ wait's end, sub_049A4), its ST scancode the control's, and the key
+\ echoed (key_echo, sub_02362); then a wait for a key (fe_wait_key): E the
+\ title loop, Y the game, any other the K screen again.
+.fe_keys
+{
+    ZA_AUTO1 k
+.again
+    JSR fe_cls
+    LDA #LO(tx_k_title) : LDX #HI(tx_k_title) : JSR fe_print
+    STZ k
+.each
+    LDX k
+    LDA k_prompt_lo,X : PHA
+    LDA k_prompt_hi,X : TAX : PLA : JSR fe_print
+.wait
+    JSR fe_make : BCS made
+    JSR fe_field
+    BRA wait
+.made
+    PHX                                         ; (its character)
+    LDX k : JSR fe_define
+    PLA : JSR fe_echo
+    INC k : LDA k : CMP #6 : BNE each
+    LDA #LO(tx_k_thanks) : LDX #HI(tx_k_thanks) : JSR fe_print
+    JSR fe_wait_key
+    CMP #'E' : BNE not_e
+    JMP front_title
+.not_e
+    CMP #'Y' : BNE again
+    JMP fe_start_game
+}
+\ (the prompts in the ST's order, and each one's defined key, by its
+\ place in the ST's $2D8-$2DD)
+.k_prompt_lo
+    EQUB LO(tx_k_dive), LO(tx_k_climb), LO(tx_k_left), LO(tx_k_right), LO(tx_k_accel), LO(tx_k_brake)
+.k_prompt_hi
+    EQUB HI(tx_k_dive), HI(tx_k_climb), HI(tx_k_left), HI(tx_k_right), HI(tx_k_accel), HI(tx_k_brake)
+.k_def
+    EQUB def_dive - def_left, def_climb - def_left, def_left - def_left
+    EQUB def_right - def_left, def_accel - def_left, def_brake - def_left
+
+\ fe_define: control X (the prompts' order) the key fe_make found: its ST
+\ scancode A the defined key (in ANDY), and the BBC's key Y beside it in
+\ input.6502's key map, so the interrupt keeps its state. (Y's bit 7 for
+\ the stick's second button: the ST's right mouse button, whose state the
+\ interrupt keeps anyway.)
+.fe_define
+{
+    ZA_AUTO1 st
+    STA st
+    LDA k_def,X : TAX
+    LDA #BANK_PIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    LDA st : STA def_left,X
+    BANK BANK_PIC
+    TXA : ASL A : TAX
+    LDA st : STA key_defined + 1,X
+    TYA : BMI button
+    STA key_defined,X
+.button
+    RTS
+}
+
+\ fe_echo (key_echo, sub_02362): character A, if it has one, then a new
+\ line and a blank one; with none, nothing, as the ST's string is then
+\ empty.
+.fe_echo
+{
+    CMP #0 : BEQ none
+    STA one_char : STZ one_char+1
+    LDA #LO(one_char) : LDX #HI(one_char) : JSR fe_print
+    LDA #LO(tx_k_echo) : LDX #HI(tx_k_echo) : JMP fe_print
+.none
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ front_game_over: the game's end from its wait on (the ST's &021C8):
+\ fade out, the pilot rating (sub_08A0A), fade out, the song, the high
+\ score's entry (sub_00E10), fade out, the song if no sample plays, the
+\ table (sub_00FB2) faded in, the end screen's colours (sub_0747A) while
+\ it waits for a key (fe_wait_key), fade out, and the title loop.
+.front_game_over
+    LDX #&FF : TXS
+    JSR fe_fade_out
+    JSR fe_rating
+    JSR fe_fade_out
+    JSR song_start
+    JSR fe_high_score
+    JSR fe_fade_out
+    JSR song_if_quiet
+    JSR fe_table
+    LDA #LO(fe_colours) : LDX #HI(fe_colours) : JSR fe_fade_in
+    JSR end_on
+.fe_end_wait                                    ; (tools/frontcheck.mjs)
+    JSR fe_forget
+    JSR fe_wait_key
+    JSR end_off
+    JSR fe_fade_out
+    JMP front_title
+
+\ fe_rating (sub_08A0A): the screen cleared, in white, the pilot rating:
+\ the four counts (ANDY's, as new_game cleared them and the game counted
+\ them), each as the ST prints a long (sub_045B4); the hit accuracy if
+\ any shot was fired (else the last game's, kept as the ST's $29E is,
+\ unprinted); the rating, the level times the accuracy over 100, 11 at
+\ most; faded in, the last key forgotten, a wait for a key.
+.fe_rating
+{
+    JSR fe_cls
+    LDA #15 : JSR fe_colour
+    LDA #LO(tx_r_title) : LDX #HI(tx_r_title) : JSR fe_print
+    LDA #BANK_PIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    LDX #15
+.counts
+    LDA shots_fired,X : STA counts_kept,X
+    DEX : BPL counts
+    ASSERT hits_taken = shots_fired + 12
+    LDA rating_pct : STA pct
+    BANK BANK_PIC
+    LDX #0
+.count
+    PHX
+    LDA r_label_lo,X : PHA
+    LDA r_label_hi,X : TAX : PLA : JSR fe_print
+    PLA : PHA : ASL A : ASL A : TAX
+    LDY #0
+.copy
+    LDA counts_kept,X : STA number,Y
+    INX : INY : CPY #4 : BNE copy
+    JSR fe_number
+    PLX : INX : CPX #4 : BNE count
+    LDA #LO(tx_r_newline) : LDX #HI(tx_r_newline) : JSR fe_print
+    LDA counts_kept : ORA counts_kept+1 : BEQ unfired       ; (divs.w: the shots' low word)
+    JSR accuracy
+    LDA #LO(tx_r_accuracy) : LDX #HI(tx_r_accuracy) : JSR fe_print
+    LDA pct : STA number : STZ number+1 : STZ number+2 : STZ number+3
+    JSR fe_number
+.unfired
+    LDA #LO(tx_r_rating) : LDX #HI(tx_r_rating) : JSR fe_print
+    \ the level (a word of 1-34) times the accuracy (0-255) over 100, as
+    \ muls.w and divs.w, which neither overflows
+    LDA level : STA mul_x : STZ mul_x+1
+    LDA pct : STA mul_y : STZ mul_y+1
+    JSR umul16
+    LDX #0
+.hundreds
+    LDA mul_p : SEC : SBC #100 : TAY
+    LDA mul_p+1 : SBC #0 : BCC rated
+    STA mul_p+1 : STY mul_p
+    INX : BRA hundreds
+.rated
+    CPX #11 : BCC named
+    LDX #11
+.named
+    LDA rating_lo,X : PHA
+    LDA rating_hi,X : TAX : PLA : JSR fe_print
+    LDA #BANK_PIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    LDA pct : STA rating_pct
+    BANK BANK_PIC
+    LDA #LO(fe_colours) : LDX #HI(fe_colours) : JSR fe_fade_in
+    JSR fe_forget
+    JMP fe_wait_key
+}
+.r_label_lo
+    EQUB LO(tx_r_shots), LO(tx_r_hits), LO(tx_r_docks), LO(tx_r_taken)
+.r_label_hi
+    EQUB HI(tx_r_shots), HI(tx_r_hits), HI(tx_r_docks), HI(tx_r_taken)
+
+\ accuracy (&08A5E): pct, the hits' low word times 100 over the shots'
+\ low word, as the 68000's muls.w and divs.w do it, both signed: the
+\ quotient's low byte, or where it overflows a word (divs.w then leaves
+\ its operand) the product's. (Hits never pass shots in play: 0-100.)
+.accuracy
+{
+    ZA_AUTO 3, prod                             ; |hits x 100|
+    ZA_AUTO2 dvs                                ; |shots|
+    ZA_AUTO 3, q
+    ZA_AUTO1 sign, rem_lo, rem_hi, i
+    \ |hits| x 100
+    LDA counts_kept+4 : STA mul_x : LDA counts_kept+5 : STA mul_x+1
+    BPL hits_pos
+    LDA #0 : SEC : SBC mul_x : STA mul_x
+    LDA #0 : SBC mul_x+1 : STA mul_x+1
+.hits_pos
+    LDA #100 : STA mul_y : STZ mul_y+1
+    JSR umul16
+    LDA mul_p : STA prod : LDA mul_p+1 : STA prod+1 : LDA mul_p+2 : STA prod+2
+    \ |shots|, and the quotient's sign
+    LDA counts_kept : STA dvs : LDA counts_kept+1 : STA dvs+1
+    BPL shots_pos
+    LDA #0 : SEC : SBC dvs : STA dvs
+    LDA #0 : SBC dvs+1 : STA dvs+1
+.shots_pos
+    LDA counts_kept+1 : EOR counts_kept+5 : STA sign
+    \ q = prod / dvs, unsigned, 24 bits by 16
+    LDA prod : STA q : LDA prod+1 : STA q+1 : LDA prod+2 : STA q+2
+    STZ rem_lo : STZ rem_hi
+    LDA #24 : STA i
+.bit
+    ASL q : ROL q+1 : ROL q+2 : ROL rem_lo : ROL rem_hi
+    LDA rem_lo : SEC : SBC dvs : TAY
+    LDA rem_hi : SBC dvs+1 : BCC next
+    STA rem_hi : STY rem_lo : INC q
+.next
+    DEC i : BNE bit
+    \ a word's room: up to 32767, or 32768 for a negative quotient
+    LDA q+2 : BNE overflow
+    LDA q+1 : BPL fits
+    BIT sign : BPL overflow
+    CMP #&80 : BNE overflow
+    LDA q : BNE overflow
+.fits
+    LDA q
+    BIT sign : BPL kept
+    EOR #&FF : INC A                            ; the negative quotient's low byte
+    BRA kept
+.overflow
+    LDA prod
+    BIT counts_kept+5 : BPL kept                ; the product's low byte, its sign the hits'
+    EOR #&FF : INC A
+.kept
+    STA pct
+    RTS
+}
+
+
+\ fe_high_score (sub_00E10): in white; the score, if it beats one of the
+\ ten (the ST's signed compare of BCD longs: one of 80,000,000 or more
+\ never does), in its place, those below down one and the last gone: the
+\ screen cleared, the congratulations (sub_00E9E), faded in, the name
+\ typed (sub_01050) into the place's. (The ST's second score, &01514, is
+\ always 0, so never enters.) The table is ANDY's, from game to game.
+NAME_BYTES = NAME_MAX + 1
+HS_BYTES = 10 * 4 + 10 * NAME_BYTES
+.fe_high_score
+{
+    ZA_AUTO1 at, at4, at9
+    LDA #15 : JSR fe_colour
+    LDA score+3 : BMI none
+    JSR hs_in
+    LDX #0
+.find
+    STX at
+    TXA : ASL A : ASL A : TAY
+    LDA hs_kept,Y : CMP score : LDA hs_kept+1,Y : SBC score+1
+    LDA hs_kept+2,Y : SBC score+2 : LDA hs_kept+3,Y : SBC score+3
+    BCC beaten                                  ; the entry is less
+    INX : CPX #10 : BNE find
+.none
+    RTS
+.beaten
+    JSR fe_cls
+    LDA #LO(tx_h_congrats) : LDX #HI(tx_h_congrats) : JSR fe_print
+    \ from the place down one, the last gone
+    LDA at : ASL A : ASL A : STA at4
+    LDA at : ASL A : ASL A : ASL A : ADC at : STA at9
+    LDY #9 * 4 - 1
+.scores
+    LDA hs_kept,Y : STA hs_kept + 4,Y
+    CPY at4 : BEQ scored
+    DEY : BRA scores
+.scored
+    LDX #0
+.score_byte
+    LDA score,X : STA hs_kept,Y
+    INY : INX : CPX #4 : BNE score_byte
+    LDY #9 * NAME_BYTES - 1
+.names
+    LDA hs_names_kept,Y : STA hs_names_kept + NAME_BYTES,Y
+    CPY at9 : BEQ named
+    DEY : BRA names
+.named
+    LDA #LO(fe_colours) : LDX #HI(fe_colours) : JSR fe_fade_in
+    LDA at9 : JSR fe_name
+    JMP hs_out
+}
+
+\ fe_name (sub_01050): the name typed into the high scores' at offset A:
+\ each key (fe_wait_key, KEY_WAIT fields, else &0D) a character of &20-&7E
+\ added and printed while NAME_MAX haven't been, Backspace or Delete the
+\ last taken off, Return or Esc (or the wait's end) the end.
+.fe_name
+{
+    ZA_AUTO1 first, at, left
+    STA first : STA at
+    LDA #NAME_MAX : STA left
+.key
+    JSR fe_wait_key
+    CMP #&0D : BEQ done
+    CMP #&1B : BEQ done
+    CMP #&08 : BEQ back
+    CMP #&7F : BEQ back
+    LDX left : BEQ key
+    CMP #&20 : BCC key
+    CMP #&7F : BCS key
+    DEC left
+    LDX at : STA hs_names_kept,X : INC at
+    STA one_char : STZ one_char+1
+    LDA #LO(one_char) : LDX #HI(one_char) : JSR fe_print
+    BRA key
+.back
+    LDA at : CMP first : BEQ key
+    DEC at : INC left
+    \ the ST's: back one, a space over it, and back again
+    DEC tty_col
+    LDA #' ' : STA one_char : STZ one_char+1
+    LDA #LO(one_char) : LDX #HI(one_char) : JSR fe_print
+    DEC tty_col
+    BRA key
+.done
+    LDX at : STZ hs_names_kept,X
+    RTS
+}
+
+\ hs_in, hs_out: the high scores from ANDY into hs_kept, and back.
+.hs_in
+{
+    LDA #BANK_PIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    LDX #HS_BYTES - 1
+.copy
+    LDA hs_scores,X : STA hs_kept,X
+    DEX : CPX #&FF : BNE copy
+    BANK BANK_PIC
+    RTS
+}
+.hs_out
+{
+    LDA #BANK_PIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    LDX #HS_BYTES - 1
+.copy
+    LDA hs_kept,X : STA hs_scores,X
+    DEX : CPX #&FF : BNE copy
+    BANK BANK_PIC
+    RTS
+}
+ASSERT HS_BYTES <= 256 AND hs_names = hs_scores + 40
+
+\ fe_table (sub_00FB2): the screen cleared, STAR SCORES, and each score
+\ (its eight digits) and name, in the colour the last print left.
+.fe_table
+{
+    ZA_AUTO1 row, name
+    JSR hs_in
+    JSR fe_cls
+    LDA #LO(tx_h_scores) : LDX #HI(tx_h_scores) : JSR fe_print
+    STZ row : STZ name
+.each
+    LDA #LO(tx_h_row) : LDX #HI(tx_h_row) : JSR fe_print
+    LDA row : ASL A : ASL A : TAX
+    INX : INX : INX
+    LDY #0
+.digits
+    LDA hs_kept,X : LSR A : LSR A : LSR A : LSR A : ORA #'0' : STA fe_text,Y : INY
+    LDA hs_kept,X : AND #15 : ORA #'0' : STA fe_text,Y : INY
+    DEX : CPY #8 : BNE digits
+    LDA #0 : STA fe_text,Y
+    LDA #LO(fe_text) : LDX #HI(fe_text) : JSR fe_print
+    LDA #LO(tx_h_gap) : LDX #HI(tx_h_gap) : JSR fe_print
+    LDA name : CLC : ADC #LO(hs_names_kept) : PHA
+    LDA #0 : ADC #HI(hs_names_kept) : TAX : PLA : JSR fe_print
+    LDA name : CLC : ADC #NAME_BYTES : STA name
+    INC row : LDA row : CMP #10 : BNE each
+    RTS
+}
+
+\ fe_number (sub_045B4): number, a long, printed as the ST's: "0", or its
+\ decimal digits with no leading zeros, nine at most (a top digit past 9
+\ comes out as the character after), after "M " if it's negative.
+.fe_number
+{
+    ZA_AUTO1 out, digit, started
+    STZ out : STZ started
+    LDA number+3 : BPL positive
+    LDX #0 : LDY #4 : SEC
+.negate
+    LDA #0 : SBC number,X : STA number,X
+    INX : DEY : BNE negate
+    LDA #'M' : JSR put : LDA #' ' : JSR put
+.positive
+    LDA number : ORA number+1 : ORA number+2 : ORA number+3 : BNE some
+    LDA #'0' : JSR put
+    BRA end
+.some
+    LDX #8 * 4                                  ; 10^8 down to 10^0
+.power
+    STZ digit
+.subtract
+    LDA number : SEC : SBC powers,X : PHA
+    LDA number+1 : SBC powers+1,X : PHA
+    LDA number+2 : SBC powers+2,X : PHA
+    LDA number+3 : SBC powers+3,X : BCC place
+    STA number+3 : PLA : STA number+2 : PLA : STA number+1 : PLA : STA number
+    INC digit
+    BRA subtract
+.place
+    PLA : PLA : PLA
+    LDA digit : ORA started : BEQ skip
+    LDA digit : CLC : ADC #'0' : JSR put
+    DEC started
+.skip
+    DEX : DEX : DEX : DEX : BPL power
+.end
+    LDA #0 : JSR put
+    LDA #LO(fe_text) : LDX #HI(fe_text) : JMP fe_print
+.put
+    LDY out : STA fe_text,Y : INC out
+    RTS
+.powers
+    EQUD 1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000
+}
+
+\ ---------------------------------------------------------------------------
+\ The end screen (sub_0747A): the ST's boxes round the table, each in a
+\ colour its timers move (sub_0752A each VBL, sub_0768A every four scan
+\ lines): its two greys (1 and 2) are logical 1, its rainbows and reds
+\ (3-6) logical 2. Each band of four lines takes the nearest of the BBC's
+\ colours (tools/mkfront.py's) to grey 1's, for logical 1, and for logical
+\ 2 to rainbow 3's above the boxes' middle and rainbow 4's below it, where
+\ those are the boxes' (band_irq writes them).
+.end_on
+{
+    ZA_AUTO1 y, n, c1
+    ZA_AUTO2 p, o
+    LDA #ACCCON_X : TSB acccon
+    LDX #0                                      ; (in order: some lie over others)
+.box
+    LDA box_y,X : STA y
+    LDA box_h,X : STA n
+.line
+    LDA y : LSR A : LSR A : LSR A : TAY
+    LDA y : AND #7 : CLC : ADC screen_row_lo,Y : STA p
+    LDA screen_row_hi,Y : ADC #0 : STA p+1
+    \ its first byte: its byte column's cell, 8 bytes a column
+    LDA box_col,X : STA o : STZ o+1
+    ASL o : ROL o+1 : ASL o : ROL o+1 : ASL o : ROL o+1
+    LDA p : CLC : ADC o : STA p
+    LDA p+1 : ADC o+1 : STA p+1
+    LDA box_w,X : STA c1
+    LDY #0
+.byte
+    LDA box_byte,X : STA (p),Y
+    TYA : CLC : ADC #8 : TAY : BNE next
+    INC p+1
+.next
+    DEC c1 : BNE byte
+    INC y : DEC n : BNE line
+    INX : CPX #BOXES : BNE box
+    LDA #ACCCON_X : TRB acccon
+    \ the VBL's state as sub_0747A sets it, its bands made, and band_irq's
+    \ from the next vertical sync
+    LDX #END_STATE - 1
+.zero
+    STZ end_state,X
+    DEX : BPL zero
+    JSR end_bands
+    SEI
+    LDA #LO(band_irq) : STA irq1v
+    LDA #HI(band_irq) : STA irq1v+1
+    CLI
+    LDA #&FF : STA end_running
+    RTS
+}
+.end_off
+    STZ end_running
+    SEI
+    LDA #LO(irq_handler) : STA irq1v
+    LDA #HI(irq_handler) : STA irq1v+1
+    LDA #&20 : STA usrvia_ier                   ; T2's interrupt off
+    CLI
+    LDA #LO(fe_colours) : LDX #HI(fe_colours)
+    JMP palette_set
+
+\ end_step: fe_field's, while the end screen shows: sub_0752A's counts for
+\ the greys (every 3 VBLs, &2EC up 2) and the rainbows (every 2: &2EE down
+\ 2, from &28 after 0; &2EF up 2, to 0 at &2A); then the bands.
+.end_step
+{
+    INC end_grey_n : LDA end_grey_n : CMP #3 : BNE grey
+    STZ end_grey_n
+    LDA end_grey : CLC : ADC #2 : AND #&0E : STA end_grey
+.grey
+    INC end_rain_n : LDA end_rain_n : CMP #2 : BNE end_bands
+    STZ end_rain_n
+    LDA end_rain : SEC : SBC #2 : BPL down
+    LDA #&28
+.down
+    STA end_rain
+    LDA end_rain4 : CLC : ADC #2 : CMP #&2A : BNE up
+    LDA #0
+.up
+    STA end_rain4
+    \ (on into end_bands)
+}
+
+\ end_bands: each band's colours for band_irq, as sub_0768A steps them
+\ from the VBL's every four lines (the greys up, the rainbows down), its
+\ first interrupt taking the VBL's own: the ULA's bytes (physical colours
+\ EORed with 7).
+END_BANDS_TOP = 104 DIV BAND_LINES              ; (the boxes of 3 and 5 above, 4 and 6 below)
+.end_bands
+{
+    ZA_AUTO1 g, r, r4
+    LDA #&FF : STA band_1 - 1 : STA band_2 - 1   ; (so the first band's always written)
+    LDA end_grey : STA g
+    LDA end_rain : STA r
+    LDA end_rain4 : STA r4
+    LDX #0
+.band
+    LDA g : LSR A : TAY
+    LDA end_grey_phys,Y : EOR #7 : STA band_1,X
+    LDA r
+    CPX #END_BANDS_TOP : BCC rain
+    LDA r4
+.rain
+    AND #&1E : LSR A : TAY
+    LDA end_rain_phys,Y : EOR #7 : STA band_2,X
+    CPX #0 : BEQ next
+    LDA g : CLC : ADC #2 : AND #&0E : STA g
+    DEC r : DEC r
+    DEC r4 : DEC r4
+.next
+    INX : CPX #BANDS : BNE band
+    RTS
+}
+
+\ band_irq: IRQ1V while the end screen shows, as the ST's Timer B changes
+\ its colours every 4 lines (sub_0768A): User VIA T2, free out of play,
+\ comes every BAND_LINES lines from the screen's top (started at each
+\ vertical sync), and puts logical 1 and 2 in the band's colours (band_1
+\ and band_2, the ULA's bytes, end_bands's); anything else is the
+\ engine's (engine.6502). It can be here, in bank 7, as nothing pages
+\ another bank meanwhile but the interrupt itself (sound_vsync), which
+\ puts it back.
+BAND_LINES = 4
+BANDS = SCREEN_ROWS * 8 DIV BAND_LINES
+BAND_EARLY = 4                                  ; (its writes start later in it than the split's)
+BAND_FIRST = SYNC_TO_TOP * SCAN_US - 2 + SPLIT_ADJ - BAND_EARLY
+BAND_T2 = BAND_LINES * SCAN_US
+.band_irq
+{
+    ZA_INTERRUPT
+    LDA usrvia_ifr : AND #&20 : BEQ not_band
+    \ the band's colours first, to land in the line's blank, each only if
+    \ it changes (eight writes overrun the blank; each table has a byte no
+    \ colour is before it, for the first band's to be written)
+    PHX
+    LDX band_i
+    LDA band_1,X : CMP band_1 - 1,X : BEQ same_1
+    ORA #&20 : STA ula_pal : ORA #&10 : STA ula_pal     ; logical 1's entries: 2, 3, 7, 6
+    ORA #&40 : STA ula_pal : EOR #&10 : STA ula_pal
+.same_1
+    LDA band_2,X : CMP band_2 - 1,X : BEQ same_2
+    ORA #&80 : STA ula_pal : ORA #&10 : STA ula_pal     ; logical 2's: 8, 9, 13, 12
+    ORA #&40 : STA ula_pal : EOR #&10 : STA ula_pal
+.same_2
+    \ the next band's count from this one's due moment: T2 runs on past 0
+    LDA usrvia_t2cl : CLC : ADC #LO(BAND_T2) : TAX     ; (acknowledged)
+    LDA usrvia_t2ch : ADC #HI(BAND_T2)
+    STX usrvia_t2cl : STA usrvia_t2ch
+    INC band_i : LDA band_i : CMP #BANDS : BNE more
+    LDA #&20 : STA usrvia_ier                   ; the last: T2's interrupt off till the sync
+.more
+    PLX
+    LDA &FC                                     ; the interrupted A, which the OS kept
+    RTI
+.not_band
+    LDA sysvia_ifr : AND #2 : BEQ engine
+    STZ band_i
+    LDA #LO(BAND_FIRST) : STA usrvia_t2cl
+    LDA #HI(BAND_FIRST) : STA usrvia_t2ch       ; starts the count
+    LDA #&A0 : STA usrvia_ier                   ; T2's interrupt on
+.engine
+    JMP irq_handler                             ; (which takes the sync)
+}
+
+\ ---------------------------------------------------------------------------
+\ The fields and the keys.
+
+\ fe_field: the next field, waited for, then its work: the keys scanned,
+\ the stick's move taken into the accumulators (input.6502's input_step,
+\ as the ST's mouse moves them while it waits), the end screen's colours;
+\ fe_elapsed counted.
+.fe_field
+{
+    LDA fields
+.wait
+    CMP fields : BEQ wait
+    INC fe_elapsed : BNE counted
+    INC fe_elapsed+1
+.counted
+    JSR fe_scan
+    JSR input_step
+    BIT end_running : BPL done
+    JMP end_step
+.done
+    RTS
+}
+.fe_wait_begin
+    STZ fe_elapsed : STZ fe_elapsed+1
+    RTS
+\ fe_waited: carry set once fe_elapsed has reached A (low) and X (high)
+.fe_waited
+{
+    ZA_AUTO2 t
+    STA t : STX t+1
+    LDA fe_elapsed : CMP t
+    LDA fe_elapsed+1 : SBC t+1
+    RTS
+}
+
+\ fe_wait_key (sub_00BCA): the next key made, its character (0 for one
+\ without), or &0D after KEY_WAIT fields.
+.fe_wait_key
+{
+    JSR fe_wait_begin
+.poll
+    JSR fe_make : BCS made
+    JSR fe_field
+    LDA #LO(KEY_WAIT) : LDX #HI(KEY_WAIT) : JSR fe_waited : BCC poll
+    LDA #&0D
+    RTS
+.made
+    TXA
+    RTS
+}
+
+\ fe_make: carry set and the last key made, if one was, taken: A its ST
+\ scancode, X its character (0 for none), Y the BBC's key (bit 7 set for
+\ the stick's second button, the ST's right mouse button as its IKBD
+\ sends it, &75, which the ST's table reads as a space); carry clear if
+\ none was.
+.fe_make
+{
+    LDA key_latch : CMP #ST_BUTTON_RIGHT : BNE keys
+    STZ key_latch
+    LDX #' ' : LDY #&FF
+    SEC
+    RTS
+.keys
+    LDY fe_latch : BMI none
+    LDA #&FF : STA fe_latch
+    LDA bbc_st,Y : LDX bbc_char,Y
+    SEC
+    RTS
+.none
+    CLC
+    RTS
+}
+
+\ fe_forget: the last key made forgotten, as the ST clears its latch.
+.fe_forget
+    LDA #&FF : STA fe_latch
+    STZ key_latch
+    RTS
+
+\ fe_scan: every key's state read, a key down that wasn't the last key
+\ made (fe_latch), as the ST's keyboard interrupt latches the last make.
+\ Interrupts off, as the interrupt reads the keys too (input.6502).
+.fe_scan
+{
+    PHP : SEI
+    LDA #&7F : STA sysvia_ddra                  ; bits 0-6 the key, bit 7 its state
+    LDA #3 : STA sysvia_orb                     ; auto-scan off
+    LDX #BBC_KEYS - 1
+.key
+    LDA bbc_keys,X : STA sysvia_ora_nh
+    LDA sysvia_ora_nh : BMI down
+    STZ fe_down,X
+    DEX : BPL key
+    BRA scanned
+.down
+    LDA fe_down,X : BNE held
+    INC fe_down,X
+    LDA bbc_keys,X : STA fe_latch
+.held
+    DEX : BPL key
+.scanned
+    LDA #&0B : STA sysvia_orb                   ; auto-scan back
+    LDA #&FF : STA sysvia_ddra
+    PLP
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ The colours: the ST's fades of 8 VBLs (&06ACC in, from black; &06B3C
+\ out, to black) as their colours come out in the BBC's eight, each at
+\ full brightness: the change at the fade's middle (front_main.6502's
+\ palette_set).
+.fe_fade_out
+    LDA #LO(fe_blacks) : LDX #HI(fe_blacks)
+.fe_fade_to
+{
+    ZA_AUTO2 to
+    STA to : STX to+1
+    JSR fe_fields4
+    LDA to : LDX to+1 : JSR palette_set
+    \ (on into fe_fields4)
+}
+.fe_fields4
+{
+    LDA #4
+.field
+    PHA : JSR fe_field : PLA
+    DEC A : BNE field
+    RTS
+}
+.fe_fade_in
+    PHA : PHX
+    JSR fe_black
+    PLX : PLA
+    BRA fe_fade_to
+.fe_black
+    LDA #LO(fe_blacks) : LDX #HI(fe_blacks)
+    JMP palette_set
+
+\ ---------------------------------------------------------------------------
+\ The screen, as the ST's text printer (&012EC) has it: 40 columns of 8
+\ pixels, 25 rows of 8 lines, a cursor, and a colour.
+
+\ fe_cls (sub_00F80): the screen cleared, the cursor at its top left.
+.fe_cls
+{
+    ZA_AUTO2 p
+    LDA #ACCCON_X : TSB acccon
+    STZ p : LDX #HI(SCREEN)
+    LDY #LO(SCREEN) : LDA #0
+.page
+    STX p+1
+.byte
+    STA (p),Y
+    INY : BNE byte
+    INX : BPL page                              ; to &7FFF
+    LDA #ACCCON_X : TRB acccon
+    STZ tty_col : STZ tty_row
+    RTS
+}
+
+\ fe_colour: the ST's colour A (D_019F0) the printer's, as the title's
+\ four have it.
+.fe_colour
+    TAX : LDA fe_masks,X : STA tty_mask
+    RTS
+
+\ fe_print: the string at A (low) and X (high), as the ST's printer takes
+\ it: CR the column 0, LF the row down, &80 + a colour that colour, a
+\ character drawn and the cursor on (to the next row past the 40th
+\ column), 0 the end. (The ST's draws a character under &20 from outside
+\ its font: none of its texts has one; here it's nothing.)
+.fe_print
+{
+    ZA_AUTO2 s
+    STA s : STX s+1
+    LDA #ACCCON_X : TSB acccon
+.next
+    LDA (s) : BEQ done
+    INC s : BNE got
+    INC s+1
+.got
+    CMP #&80 : BCC plain
+    AND #&7F : JSR fe_colour
+    BRA next
+.plain
+    CMP #&0D : BNE not_cr
+    STZ tty_col
+    BRA next
+.not_cr
+    CMP #&0A : BNE not_lf
+    JSR fe_lf
+    BRA next
+.not_lf
+    CMP #&20 : BCC next
+    JSR fe_glyph
+    INC tty_col : LDA tty_col : CMP #40 : BNE next
+    STZ tty_col
+    JSR fe_lf
+    BRA next
+.done
+    LDA #ACCCON_X : TRB acccon
+    RTS
+}
+\ fe_lf: the next row (the ST's goes past the last row to an address that
+\ isn't the screen: tools/mkfront.py checks no text gets there)
+.fe_lf
+{
+    INC tty_row : LDA tty_row : CMP #25 : BNE same
+    STZ tty_row
+.same
+    RTS
+}
+
+\ fe_glyph: character A (&20-&7F) drawn at the cursor in the printer's
+\ colour, the whole cell, as the ST writes every plane.
+.fe_glyph
+{
+    ZA_AUTO2 g, q
+    \ the glyph
+    SEC : SBC #FONT_FIRST : STZ g+1
+    ASL A : ROL g+1 : ASL A : ROL g+1 : ASL A : ROL g+1
+    CLC : ADC #LO(fe_font) : STA g
+    LDA g+1 : ADC #HI(fe_font) : STA g+1
+    \ the cell: SCREEN + 640 row + 16 column
+    LDA tty_row : ASL A : ASL A : ADC tty_row   ; 5 row (C clear: row 24 at most)
+    LSR A : STA q+1 : LDA #0 : ROR A : STA q    ; x 128
+    LDA tty_col : LSR A : LSR A : LSR A : LSR A
+    CLC : ADC q+1 : STA q+1
+    LDA tty_col : ASL A : ASL A : ASL A : ASL A
+    CLC : ADC q : STA q
+    BCC within
+    INC q+1
+.within
+    LDA q : CLC : ADC #LO(SCREEN) : STA q
+    LDA q+1 : ADC #HI(SCREEN) : STA q+1
+    LDY #7
+.row
+    LDA (g),Y : PHA
+    LSR A : LSR A : LSR A : LSR A : TAX
+    LDA spread,X : AND tty_mask : STA (q),Y
+    PLA : AND #15 : TAX
+    TYA : ORA #8 : TAY
+    LDA spread,X : AND tty_mask : STA (q),Y
+    TYA : AND #7 : TAY
+    DEY : BPL row
+    RTS
+.spread                                         ; four pixels' bits to MODE 1's colour 3
+    FOR n = 0..15
+        EQUB n * &11
+    NEXT
+}
+
+\ fe_unpack: the title (tools/mkfront.py's packed stream) into the
+\ screen, to its end at &8000: a 0 bit a run of bytes as they are, its
+\ length first; a 1 a match, its offset (less one) in 256s plus one, its
+\ low byte, its length less one, copied from what's unpacked. A number is
+\ Elias-gamma interlaced: from 1, each 0 bit followed by a bit shifted
+\ in, until a 1.
+.fe_unpack
+{
+    ZA_AUTO2 src, dst, mp, v
+    ZA_AUTO1 bits, hi
+    LDA #ACCCON_X : TSB acccon
+    LDA #LO(title_packed) : STA src : LDA #HI(title_packed) : STA src+1
+    LDA #LO(SCREEN) : STA dst : LDA #HI(SCREEN) : STA dst+1
+    LDA #&80 : STA bits
+.token
+    ASL bits : BNE got_token                    ; (each bit's read is refill's but a byte in eight)
+    JSR refill
+.got_token
+    BCS match
+    JSR gamma
+    LDA src : STA mp : LDA src+1 : STA mp+1
+    JSR copy
+    LDA mp : STA src : LDA mp+1 : STA src+1
+    BRA next
+.match
+    JSR gamma
+    LDA v : DEC A : STA hi
+    LDA (src) : PHA
+    INC src : BNE m1
+    INC src+1
+.m1
+    \ from dst - (256 hi + low) - 1
+    PLA : STA mp
+    CLC
+    LDA dst : SBC mp : STA mp
+    LDA dst+1 : SBC hi : STA mp+1
+    JSR gamma
+    INC v : BNE matched
+    INC v+1
+.matched
+    JSR copy
+.next
+    LDA dst+1 : CMP #HI(&8000) : BNE token
+    LDA #ACCCON_X : TRB acccon
+    RTS
+\ copy: v bytes from (mp) to (dst), each pointer moved on past them, a
+\ byte at a time from the first, so a match may overlap what it makes
+.copy
+    LDY #0
+    LDX v+1 : BEQ part
+.page
+    LDA (mp),Y : STA (dst),Y
+    INY : BNE page
+    INC mp+1 : INC dst+1
+    DEX : BNE page
+.part
+    LDX v : BEQ copied
+.byte
+    LDA (mp),Y : STA (dst),Y
+    INY : DEX : BNE byte
+    TYA : CLC : ADC mp : STA mp
+    BCC moved
+    INC mp+1
+.moved
+    TYA : CLC : ADC dst : STA dst
+    BCC copied
+    INC dst+1
+.copied
+    RTS
+\ refill: when ASL bits has left it 0, the next byte's bits, its top bit
+\ in carry
+.refill
+    LDA (src)
+    INC src : BNE filled
+    INC src+1
+.filled
+    ROL A : STA bits                            ; (the carry the marker bit's 1)
+    RTS
+\ gamma: the next number into v
+.gamma
+    LDA #1 : STA v : STZ v+1
+.more
+    ASL bits : BNE got_stop
+    JSR refill
+.got_stop
+    BCS gamma_done
+    ASL bits : BNE got_bit
+    JSR refill
+.got_bit
+    ROL v : ROL v+1
+    BRA more
+.gamma_done
+    RTS
+}
+ASSERT SCREEN + SCREEN_ROWS * SCREEN_ROW = &8000
+
+\ The title's colours and black, as physical colours, for palette_set.
+.fe_colours
+    EQUB TITLE_COLOURS
+.fe_blacks
+    EQUB 0, 0, 0, 0
+
+\ ---------------------------------------------------------------------------
+\ FRONT's state (past &9000, so its copies of ANDY's can be made with ANDY
+\ paged).
+.fe_state
+.fe_elapsed     SKIP 2      ; fields counted from fe_wait_begin
+.fe_latch       SKIP 1      ; the last BBC key made (&FF: none)
+.title_count    SKIP 1      ; the title loop's passes ($29A)
+.tty_col        SKIP 1      ; the printer's cursor ...
+.tty_row        SKIP 1
+.tty_mask       SKIP 1      ; ... and its colour, as a MODE 1 byte's bits
+.pct            SKIP 1      ; the rating's accuracy ($29E)
+.number         SKIP 4      ; fe_number's long
+.fe_text       SKIP 16     ; its digits, and the table's
+.one_char       SKIP 2      ; one character, ended
+.counts_kept    SKIP 16     ; the rating's counts
+.hs_kept        SKIP 40     ; the high scores' ...
+.hs_names_kept  SKIP 10 * NAME_BYTES    ; ... and names
+.end_running    SKIP 1      ; bit 7 while the end screen shows
+.end_state
+.end_grey_n     SKIP 1      ; sub_0752A's $2F2 ...
+.end_grey       SKIP 1      ; ... $2EC
+.end_rain_n     SKIP 1      ; $2F3 ...
+.end_rain       SKIP 1      ; ... $2EE ...
+.end_rain4      SKIP 1      ; ... $2EF
+END_STATE = P% - end_state
+.band_i         SKIP 1      ; band_irq's next band
+                SKIP 1      ; (end_bands's &FF)
+.band_1         SKIP BANDS  ; by band: logical 1's colour, its byte for the ULA ...
+                SKIP 1
+.band_2         SKIP BANDS  ; ... and logical 2's
+.fe_down        SKIP BBC_KEYS   ; by key: non-zero while it's down
+ASSERT fe_state >= ANDY_TOP

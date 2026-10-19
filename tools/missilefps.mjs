@@ -18,7 +18,7 @@ import { pathToFileURL } from "node:url";
 const root = process.cwd();
 const { loadSymbols } = await import(pathToFileURL(path.join(root, "tools/beeb.mjs")).href);
 const { TestMachine } = await import(pathToFileURL(path.join(root, "node_modules/jsbeeb/src/test-machine.js")).href);
-const { loadDisc } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
+const { loadDisc, toGame } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
 const args = process.argv.slice(2);
 const opt = (name, dflt) => {
     const i = args.indexOf(name);
@@ -40,7 +40,7 @@ console.log = q;
 const cpu = tm.processor;
 const ram = cpu.ramRomOs;                           // (ANDY is at &8000 in jsbeeb's memory)
 loadDisc(tm, path.join(root, build, "starglider.ssd"), sym);
-await tm.runUntilAddress(sym.engine_run, 60);
+await toGame(tm, sym);
 await tm.runFor(6 * 2000000);
 
 // each frame's marks, by the routines' entries in main RAM

@@ -20,8 +20,8 @@
 \ player_flight, object_handlers, animate_shapes, collisions,
 \ level_message and frame_end's logic; the step's frame shown, if it drew
 \ one; then the post-frame tests, which may go on to a level's change
-\ or, the game over, to the next game (at once, until the front end is
-\ in).
+\ or, the game over, to the game's end (front_main.6502's game_end; in
+\ the spike, which has no front end, the next game at once).
 .step_logic
 {
     BANK_ANDY BANK_LOGIC
@@ -46,7 +46,11 @@
     PLA : TAX
     LDA level_changed : BNE level
     TXA : BEQ playing
+IF DEFINED(SPIKE)
     JSR new_game
+ELSE
+    JMP game_end
+ENDIF
 .level
     JMP level_start
 .playing

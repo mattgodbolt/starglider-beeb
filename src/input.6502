@@ -60,6 +60,13 @@ ENDMACRO
     KEY &41, &1E                    ; A
     KEY &33, &13                    ; R
     KEY &53, &22                    ; G
+    \ and the K screen's six (the ST's $2D8-$2DD, def_left's order), each
+    \ the key chosen and its ST scancode (front.6502's fe_define): until
+    \ then SPACE's again, which changes nothing
+.key_defined
+    FOR i = 1..6
+        KEY &62, &39
+    NEXT
 KEY_MAP_BYTES = P% - key_map
 ASSERT KEY_MAP_BYTES <= 128         ; (input_irq's index, stepped by 2, kept positive)
 

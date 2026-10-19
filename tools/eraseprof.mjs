@@ -30,14 +30,15 @@ const missile = args.includes("--missile");
 const pos = args.filter((a) => !a.startsWith("--"));
 const { loadSymbols } = await import(pathToFileURL(path.join(root, "tools/beeb.mjs")).href);
 const { TestMachine } = await import(pathToFileURL(path.join(root, "node_modules/jsbeeb/src/test-machine.js")).href);
-const { loadDisc } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
+const { loadDisc, toGame } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
 const sym = loadSymbols(path.join(root, build, "starglider.json"));
 const tm = new TestMachine("Master");
 await tm.initialise();
 const q = console.log; console.log = () => {}; await tm.runUntilInput(); console.log = q;
 const cpu = tm.processor, ram = cpu.ramRomOs;          // (shadow RAM is at &8000 on in jsbeeb's)
 loadDisc(tm, path.join(root, build, "starglider.ssd"), sym);
-await tm.runFor(14 * 2000000);
+await toGame(tm, sym);
+await tm.runFor(4 * 2000000);
 const keys = (pos[1] ?? "").split(",").filter(Boolean);
 for (const k of keys) tm.keyDown(k);
 if (keys.length) await tm.runFor(2 * 2000000);

@@ -1342,3 +1342,36 @@ byte a first sample reads; the clips stay where they were.
   12.17 a second against 10.33 (measured 2026-10-18). Main RAM gave 349
   bytes, and fixed zero page's last byte is the tick's.
 
+### The front end
+
+The disc boots to the ST's title: the credits after its wait, the K
+screen, Esc back to the title, and the game's end, with the words, the
+pilot rating, the high scores and the end screen's colour bands. Each
+comes from the ST's code with its timings in VBLs, read and run in Hatari
+(`docs/research/st-logic.md`, "The front end"), quirks kept: the place
+number never printed, the second score always 0, the high scores lasting
+until the machine is switched off.
+
+- **FRONT** holds bank 7 out of play (decision 39) and loads over flight's
+  files, never while speech plays. The title is TITLE.TRA dithered into
+  four colours and packed (decision 40), shown on the shadow screen so the
+  cockpit stays on main RAM's. A game's start loads flight's files back,
+  2-4 seconds on black in jsbeeb; the game's end loads FRONT behind the
+  ST's own 301-VBL wait.
+- **The K screen** asks for the ST's six keys and stores them as pressed;
+  they join the key map (decision 44).
+- **The title song** isn't in: `song_start`, `song_stop` and
+  `song_if_quiet` in `src/front.6502` are silent hooks where the ST calls
+  its sample, for Matt to choose by ear (decision 5) between the ST's
+  sample streamed (about 37K at 4 kHz, the drive running for each 18-second
+  pass) and David Lowe's AY tune from the Spectrum 128K (about 3.2K with
+  its player, no streaming).
+- **A latent bug.** `erase_init` was part of the start, which the lists
+  overwrite once a game has run, so a second game crashed once the merge
+  moved the start. It's resident now, and frontcheck plays a game after a
+  game's end.
+
+`tools/frontcheck.mjs`, in `make check`, compares every screen byte for
+byte with a model of the ST's printer, times the waits, checks the defined
+keys reach the logic as the ST's scancodes, and checks the high scores.
+

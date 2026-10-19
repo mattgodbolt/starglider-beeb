@@ -9,9 +9,10 @@
 \ keys, as it costs the ST its frame's. The keyboard layer fills key_state
 \ and key_latch from the BBC's keys (decision 6).
 \
-\ What a command enters that runs frames of its own or leaves the game is a
-\ later layer, stubbed here: the Interrogate screen, the cheat_mode prompt's
-\ waits for keys (the prompt itself is transcribed), and Esc to the title.
+\ What a command enters that runs frames of its own is a later layer,
+\ stubbed here: the Interrogate screen and the cheat_mode prompt's waits
+\ for keys (the prompt itself is transcribed). Esc leaves for the front
+\ end's title (front_main.6502).
 \ ***************************************************************************
 
 \ read_keys (&0270E)
@@ -273,9 +274,14 @@
     RTS
 
 \ quit_to_title (&03FF2): Esc, which leaves the frame for the title (the
-\ ST's L_01E94), a later layer.
+\ ST's L_01E94): front_main.6502's to_title. (The spike has no front end,
+\ and goes on with the step.)
 .quit_to_title
+IF DEFINED(SPIKE)
     RTS
+ELSE
+    JMP to_title
+ENDIF
 
 \ key_ascii (&015F6): the ST's characters, by scancode from 1, uppercase;
 \ the cursor keys are 0. The table ends at &72's (keypad Enter); the ST

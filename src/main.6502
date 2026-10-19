@@ -1,22 +1,23 @@
 \ ***************************************************************************
 \ STARGLIDER for the BBC Master - the disc
 \
-\ The game, from a new game at level 1, as the ST's title starts one (the
-\ front end is to come): the ST's logic (logic/, decision 1) stepped on
-\ the engine (engine.6502, decision 14) in the ST's order, steered by the
-\ ST's keys and the analogue joystick (input.6502, decision 6), drawn by
-\ the port's renderer into a double-buffered MODE 1 screen at the ST's
-\ 320 x 200.
+\ The game as the ST's: its title, credits and K screen, and its end, the
+\ front end (front.6502, decision 12); and the game, the ST's logic
+\ (logic/, decision 1) stepped on the engine (engine.6502, decision 14)
+\ in the ST's order, steered by the ST's keys and the analogue joystick
+\ (input.6502, decision 6), drawn by the port's renderer into a
+\ double-buffered MODE 1 screen at the ST's 320 x 200.
 \
 \ !BOOT (*EXEC'd) sets the mode and palette through BASIC and the OS and
 \ runs SG, which makes no OS call: it loads the rest itself, with its own
 \ disc reader (disc.6502, decision 12), a track a revolution: HAZEL's
 \ files into HAZEL (the filing system's workspace until then), the shapes,
-\ the world and the logic into their banks, the loading area's window and
-\ speech into bank 7, and the cockpit into the screen, which it copies
-\ into the shadow screen. (*SRLOAD, Q or no,
-\ loaded the banks at a fraction of the speed: docs/journal.md,
-\ 2026-10-18.)
+\ the world and the logic into their banks, the front end into bank 7,
+\ and the cockpit into the screen. A game's start loads flight's view
+\ code, its window and speech into bank 7 in the front end's place, and
+\ copies the cockpit into the shadow screen; its end loads the front end
+\ again (front_main.6502). (*SRLOAD, Q or no, loaded the banks at a
+\ fraction of the speed: docs/journal.md, 2026-10-18.)
 \ ***************************************************************************
 
 INCLUDE "defs.6502"
@@ -86,21 +87,7 @@ INCLUDE "speech.6502"
 ASSERT P% <= &3000                  ; (the interrupt runs them)
 INCLUDE "cockpit.6502"
 INCLUDE "disc.6502"
-
-\ ---------------------------------------------------------------------------
-\ play: from the start (start.6502), its code done: the objects 0 over it
-\ (and the silo's two records with them, which no level's set-up clears,
-\ as the ST's are as it loads), the new game as the ST's start_game makes
-\ it (L_01EFE) and its first level's start (L_01F06), and the engine
-\ (engine.6502), for ever.
-.play
-    JSR objects_clear
-    BANK_ANDY BANK_LOGIC
-    JSR new_game
-    JSR level_start
-    LDA fields : STA stepped
-    JMP engine_run
-
+INCLUDE "front_main.6502"
 INCLUDE "code.6502"
 INCLUDE "overlays.6502"
 ENDSECTION
@@ -125,13 +112,29 @@ INCBIN "../build/gen/speech_a.bin"
     ASSERT P% = ANDY_TOP
 ENDSECTION
 
-\ The controls' state (input.6502), in the workspace, below &3000 for the
-\ interrupt.
+\ The controls' state (input.6502) and the split's colours (engine.6502),
+\ in the workspace, below &3000 for the interrupt.
 SECTION GameWork, org = logic_work_end, guard = NMI_PAGE, virtual = TRUE
 .adc_channel  SKIP 1        ; the joystick's axis converting: 0 x, 1 y
 .adc_raw      SKIP 2        ; by axis, its last reading, the ADC's top 8 bits
 .adc_kept     SKIP 2        ; and the reading the accumulators last moved to
 .keys_held    SKIP 1        ; the keys held at the last read of them
+.c3_ula       SKIP 8        ; logical 3's four entries for the ULA above the split, then below
 ENDSECTION
 
 INCLUDE "banks.6502"
+
+\ The front end (front.6502), bank 7's out of play, past the zeros that
+\ keep the OS from taking it for a ROM's header: its data first, which may
+\ lie in the bank's first 4K and below world_list_end, then its code,
+\ which mustn't (baron#29, banks.6502).
+SECTION Front, org = &8000, filename = "FRONT", guard = &C000, cmos = TRUE
+    EQUD 0, 0
+INCLUDE "../build/gen/front.6502"
+IF P% < world_list_end
+    SKIP world_list_end - P%
+ENDIF
+.front_code
+INCLUDE "front.6502"
+ENDSECTION
+ASSERT front_code >= world_list_end

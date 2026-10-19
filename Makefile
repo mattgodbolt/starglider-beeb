@@ -8,7 +8,8 @@
 #   make check    sincos against the ST's sine table, the spike, the
 #                 disc's erasing (tools/erasecheck.mjs), its own disc
 #                 reader (tools/disccheck.mjs), its controls
-#                 (tools/inputcheck.mjs), its sound effects (make sfx)
+#                 (tools/inputcheck.mjs), its front end's flows
+#                 (tools/frontcheck.mjs), its sound effects (make sfx)
 #                 and its speech (make speech)
 #   make sfx      the disc's sound effects against the ST's YM writes
 #                 (tools/sfxcheck.mjs, on build/sfx's capture)
@@ -62,7 +63,7 @@ DISC     = starglider.ssd
 
 all: $(TARGET) build/spike/SPIKE
 
-$(TARGET): $(SOURCES) $(GEN) build/gen/cockpit.bin | build
+$(TARGET): $(SOURCES) $(GEN) build/gen/cockpit.bin build/gen/front.6502 build/gen/front_init.6502 build/gen/panel_start.6502 | build
 	$(ASM) -D 'BUILD="$(BUILD)"' -o $@ --title STARGLIDER --opt 3 --warn 2 --symbols $(@:.ssd=.json) src/main.6502
 
 build:
@@ -135,8 +136,13 @@ build/gen/levels.6502: $(PRG) tools/mklevels.py tools/st_prg.py | build/gen
 
 # The panel's font, strings, waveforms and colours, from STAR.PRG (and the
 # few pixels of RESULT.TRA it changes without covering).
-build/gen/panel.6502 build/gen/panel.json &: $(PRG) tools/mkpanel.py tools/mkcockpit.py tools/st_prg.py | build/gen
-	$(PYTHON) -I tools/mkpanel.py $(PRG) build/st/disc/RESULT.TRA build/gen/panel.6502 build/gen/panel.json
+build/gen/panel.6502 build/gen/panel.json build/gen/panel_start.6502 &: $(PRG) tools/mkpanel.py tools/mkcockpit.py tools/st_prg.py | build/gen
+	$(PYTHON) -I tools/mkpanel.py $(PRG) build/st/disc/RESULT.TRA build/gen/panel.6502 build/gen/panel.json build/gen/panel_start.6502
+
+# The front end's data: the title packed, the font, the texts, the keys
+# (from the ST's STAR.PRG and TITLE.TRA), and the high scores for the start.
+build/gen/front.6502 build/gen/front_init.6502 build/gen/front.json &: $(PRG) tools/mkfront.py tools/mkcockpit.py tools/st_prg.py | build/gen
+	$(PYTHON) -I tools/mkfront.py $(PRG) build/st/disc/TITLE.TRA build/gen/front.6502 build/gen/front_init.6502 build/gen/front.json
 
 # The cockpit, from the ST's RESULT.TRA (on its disc, beside STAR.PRG).
 build/gen/cockpit.bin: $(PRG) tools/mkcockpit.py | build/gen
@@ -157,11 +163,12 @@ build/st build/gen build/spike:
 build/scenes/%/beeb.json: build/scenes/%/scenes.json $(PRG) tools/mkscene.py tools/st_render.py
 	$(PYTHON) -I tools/mkscene.py $(PRG) $< $@
 
-check: build/spike/SPIKE spike panel view rot sfx speech $(TARGET)
+check: build/spike/SPIKE spike panel view rot sfx speech $(TARGET) build/gen/front.json
 	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike
 	node tools/erasecheck.mjs
 	node tools/disccheck.mjs
 	node tools/inputcheck.mjs
+	node tools/frontcheck.mjs
 
 # The sound effects on the disc against the ST's YM writes, captured in
 # Hatari (make sfxcapture: slow, needs Hatari), and their gates

@@ -30,7 +30,11 @@ ASSERT SHOTS >= 4 * MAX_STEPS           ; every shot a frame's steps fire kept f
 \ picks among a logical colour's four by the pixels beside it) are
 \ written in the horizontal blank before the panel's first scan line.
 \ T1 is started at the vertical sync, which screen_mode puts
-\ SYNC_TO_TOP scan lines before the screen's first.
+\ SYNC_TO_TOP scan lines before the screen's first. The entries' bytes
+\ for each side are in c3_ula (c3_set's), which the front end, whose
+\ screens have no split, makes the same (front_main.6502's palette_set):
+\ the split goes on beneath it, as sound_tick and the speech's tick time
+\ themselves by it.
 VIEW_COLOUR_3  = 7                  ; white
 PANEL_COLOUR_3 = 4                  ; blue
 PANEL_LINE     = VIEW_YMAX + 1
@@ -65,10 +69,10 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
 .dispatch
     BIT usrvia_ifr : BVC not_split              ; (T1 is bit 6)
     LDA usrvia_t1cl                             ; acknowledged
-    FOR e = {10, 11, 14, 15}
-        LDA #ula_entry(e, PANEL_COLOUR_3) : STA ula_pal
+    FOR i = 0..3
+        LDA c3_ula + C3_PANEL + i : STA ula_pal
     NEXT
-    BRA done
+    JMP done
 .not_split
     LDA ta_kind : BEQ not_sound                 ; (the OS left T1 running)
     BIT sysvia_ifr : BVC not_sound
@@ -80,8 +84,8 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
     STA sysvia_ifr                              ; acknowledged
     LDA #LO(SPLIT_T1) : STA usrvia_t1cl
     LDA #HI(SPLIT_T1) : STA usrvia_t1ch         ; starts the count
-    FOR e = {10, 11, 14, 15}
-        LDA #ula_entry(e, VIEW_COLOUR_3) : STA ula_pal
+    FOR i = 0..3
+        LDA c3_ula + C3_VIEW + i : STA ula_pal
     NEXT
     INC fields
     LDA frame_ready : BEQ shown
@@ -106,6 +110,24 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
     RTI
 }
 ASSERT irq_handler < &3000
+
+\ c3_set: logical colour 3 physical colour A on the split's side X
+\ (C3_VIEW above it, C3_PANEL below), as its four entries' bytes for the
+\ ULA (c3_ula), which the interrupt writes as they are.
+C3_VIEW  = 0
+C3_PANEL = 4
+.c3_set
+{
+    ZA_AUTO1 c
+    EOR #7 : STA c                              ; (the ULA takes it EORed with 7)
+    LDY #3
+.entry
+    LDA c3_entries,Y : ORA c : STA c3_ula,X
+    INX : DEY : BPL entry
+    RTS
+.c3_entries
+    EQUB 15 * 16, 14 * 16, 11 * 16, 10 * 16
+}
 
 \ engine_run: the game, for ever: every step that's due, and between them
 \ a frame. The fields counter wraps; a frame is far shorter than 256 fields.

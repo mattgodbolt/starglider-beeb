@@ -25,7 +25,7 @@ const q = console.log; console.log = () => {}; await tm.runUntilInput(); console
 const cpu = tm.processor, ram = cpu.ramRomOs;
 const bank = (n) => cpu.romOffset + n * 16384;
 // unpack the disc's files from the .ssd by name
-const { loadDisc } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
+const { loadDisc, toGame } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
 loadDisc(tm, path.join(root, "build/starglider.ssd"), sym);
 const erased = sym["frame.erased"];
 // The panel's texts: each ps_texts bit's (texts_do's tx_first and tx_n), and
@@ -75,7 +75,8 @@ const MISSILE_AT = 150;
 const KEYS = [[MISSILE_AT, "KeyL", true], [MISSILE_AT + 4, "KeyL", false], [MISSILE_AT + 30, "ArrowLeft", true],
   [MISSILE_AT + 90, "ArrowLeft", false], [MISSILE_AT + 100, "ArrowRight", true], [MISSILE_AT + 160, "ArrowRight", false]];
 const drawn = sym.moving + 3;                       // (under_draw's JMP dots_draw, the window drawn)
-await tm.runUntilAddress(sym.start_loaded, 60);     // SG loading the game's files
+await toGame(tm, sym);                              // SG loading the game's files, the title, a game
+ram[sym.cheat_mode] = 0xff;                         // (its refills: the game mustn't end, for the front end)
 let bad = 0, mvFrames = 0, mvBad = 0, mvLines = 0;
 const frames = Number(process.argv[2] ?? 700);
 for (let f = 0; f < frames; f++) {
