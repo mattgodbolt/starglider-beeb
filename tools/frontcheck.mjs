@@ -152,7 +152,9 @@ same("the credits", credits.screen);
 t = now();
 await at("fe_title_show", 40);
 near("the credits' wait, in fields", fields(t), 0x44c + 1, 3);
+t = now();
 await at("front_title.pass");
+times.show = fields(t);
 same("the title again", fe.title);
 
 // --- K: six keys defined (Z, B, H, U, T, V), then Y ---
@@ -303,7 +305,8 @@ const frames0 = word(sym.frames);
 await tm.runFor(3 * CYCLES);
 if (word(sym.frames) - frames0 < 5) fail("the game after the game's end isn't drawing frames");
 
-console.log(`frontcheck: the start's loads ${times.start.toFixed(2)}s, the title up at ${times.title.toFixed(2)}s; ` +
+console.log(`frontcheck: the start's loads ${times.start.toFixed(2)}s, the title up at ${times.title.toFixed(2)}s, ` +
+    `shown again (unpacked and faded in) in ${times.show.toFixed(1)} fields; ` +
     `a game's start's loads ${times.started.toFixed(2)}s, ${times.cold.toFixed(2)}s from cold; ` +
     `Esc to the title ${times.esc.toFixed(2)}s; the game's end to the rating ${times.end.toFixed(2)}s, ` +
     `its load ${times.endLoad.toFixed(2)}s of it`);

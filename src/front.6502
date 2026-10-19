@@ -961,20 +961,14 @@ BAND_T2 = BAND_LINES * SCAN_US
     LDA #LO(SCREEN) : STA dst : LDA #HI(SCREEN) : STA dst+1
     LDA #&80 : STA bits
 .token
-    JSR getbit : BCS match
+    ASL bits : BNE got_token                    ; (each bit's read is refill's but a byte in eight)
+    JSR refill
+.got_token
+    BCS match
     JSR gamma
-.run
-    LDA (src) : STA (dst)
-    INC src : BNE r1
-    INC src+1
-.r1
-    INC dst : BNE r2
-    INC dst+1
-.r2
-    LDA v : BNE r3
-    DEC v+1
-.r3
-    DEC v : LDA v : ORA v+1 : BNE run
+    LDA src : STA mp : LDA src+1 : STA mp+1
+    JSR copy
+    LDA mp : STA src : LDA mp+1 : STA src+1
     BRA next
 .match
     JSR gamma
@@ -989,40 +983,59 @@ BAND_T2 = BAND_LINES * SCAN_US
     LDA dst : SBC mp : STA mp
     LDA dst+1 : SBC hi : STA mp+1
     JSR gamma
-    INC v : BNE copy
+    INC v : BNE matched
     INC v+1
-.copy
-    LDA (mp) : STA (dst)
-    INC mp : BNE c1
-    INC mp+1
-.c1
-    INC dst : BNE c2
-    INC dst+1
-.c2
-    LDA v : BNE c3
-    DEC v+1
-.c3
-    DEC v : LDA v : ORA v+1 : BNE copy
+.matched
+    JSR copy
 .next
     LDA dst+1 : CMP #HI(&8000) : BNE token
     LDA #ACCCON_X : TRB acccon
     RTS
-\ getbit: the next bit, in carry
-.getbit
-    ASL bits : BNE got
+\ copy: v bytes from (mp) to (dst), each pointer moved on past them, a
+\ byte at a time from the first, so a match may overlap what it makes
+.copy
+    LDY #0
+    LDX v+1 : BEQ part
+.page
+    LDA (mp),Y : STA (dst),Y
+    INY : BNE page
+    INC mp+1 : INC dst+1
+    DEX : BNE page
+.part
+    LDX v : BEQ copied
+.byte
+    LDA (mp),Y : STA (dst),Y
+    INY : DEX : BNE byte
+    TYA : CLC : ADC mp : STA mp
+    BCC moved
+    INC mp+1
+.moved
+    TYA : CLC : ADC dst : STA dst
+    BCC copied
+    INC dst+1
+.copied
+    RTS
+\ refill: when ASL bits has left it 0, the next byte's bits, its top bit
+\ in carry
+.refill
     LDA (src)
-    INC src : BNE g1
+    INC src : BNE filled
     INC src+1
-.g1
+.filled
     ROL A : STA bits                            ; (the carry the marker bit's 1)
-.got
     RTS
 \ gamma: the next number into v
 .gamma
     LDA #1 : STA v : STZ v+1
 .more
-    JSR getbit : BCS gamma_done
-    JSR getbit : ROL v : ROL v+1
+    ASL bits : BNE got_stop
+    JSR refill
+.got_stop
+    BCS gamma_done
+    ASL bits : BNE got_bit
+    JSR refill
+.got_bit
+    ROL v : ROL v+1
     BRA more
 .gamma_done
     RTS
