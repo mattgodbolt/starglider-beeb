@@ -88,6 +88,7 @@ ASSERT P% <= &3000                  ; (the interrupt runs them)
 INCLUDE "cockpit.6502"
 INCLUDE "disc.6502"
 INCLUDE "front_main.6502"
+INCLUDE "docked.6502"
 INCLUDE "code.6502"
 INCLUDE "overlays.6502"
 ENDSECTION
@@ -120,6 +121,16 @@ SECTION GameWork, org = logic_work_end, guard = NMI_PAGE, virtual = TRUE
 .adc_kept     SKIP 2        ; and the reading the accumulators last moved to
 .keys_held    SKIP 1        ; the keys held at the last read of them
 .c3_ula       SKIP 8        ; logical 3's four entries for the ULA above the split, then below
+    \ the engine's pauses and waits (engine.6502)
+.paused_at    SKIP 1        ; the field count a pause began at
+.key_wait_at  SKIP 1        ; a wait's field count last seen ...
+.key_wait_left SKIP 2       ; ... and the fields it has left
+    \ the window picture's place in bank 7 (docked.6502)
+.ov_have      SKIP 1        ; what it holds (OV_*) ...
+.ov_reading   SKIP 1        ; ... and what's being read into it (&FF: none)
+.int_mask     SKIP 4        ; Interrogate's texts' colours, by line, as MODE 1 bytes' bits
+    \ G's model viewer's (viewer.6502)
+.cockpit_lost SKIP 1        ; non-zero once it has cleared main RAM's screen, the cockpit's
 ENDSECTION
 
 INCLUDE "banks.6502"
@@ -136,5 +147,6 @@ IF P% < world_list_end
 ENDIF
 .front_code
 INCLUDE "front.6502"
+INCLUDE "viewer.6502"
 ENDSECTION
 ASSERT front_code >= world_list_end

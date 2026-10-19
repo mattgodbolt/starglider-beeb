@@ -137,6 +137,10 @@ the ST's mouse moves.
   another slot's exploding byte. And it copies random32's state into zero
   page for its own `h_random32`: anything the handlers call takes numbers
   from that, never from random32 or rng32 directly.
+- `box_end` logs an object's box onto whichever screen `box_aim` last
+  aimed at: call `box_aim` before drawing an object outside
+  `view_objects` (Interrogate, the viewer).
+- jsbeeb's field is 40,000 cycles (`CYCLES / 50`), not 64 x 312 x 2.
 - Code that sets ACCCON's X from main RAM must lie below &3000 (the
   interrupt handler): `ASSERT` it. Code in a bank may set it too (the
   panel, the screens' copy and the window's clear in `src/screen.6502`,
@@ -219,6 +223,12 @@ says how):
 - A patched `JSR` wants `ZA_CANCALL`, as a patched `JMP` wants
   `ZA_CANJUMP`. `ZA_DISCARD` takes a whole variable, not an alias for
   part of one.
+- A trampoline whose callers share a tail (a JMP to one RTS) merges their
+  returns: a ZA result read after one call is live across all their
+  paths. Read results inside the trampoline (as `int_sincos` does).
+- Front-end code that reaches routines the game shares can raise
+  "ZA_AUTO input to a ZA_ENTRY routine": real stores silence it,
+  `ZA_DISCARD` doesn't.
 - Generated code with patched operands: assert that each copy's labels
   sit at the same offsets (`mkrotate.py`) when one routine patches them
   all through a pointer.
