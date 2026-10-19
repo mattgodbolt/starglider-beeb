@@ -86,6 +86,7 @@ IF P% < world_list_end
     SKIP world_list_end - P%
 ENDIF
 INCLUDE "interrogate.6502"
+.docked_end                         ; (what docked.6502 reads back of the picture)
 ENDSECTION
 
 \ The logic's bank: the rest of the game's logic, which needn't read the

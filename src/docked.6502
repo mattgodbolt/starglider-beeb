@@ -37,8 +37,9 @@ OV_DOCKED = 1                       ; DOCKED
     LDX #DF_DOCKED
     JMP disc_load
 .picture
-    LDA #LO(win_pic_end - WIN_PIC) : STA fe_len
-    LDA #HI(win_pic_end - WIN_PIC) : STA fe_len+1
+    \ (as much of it as DOCKED lay over)
+    LDA #LO(docked_end - WIN_PIC) : STA fe_len
+    LDA #HI(docked_end - WIN_PIC) : STA fe_len+1
     LDX #DF_WINDOW
     JMP disc_load_first
 .done
