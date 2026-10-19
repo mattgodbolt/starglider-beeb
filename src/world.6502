@@ -274,6 +274,29 @@ MACRO RELEVANT yes
 .no
 ENDMACRO
 
+\ Far off (decision 51): with the camera within an angle t of upright (its
+\ y row's entry on y, 16384 cos t, at least FAR_UP), an object at least
+\ FAR_OFF away on x or z and at most FAR_DY on y has x' and z' at least
+\ cos t FAR_OFF - sin t FAR_DY from the player (less what the matrix's and
+\ the terms' roundings can take, FAR_ROUND): further than RELEVANT can say
+\ yes to for an approximation within ROT_BOUND of them (REL_MOST, the
+\ pyramid's far corner), so further than the scanner's square or any
+\ collision box; and a word of them that wraps lands further across than
+\ the pyramid reaches. Nothing reads them, so it's given none: FAR_X's
+\ high byte in both, past all of those, instead. The checks take that for
+\ an object the ST has neither drawn nor near nor in the scanner's square.
+FAR_OFF = &6000
+FAR_DY = &800
+FAR_UP = &3A00
+FAR_ROUND = 64
+FAR_X = &7F00
+REL_MOST = ((&2000 + ROT_SLACK) ^ 2 + (2 * (&2000 + ROT_SLACK) + 3 * ROT_SLACK) ^ 2) ^ 0.5
+FAR_SEEN = FLOOR(REL_MOST + 2 ^ 0.5 * ROT_BOUND) + 1
+ASSERT (FAR_UP / 16384) * FAR_OFF - (1 - (FAR_UP / 16384) ^ 2) ^ 0.5 * FAR_DY - FAR_ROUND > FAR_SEEN
+ASSERT REL_MOST > NEAR_TEST * 2 ^ 0.5 AND REL_MOST > &2000 * 2 ^ 0.5
+ASSERT &10000 - (2 * &8000 ^ 2 + FAR_DY ^ 2) ^ 0.5 - ROT_BOUND > 2 * (&2000 + ROT_SLACK) + 3 * ROT_SLACK
+ASSERT LO(FAR_OFF) = 0 AND LO(FAR_DY) = 0 AND LO(FAR_UP) = 0 AND FAR_X >= &2000
+
 \ OFFSET: rot_d, the offset from the player of the object in slot X.
 MACRO OFFSET
     LDA ob_x_lo,X : SEC : SBC pl_x : STA rot_d
@@ -304,6 +327,13 @@ ENDMACRO
     LDA #LO(unrotated) : LDY #HI(unrotated)
 .way
     STA live+1 : STY live+2
+    \ and the far test, while the camera's upright enough: its BRA an LDA #
+    LDA #BRA_OP
+    LDX cam+9 : BMI far_way
+    CPX #HI(FAR_UP) : BCC far_way
+    LDA #LDA_IMM
+.far_way
+    STA far_test
     LDX coarse_n : BNE each
     STZ near_n : STZ draw_n
     RTS
@@ -329,7 +359,27 @@ ENDMACRO
     \ ob_exact &FF: relevant at the last step, and so likely at this one
     LDA ob_exact,X : BMI carried
     OFFSET
+.far_test
+    BRA approximate                         ; patched: LDA # on into the test
+    ZA_CANJUMP approximate, far_xz
+.far_xz
+    \ far off on x or z, and not on y: none at all (decision 51)
+    LDA rot_d+1 : BPL far_x_pos
+    EOR #&FF
+.far_x_pos
+    CMP #HI(FAR_OFF) : BCS far_y
+    LDA rot_d+5 : BPL far_z_pos
+    EOR #&FF
+.far_z_pos
+    CMP #HI(FAR_OFF) : BCC approximate
+.far_y
+    LDA rot_d+3 : CLC : ADC #HI(FAR_DY) : CMP #2 * HI(FAR_DY) : BCC beyond
+.approximate
     JMP rotate_approx                       ; (on to relevance)
+.beyond
+    LDA #HI(FAR_X) : STA ob_cx_hi,X : STA ob_cz_hi,X
+    STZ ob_exact,X
+    JMP listed
 .carried
     \ exactly at once, and relevant at the next step too if it's near or
     \ drawn (the draw list marks it): an exact position needs no slack
@@ -402,6 +452,7 @@ ENDMACRO
     STZ ob_exact,X
     LDA rot_acc : STA ob_cx_lo,X : LDA rot_acc+1 : STA ob_cx_hi,X
     LDA rot_acc+4 : STA ob_cz_lo,X : LDA rot_acc+5 : STA ob_cz_hi,X
+.listed
     LDA ob_exploding,X : BNE approximated
     LDA #&FF : STA ob_near,X
     TXA : LDY nears : STA near_slots,Y
@@ -411,10 +462,11 @@ ENDMACRO
 }
 
 \ ---------------------------------------------------------------------------
-\ fmul_trig: fmul16 for build_matrix (render.6502), whose factors are
-\ sines, cosines and their products: a factor of 0 or +-16384 makes the
-\ product 0, the other or its negation, exactly, without the multiply. A
-\ level pitch, its sine 0 and its cosine 16384, gives most of them one.
+\ fmul_trig: fmul16 for build_matrix (render.6502) and ground_camera
+\ (matrix.6502), whose factors are sines, cosines and their products: a
+\ factor of 0 or +-16384 makes the product 0, the other or its negation,
+\ exactly, without the multiply. A level pitch, its sine 0 and its cosine
+\ 16384, gives most of them one, as does a heading square to the axes.
 .fmul_trig
 {
     LDA mul_y : BNE x_test

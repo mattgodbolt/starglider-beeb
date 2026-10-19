@@ -17,18 +17,18 @@
 \ the bank meanwhile.
 \ ***************************************************************************
 
-\ box_aim: box_end's stores onto the erase list of the screen draw_buffer
-\ names, as draw_begin's erase_aim aims line_plot's (objects_view calls it
-\ each frame, before the objects).
+\ box_aim: box_log's stores onto the erase list of the screen draw_buffer
+\ names, as draw_begin's erase_aim aims line_plot's (sight_draw calls it
+\ each frame, before the sight, and objects_view before the objects).
 .box_aim
     LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
     ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
-    STA box_end.f_lo+2 : ADC #2
-    STA box_end.f_hi+2 : ADC #2
-    STA box_end.f_row+2 : ADC #2
-    STA box_end.f_dx+2 : ADC #2
-    STA box_end.f_dy+2 : ADC #2
-    STA box_end.f_code+2
+    STA box_log.f_lo+2 : ADC #2
+    STA box_log.f_hi+2 : ADC #2
+    STA box_log.f_row+2 : ADC #2
+    STA box_log.f_dx+2 : ADC #2
+    STA box_log.f_dy+2 : ADC #2
+    STA box_log.f_code+2
     RTS
 
 \ box_end: the object just drawn, its entries from box_start on, erased by
@@ -104,8 +104,20 @@ BOX_FIXED = 27
 .replayed
     RTS
 .boxed
-    \ the entry, at box_start: the cell of its first line and column, its
-    \ first line in the cell's character row, its columns and lines
+    \ the entry, at box_start
+    LDA w : LDY h
+    JMP box_log
+}
+
+\ box_log: an erase list's box at X (box_end's, and sight_draw's in
+\ view_under.6502), on the screen box_aim aimed at, and the list on from
+\ below it: the cell of its first line (box_y0) and column (box_c0), its
+\ first line in the cell's character row, its columns (A more) and lines
+\ (Y more).
+.box_log
+{
+    ZA_AUTO1 w, h, lo, hi
+    STA w : STY h
     LDA box_y0 : LSR A : LSR A : LSR A : TAY
     STZ hi
     LDA box_c0 : ASL A : ASL A : ROL hi : ASL A : ROL hi    ; 8 bytes a column (C = 0 after)
@@ -207,3 +219,87 @@ NEXT
 ASSERT LO(SCREEN) MOD 8 = 0 AND SCREEN_ROW MOD 8 = 0
 \ (it sets X, which moves &3000-&7FFF, code's fetches too)
 ASSERT box_aim >= &8000
+
+\ near_outside: C set if a near object lies wholly beyond one of the
+\ window's edges, so that every vertex is outside it and every edge is
+\ one the clip rejects: the object draws nothing, whatever its faces.
+\ Every vertex is within its radius of (tx, ty, tz), and NEAR_SLACK more
+\ for the matrix's and the transform's roundings. A vertex is beyond the
+\ right edge when 128 x / z, truncated, puts it past VIEW_XMAX: x >= k z
+\ for k = (VIEW_XMAX + 1 - VIEW_CX) / 128; so is every point of a sphere
+\ of radius R when tx - k tz >= R sqrt(1 + k^2), and the same for the
+\ others. Each k and root is taken a little larger, as a sum of tz and R
+\ shifted right (near_terms, by edge: asserted), each term's truncation
+\ made good by the sum's 8. Only an object at least 256 deep throughout
+\ is tested, so that no vertex is cut at the near plane or overflows
+\ proj_x. (The missile view's window lies inside the view's, so an object
+\ beyond the view's is beyond it too.) Here, out of main RAM, as it reads
+\ only zero page: draw_shape pages the bank for it.
+NEAR_SLACK = 8
+NT_TZ = 0 : NT_R = 2                    ; a term's source, and its shift times 4
+NT_END = &FF
+ASSERT 128 * (1 + 1/4 + 1/64) >= VIEW_XMAX + 1 - VIEW_CX
+ASSERT (1 + 1/2 + 1/8) ^ 2 >= 1 + ((VIEW_XMAX + 1 - VIEW_CX) / 128) ^ 2
+ASSERT 128 >= VIEW_CX - VIEW_XMIN + 1
+ASSERT (1 + 1/4 + 1/8 + 1/16) ^ 2 >= 1 + ((VIEW_CX - VIEW_XMIN + 1) / 128) ^ 2
+ASSERT 128 / 2 >= VIEW_YMAX + 1 - VIEW_CY
+ASSERT (1 + 1/8) ^ 2 >= 1 + ((VIEW_YMAX + 1 - VIEW_CY) / 128) ^ 2
+ASSERT 128 * (1/4 + 1/8 + 1/16 + 1/32) >= VIEW_CY - VIEW_YMIN + 1
+ASSERT (1 + 1/8) ^ 2 >= 1 + ((VIEW_CY - VIEW_YMIN + 1) / 128) ^ 2
+.near_outside
+{
+    ZA_AUTO 4, src                      ; tz, R
+    ZA_AUTO2 v, t, u
+    LDA sh_radius : CLC : ADC #NEAR_SLACK : STA src+2
+    LDA sh_radius+1 : ADC #0 : STA src+3
+    LDA tz : STA src : SEC : SBC src+2
+    LDA tz+1 : STA src+1 : SBC src+3 : BEQ no : BMI no
+    LDX #near_right - near_terms
+    LDA tx : LDY tx+1 : BPL across
+    LDX #near_left - near_terms
+.across
+    JSR beyond : BCS yes
+    LDX #near_below - near_terms
+    LDA ty : LDY ty+1 : BPL beyond
+    LDX #near_above - near_terms
+    \ (on into beyond)
+\ beyond: C set if |Y:A| is at least 8 and the terms from X, the largest
+\ first, so that an object in view is mostly settled by the first.
+.beyond
+    STA v : STY v+1 : TYA : BPL v_pos
+    LDA #0 : SEC : SBC v : STA v
+    LDA #0 : SBC v+1 : STA v+1
+.v_pos
+    LDA #8 : STA t : STZ t+1
+.term
+    LDA near_terms,X : BMI yes
+    INX
+    PHA : AND #3 : TAY
+    LDA src,Y : ZA_INDEXEDBY {0, 2}
+    STA u
+    LDA src+1,Y : ZA_INDEXEDBY {0, 2}
+    STA u+1
+    PLA : LSR A : LSR A : TAY : BEQ shifted
+.shift
+    LSR u+1 : ROR u
+    DEY : BNE shift
+.shifted
+    ADDW t, u
+    \ (both under 32768, so the carry is the answer)
+    LDA v : CMP t : LDA v+1 : SBC t+1 : BCS term
+    RTS
+.yes
+    SEC : RTS
+.no
+    CLC : RTS
+}
+\ near_outside's terms, by edge: each NT_TZ or NT_R plus 4 times its shift
+.near_terms
+.near_right
+    EQUB NT_TZ, NT_R, NT_TZ + 4 * 2, NT_R + 4 * 1, NT_R + 4 * 3, NT_TZ + 4 * 6, NT_END
+.near_left
+    EQUB NT_TZ, NT_R, NT_R + 4 * 2, NT_R + 4 * 3, NT_R + 4 * 4, NT_END
+.near_below
+    EQUB NT_TZ + 4 * 1, NT_R, NT_R + 4 * 3, NT_END
+.near_above
+    EQUB NT_TZ + 4 * 2, NT_R, NT_TZ + 4 * 3, NT_TZ + 4 * 4, NT_R + 4 * 3, NT_TZ + 4 * 5, NT_END

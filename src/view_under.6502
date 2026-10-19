@@ -42,39 +42,95 @@
 
 \ ---------------------------------------------------------------------------
 \ sight_draw (&05598): the gunsight's runs (build/gen/sight.6502) from the
-\ sight's place, if that's inside the window (the ST's test, on the N flag
-\ of each edge's word difference), in the ST's colour 15. The ST blits it
-\ unmasked onto the window just cleared, under everything else, so its
-\ set pixels are what it draws.
+\ sight's place, in the ST's colour 15. The ST blits it unmasked onto the
+\ window just cleared, under everything else, so its set pixels are what
+\ it draws: each run ORed in a byte at a time, level ones up to two bytes,
+\ upright ones a line at a time. The ST draws it only if its place is
+\ inside the window, which place_sight's clamps make it always (asserted
+\ here, for every pixel), so its erase can be its box (box.6502's
+\ box_log), cheaper than its runs drawn again as zeros.
+ASSERT SIGHT_RUN_MOST <= 5                  ; (a level run: two bytes at most)
+ASSERT SIGHT_CX - MOUSE_X_MAX DIV 4 + SIGHT_LEFT >= VIEW_XMIN
+ASSERT SIGHT_CX + MOUSE_X_MAX DIV 4 + SIGHT_RIGHT <= VIEW_XMAX
+ASSERT SIGHT_CY - MOUSE_Y_MAX DIV 8 + SIGHT_TOP >= VIEW_YMIN
+ASSERT SIGHT_CY + MOUSE_Y_MAX DIV 8 + SIGHT_BOTTOM <= VIEW_YMAX
+ASSERT SIGHT_LEFT <= 0 AND SIGHT_RIGHT >= 0 AND SIGHT_TOP <= 0 AND SIGHT_BOTTOM >= 0
+ASSERT VIEW_XMIN MOD 4 = 0 AND VIEW_XMAX MOD 4 = 3
 .sight_draw
 {
-    ZA_AUTO1 i
-    LDA sight_x : SEC : SBC #LO(VIEW_XMIN) : LDA sight_x+1 : SBC #HI(VIEW_XMIN) : BMI done
-    LDA sight_x : SEC : SBC #LO(VIEW_XMAX) : LDA sight_x+1 : SBC #HI(VIEW_XMAX) : BPL done
-    LDA sight_y : SEC : SBC #LO(VIEW_YMIN) : LDA sight_y+1 : SBC #HI(VIEW_YMIN) : BMI done
-    LDA sight_y : SEC : SBC #LO(VIEW_YMAX) : LDA sight_y+1 : SBC #HI(VIEW_YMAX) : BPL done
-    LDA colour_map+15 : JSR set_colour
+    ZA_AUTO1 i, t, mask, colour
+    ZA_AUTO2 p
+    \ its box on the erase list: from its pixels' first column and line
+    JSR box_aim
+    LDA sight_x : CLC : ADC #LO(SIGHT_RIGHT) : STA t
+    LDA sight_x+1 : ADC #HI(SIGHT_RIGHT) : LSR A : LDA t : ROR A : LSR A : STA t
+    LDA sight_x : CLC : ADC #LO(SIGHT_LEFT) : STA box_c0
+    LDA sight_x+1 : ADC #HI(SIGHT_LEFT) : LSR A : LDA box_c0 : ROR A : LSR A : STA box_c0
+    LDA sight_y : CLC : ADC #LO(SIGHT_TOP) : STA box_y0
+    LDA t : SEC : SBC box_c0                ; its columns, less 1
+    LDY #SIGHT_BOTTOM - SIGHT_TOP           ; its lines, less 1
+    LDX erase_i
+    JSR box_log
+    \ the runs, into the screen draw_bank names
+    LDA colour_map+15 : STA colour
+    LDA draw_bank : TSB acccon
     LDX #SIGHT_RUNS - 1
 .run
     STX i
-    LDA sight_x0,X : JSR sight_dx : STA line_x0 : STY line_x0+1
-    LDA sight_x1,X : JSR sight_dx : STA line_x1 : STY line_x1+1
-    LDA sight_y0,X : CLC : ADC sight_y : STA line_y0
-    LDA sight_y1,X : CLC : ADC sight_y : STA line_y1
-    JSR line_plot
-    LDX i : DEX : BPL run
-.done
-    RTS
-\ sight_dx: A (low), Y (high) = sight_x + the signed byte A.
-.sight_dx
-    LDY #0
-    ORA #0 : BPL right
+    \ its first pixel's byte, as dot_put finds one (line t)
+    LDA sight_y0,X : CLC : ADC sight_y : STA t
+    LDY #0 : LDA sight_x0,X : BPL right
     DEY
 .right
-    CLC : ADC sight_x : PHA
-    TYA : ADC sight_x+1 : TAY
-    PLA
+    CLC : ADC sight_x : STA mask            ; (x's low byte, for its pixel)
+    TYA : ADC sight_x+1 : STA p+1
+    LDA t : LSR A : LSR A : LSR A : TAY
+    LDA mask : AND #&FC : ASL A : STA p     ; C = bit 7 of x
+    ROL p+1
+    LDA t : AND #7 : ORA p
+    CLC : ADC screen_row_lo,Y : STA p
+    LDA p+1 : ADC screen_row_hi,Y : STA p+1
+    LDA mask : AND #3 : TAY                 ; the pixel's place in its byte
+    LDA sight_y0,X : CMP sight_y1,X : BNE upright
+    \ level: pixels Y on, to Y + (x1 - x0), which past 3 is in the next byte
+    STY t
+    LDA sight_x1,X : SEC : SBC sight_x0,X : CLC : ADC t : TAX
+    LDA run_from,Y
+    CPX #4 : BCS two
+    AND run_to,X : AND colour
+    ORA (p) : STA (p)
+    BRA next
+.two
+    AND colour : ORA (p) : STA (p)
+    LDY #8
+    LDA run_to - 4,X : AND colour
+    ORA (p),Y : STA (p),Y
+    BRA next
+.upright
+    \ a pixel a line, each the line below, or the next character row's first
+    LDA dot_pix,Y : AND colour : STA mask
+    LDA sight_y1,X : SEC : SBC sight_y0,X : TAX
+.line
+    LDA mask : ORA (p) : STA (p)
+    DEX : BMI next
+    LDA p : AND #7 : CMP #7 : BEQ row_down
+    INC p                                   ; (no carry: not a row's last line)
+    BRA line
+.row_down
+    LDA p : CLC : ADC #LO(SCREEN_ROW - 7) : STA p
+    LDA p+1 : ADC #HI(SCREEN_ROW - 7) : STA p+1
+    BRA line
+.next
+    LDX i : DEX : BMI drawn
+    JMP run
+.drawn
+    LDA draw_bank : TRB acccon
     RTS
+\ a byte's pixels from each pixel on, and up to each
+.run_from
+    EQUB &FF, &77, &33, &11
+.run_to
+    EQUB &88, &CC, &EE, &FF
 }
 INCLUDE "../build/gen/sight.6502"
 

@@ -307,8 +307,13 @@ for (const f of map.objects) {
 // keeps to that is taken as matching. Their y' isn't made at all (decision
 // 21). Drawn is the ST's draw list at the exit, not the record's flag: the
 // silo's two records keep what TOS left in theirs, which nothing clears.
+// One the list phase found far off (decision 51) has a sentinel in both,
+// taken as matching for an object the ST has where nothing reads them:
+// neither drawn nor near, nor in the scanner's square (-&2000 to &2000).
 const ROT_BOUND = need("ROT_BOUND");
 const NEAR_BOX = need("NEAR_BOX");
+const FAR_X = need("FAR_X");
+const sentinel = (s) => ram[need("ob_cx_hi") + s] === FAR_X >> 8 && ram[need("ob_cz_hi") + s] === FAR_X >> 8;
 const exactAt = need("ob_exact");
 const drawList = items.find((it) => it.name === "st_draw_list");
 const camera = ["ob_cx", "ob_cy", "ob_cz"].map((n) => items.find((it) => it.name === n));
@@ -323,6 +328,12 @@ for (const it of camera)
             }
             const st = [camera[0], camera[2]].map((c) => s16(c.want(exit)[s]));
             const drawn = drawList.want(exit).slice(1).some((ptr) => slotOf(ptr) === s);
+            if (sentinel(s)) {
+                const near = st.every((c) => Math.abs(c) <= NEAR_BOX);
+                const scanned = st.every((c) => Math.abs(c) < 0x2000);
+                if (!drawn && !near && !scanned) got[s] = want[s];
+                continue;
+            }
             const off = Math.abs(s16((got[s] - want[s]) & 0xffff));
             if (off <= ROT_BOUND && !drawn && !st.every((c) => Math.abs(c) <= NEAR_BOX)) got[s] = want[s];
         }

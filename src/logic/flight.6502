@@ -10,6 +10,13 @@
 \ leaves d0, which a later random8 may add.
 \ ***************************************************************************
 
+\ the turn's clamp and the climb's, and the sight's centre (init_resolution's,
+\ in colour), which place_sight puts the sight about (view_under.6502's
+\ sight_draw takes them all)
+MOUSE_X_MAX = &1F0
+MOUSE_Y_MAX = &140
+SIGHT_CX = 160
+SIGHT_CY = 68
 .player_flight
 {
     ZA_AUTO2 t
@@ -24,14 +31,14 @@
     ADDW pl_z, pl_vz
 .turn
     \ the turn within &1F0 either way, and the roll from it
-    CLAMP mouse_x, -&1F0, &1F0
+    CLAMP mouse_x, -MOUSE_X_MAX, MOUSE_X_MAX
     MOVW t, mouse_x
     ASRW t : ASRW t : ASRW t : ASRW t
     NEGW t
     MOVW pl_roll, t
     \ the climb within &140 either way, and the climb rate from it, 0
     \ within &30
-    CLAMP mouse_y, -&140, &140
+    CLAMP mouse_y, -MOUSE_Y_MAX, MOUSE_Y_MAX
     MOVW t, mouse_y
     CMPS16 t, #&31 : BPL climbing
     CMPS16 t, #-&30 : BMI climbing

@@ -1408,3 +1408,37 @@ prompt's sequence, wrong key and timeout; Interrogate's texts against the
 ST's printer and its reads timed; the viewer's keys and numbers; the
 cockpit read back byte for byte.
 
+### The turn and the towers
+
+Holding a hard turn the step took about 102,000 cycles and the frame
+215,000; flying straight the frame was the cost, 187,000, of which far
+objects took 65,000, half of each one fixed work. Four changes, measured
+on 2026-10-18:
+
+- **Near objects beyond the window.** The view's pyramid is wider than
+  the window, and a near object wholly beyond an edge still had its
+  matrix, faces and vertices made before the clip rejected every edge.
+  `near_outside` (in bank 7, beside the boxes) tests its bounding sphere
+  against each edge's plane, the slopes and roots taken a little larger
+  and asserted against the window. In flight 40% of the near objects the
+  disc draws go no further: the objects' phase falls 7% in flight and 9%
+  in the missile view.
+- **Square headings.** `ground_camera` takes its four products through
+  fmul_trig, so the towers, the beam and most still objects need no
+  multiply: the towers' objects fall 3%.
+- **The gunsight** is ORed in run by run and erased as one box, not nine
+  lines drawn and drawn again. place_sight's clamps keep it inside the
+  window, so the ST's test always holds (asserted).
+- **Far-off objects** (decision 51). An object far off on x or z, with the
+  camera near upright, can't be relevant, on the scanner or in a
+  collision box, so it gets a sentinel in place of its approximation: in a
+  hard turn, a quarter of the approximations.
+
+`make fps`: 8.00 to 9.23 frames a second flying straight; holding a turn,
+3.65 to 3.90 left and 3.88 to 4.30 right. The step is still about 100,000
+cycles in a turn: its exact rotations, approximations and dots are what
+decisions 1, 11 and 29 require. The towers' near objects cost a near
+vertex's 830 cycles times bigger shapes; reusing face visibility from
+frame to frame would cut the most there, once main RAM has room (about
+250 bytes of code, faces needing the shapes bank paged).
+

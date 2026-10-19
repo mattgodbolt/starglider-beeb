@@ -45,8 +45,6 @@ ENDIF
 \ ---------------------------------------------------------------------------
 \ game: the game's state as the ST's start-up leaves it, then the front
 \ end's title (front_main.6502's boot_front).
-SIGHT_CX = 160                      ; the sight's centre (init_resolution's, in colour)
-SIGHT_CY = 68
 .game
 {
     \ the logic's variables 0, in the workspace and in ANDY (with the

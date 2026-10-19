@@ -229,6 +229,9 @@ says how):
 - Front-end code that reaches routines the game shares can raise
   "ZA_AUTO input to a ZA_ENTRY routine": real stores silence it,
   `ZA_DISCARD` doesn't.
+- The world bank's list phase is full: room for list-phase code comes from
+  moving what only rotate_setup reads into `build/gen/rotate_data.6502`,
+  past the sine table, paid for from the world bank's free space.
 - Generated code with patched operands: assert that each copy's labels
   sit at the same offsets (`mkrotate.py`) when one routine patches them
   all through a pointer.
