@@ -1,28 +1,36 @@
 # Starglider on the BBC Master
 
 A port of Argonaut Software's *Starglider* (Atari ST, Rainbird, 1986) to
-the BBC Master 128, with Argonaut's blessing. It's early days: the game
-isn't here yet.
+the BBC Master 128, with Argonaut's blessing.
 
 **[Run it in jsbeeb](https://bbc.xania.org/?autoboot&model=Master&disc1=github:mattgodbolt/starglider-beeb/starglider.ssd)**
 (a Master 128), or write `starglider.ssd` to a disc and SHIFT-BREAK a
-Master. For now the disc plays the game's world with its panel, its
-sound effects and its speech, and its front end: the title and the
-credits (any key starts a game, K redefines the keys), and at the game's
-end the pilot rating, the high scores and the end screen (Esc in play
-goes back to the title). The game's logic is the ST's transcribed
-exactly, drawn in MODE 1 at the ST's 320 x 200 with the cockpit's own
-colours below the view, double-buffered, the game stepping 12.5 times a
-second as the ST's does in flight. The title song is still to come.
+Master.
 
-The keys are the ST's: the cursor keys, or X and C, bank; cursor up and
-`;` dive, cursor down and `.` climb; SPACE is faster and `/` slower;
-RETURN or COPY fires; L launches a missile and P picks one up in a silo;
-F fixes the sight. An analogue joystick steers as the ST's mouse does:
-its fire button fires, and with the second button held its climb sets
-the speed.
+The disc is the whole game but for the title song, which is still to be
+chosen. It has the title and the credits (any key starts a game, K
+redefines the keys), the flight with its panel, sound effects and
+Clare Edgeley's speech, docking, Interrogate, the cheat, the level
+changes, and at the game's end the pilot rating, the high scores and the
+end screen. Esc in play goes back to the title. The game's logic is the
+ST's transcribed exactly, drawn in MODE 1 at the ST's 320 x 200 with the
+cockpit's own colours below the view, double-buffered, the game stepping
+12.5 times a second as the ST's does in flight.
 
-![A walker in the cockpit's window, on the disc](docs/images/disc_cockpit.png)
+The keys are the ST's:
+
+- the cursor keys, or X and C, bank; cursor up and `;` dive, cursor down
+  and `.` climb; SPACE is faster and `/` slower;
+- RETURN or COPY fires; L launches a missile, and P picks one up in a
+  silo;
+- docked, SPACE launches and I interrogates the computer;
+- F fixes the sight, Q and S turn the sound off and on, and DELETE starts
+  the cheat.
+
+An analogue joystick steers as the ST's mouse does: its fire button
+fires, and with the second button held its climb sets the speed.
+
+![Banking over the ground's dots, on the disc](docs/images/disc_play.png)
 
 ## How it's being made
 
