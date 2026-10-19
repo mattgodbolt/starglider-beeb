@@ -8,7 +8,10 @@ The lists and the camera-space positions are the game's logic: they must
 match exactly, but for the objects the port rotated approximately
 (decision 11), whose x' and z' must be within the approximation's bound
 (it makes no y': decision 21) and which must be neither drawn nor near
-the player in x and z on the ST. Lines are compared by object and edge:
+the player in x and z on the ST, and those it found far off (decision
+47), whose sentinel the ST must have where nothing reads their x' and z':
+neither drawn nor near, nor in the scanner's square. Lines are compared
+by object and edge:
 an edge drawn by one
 and not the other is a culling difference (decision 9 moves the test into
 object space); an edge both draw must lie within --tolerance pixels of the
@@ -56,7 +59,9 @@ def main():
     # ST's (tools/mkrotate.py's ROT_BOUND), and the box an approximated
     # object must be outside (world.6502's NEAR_BOX, the largest collision box)
     rot_bound, near_box = run["rot_bound"], run["near_box"]
-    st = {k: 0 for k in ("frames", "list_bad", "rel_bad", "rel_approx", "edges_both", "edges_moved",
+    # decision 47: the far-off objects' sentinel
+    far_x = run.get("far_x")
+    st = {k: 0 for k in ("frames", "list_bad", "rel_bad", "rel_approx", "rel_far", "edges_both", "edges_moved",
                           "only_st", "only_port", "erase_left")}
     worst = 0
     worst_approx = 0
@@ -91,6 +96,16 @@ def main():
                 if g != v:
                     st["rel_bad"] += 1
                     show(f"frame {n}: slot {slot} camera-space {g} on the port, {v} on the ST")
+                continue
+            # far off (decision 47): the sentinel in x' and z', for an object
+            # the ST has where nothing reads them: neither drawn, nor near,
+            # nor in the scanner's square (-&2000 to &2000, both open)
+            if far_x is not None and g[0] >> 8 == far_x >> 8 and g[2] >> 8 == far_x >> 8:
+                st["rel_far"] += 1
+                if (int(slot) in drawn or all(abs(v[i]) <= near_box for i in (0, 2))
+                        or all(abs(v[i]) < 0x2000 for i in (0, 2))):
+                    st["rel_bad"] += 1
+                    show(f"frame {n}: slot {slot} taken as far off, the ST's {v}")
                 continue
             # rotated approximately (decision 11): x' and z' within the
             # bound (there's no y': decision 21), and neither drawn by the ST
