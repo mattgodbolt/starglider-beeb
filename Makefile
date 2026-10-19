@@ -18,6 +18,9 @@
 #                 each clip as the chip plays it (tools/speechcheck.mjs)
 #   make sfxcapture  capture the ST's sound effects in Hatari
 #                 (tests/st/sfx_all.txt; slow, needs Hatari)
+#   make song     the title song's candidates as the SN76489 would play
+#                 them, as WAVs in build/song/wav (decision 5,
+#                 docs/research/song.md)
 #   make spike    the spike on every captured scene, checked against the
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
 #   make logic    the port's game logic against the ST's, routine by
@@ -60,7 +63,7 @@ BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short 
 TARGET   = build/starglider.ssd
 DISC     = starglider.ssd
 
-.PHONY: all run disc check spike logic view panel rot sfx speech sfxcapture steps memory fps scenes fetch venv clean
+.PHONY: all run disc check spike logic view panel rot sfx speech sfxcapture song steps memory fps scenes fetch venv clean
 
 all: $(TARGET) build/spike/SPIKE
 
@@ -191,6 +194,24 @@ speech: $(TARGET) build/gen/speech.json
 sfxcapture:
 	$(PYTHON) -I tools/st_sfx.py run tests/st/sfx_all.txt build/sfx/all \
 	    --disk "$(ST_STX)" --hatari $(HATARI) --tos $(HATARI_TOS)
+
+# The title song's two candidates as the SN76489 would play them, for
+# choosing by ear (decision 5, docs/research/song.md): the ST's sample at
+# 4,096 and 6,144 Hz and David Lowe's AY tune from the Spectrum 128K, as
+# WAVs in build/song/wav, with the ST's own in build/song/st/star.wav.
+song: build/zx/song.json $(PRG) tools/mksong.py tools/mkspeech.py tools/songwav.mjs
+	$(PYTHON) -I tools/mksong.py $(PRG) build/zx/song.json build/song
+	$(PYTHON) -I tools/st_samples.py $(PRG) --wav build/song/st > /dev/null
+	node tools/songwav.mjs build/song
+
+# One pass of the tune's AY writes, from its own player (tools/zx_song.py),
+# on the 128K tape's snapshot (docs/research/zx.md, "Loading").
+build/zx/song.json: build/zx128.z80 tools/zx_song.py tools/zx.py
+	$(PYTHON) -I tools/zx_song.py --snap build/zx128.z80 $@
+
+build/zx128.z80: original/zx/Starglider128.tap
+	rm -f $@
+	$(PYTHON) -I .venv/bin/tap2sna.py -c machine=128 -c timeout=3000 -s 34048 $< $@
 
 spike: build/spike/SPIKE $(SCENES:%=build/scenes/%/beeb.json)
 	@for s in $(SCENES); do \

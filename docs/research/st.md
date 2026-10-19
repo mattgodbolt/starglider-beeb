@@ -746,6 +746,10 @@ What Clare says in each clip is [inferred] from where it plays: missile
 launched, docked/rearmed, shields low, energy low. Listen to check:
 `st_samples.py PRG --wav DIR` writes them.
 
+The song as the SN76489 would play it, at 4,096 and 6,144 Hz, beside the
+Spectrum 128K's AY tune converted, with what each costs, is
+`docs/research/song.md` (decision 5).
+
 ### Music and effects
 
 The only music is the sampled title song. In play the YM is written by

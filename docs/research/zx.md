@@ -31,7 +31,7 @@ check it.
 | Hidden lines | Back-face culling per object: an edge is drawn if a face listing it faces the viewer. Objects never hide one another **[measured: the game's own drawing in tools/zx_shapes.py]** |
 | Colour | One attribute fill for the view (&04: green ink, black paper); each line sets the cells it crosses to bright plus its edge's ink, so the object drawn last wins a cell; objects are drawn in depth order (far to near, inferred) **[measured: attributes in snapshots; &8D85, &A508]** |
 | Speech (128K) | 4 phrases, 26,932 bytes of signed 8-bit samples in banks 1 and 3, played at 5,952Hz (4.53 s in all) through three AY volume registers. A phrase stops the game for 104-123 frames, bleeps included **[measured: tools/zx_speech.py]** |
-| Music (128K) | David Lowe's tune plays only on the attract screen (the loading picture), after the menu sits idle for about 6 s **[measured]** |
+| Music (128K) | David Lowe's tune plays only on the attract screen (the loading picture), after the menu sits idle for about 6 s, 155.88 s a pass, looped until a key **[measured: tools/zx_song.py]**; as the SN76489 would play it in `docs/research/song.md` |
 | Sound effects | AY (128K): a shadow of the 14 registers, all written each frame. Beeper in the 48K **[measured: port log]** |
 | 128K only | Speech, title music, six special missions and their six shapes (Battle Crawler, Rear View Scanner, Energy Pod, Super Missile, Ammunition Dump, Command Centre), the rear view scanner and super missile keys **[measured: strings and shape tables of both versions]** |
 
@@ -156,6 +156,7 @@ Tools written for this study (all run with `.venv/bin/python -I`):
 | `tools/zx_steps.py` | T-states a pass of each step of the main loop |
 | `tools/zx_shapes.py` | Run the game's object drawer on every type: vertices, edges, faces, the game's own picture, views, a contact sheet |
 | `tools/zx_speech.py` | Time the speech player and write each phrase as a WAV (to `build/zx/`, not committed) |
+| `tools/zx_song.py` | Log one pass of the title tune's AY writes from its own player, and walk the data it reads (`build/zx/song.json`; `docs/research/song.md`) |
 | `disasm/zx128.ctl` | SkoolKit control file for the 64K view with bank 0 paged, with the routines below titled: `sna2skool.py -H -p 0 -c disasm/zx128.ctl build/zx128.z80` |
 
 The screenshots in `docs/images/zx/` came from these scripts **[measured]**:
@@ -712,6 +713,12 @@ Speech in all: 26,932 bytes of samples, plus the 768-byte volume tables.
   table at &C533. A volume list comes through a pointer table at &C585 and
   is written to register 9 or 10 a step at a time. Channel A plays lists
   of register and value pairs (&C195), through the same &C533 table.
+- **One pass** is 23,040 ticks, 155.88 s at 147.80 ticks a second, all
+  three channels' lists going back to their starts together; channel A
+  is always on the envelope, mostly with the noise, and C goes below the
+  SN's lowest note in 42% of its ticks **[measured: tools/zx_song.py,
+  tools/mksong.py]**. The player's formats in full, the tune's use of the
+  AY and its conversion to the SN76489 are in `docs/research/song.md`.
 
 ### Effects
 
