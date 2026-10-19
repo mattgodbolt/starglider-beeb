@@ -9,8 +9,9 @@
 #                 disc's erasing (tools/erasecheck.mjs), its own disc
 #                 reader (tools/disccheck.mjs), its controls
 #                 (tools/inputcheck.mjs), its front end's flows
-#                 (tools/frontcheck.mjs), its sound effects (make sfx)
-#                 and its speech (make speech)
+#                 (tools/frontcheck.mjs), the cheat prompt and
+#                 Interrogate (tools/modalcheck.mjs), its sound effects
+#                 (make sfx) and its speech (make speech)
 #   make sfx      the disc's sound effects against the ST's YM writes
 #                 (tools/sfxcheck.mjs, on build/sfx's capture)
 #   make speech   the disc's speech against its packed levels, and a WAV of
@@ -47,7 +48,7 @@ ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
 SCENES   = flight towers docked missile
 SOURCES  = $(wildcard src/*.6502 src/logic/*.6502)
-GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/anim.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/sight.6502 build/gen/ground.6502 build/gen/window.6502 build/gen/panel.6502 build/gen/sfx.6502 build/gen/speech.6502 build/gen/speech_clips.6502
+GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/anim.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/dispatch.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/sight.6502 build/gen/ground.6502 build/gen/window.6502 build/gen/panel.6502 build/gen/sfx.6502 build/gen/speech.6502 build/gen/speech_clips.6502 build/gen/interrogate.6502
 
 # A failed step leaves no half-made target behind (asm.sh fails on a
 # warning after baron has written its output).
@@ -130,6 +131,11 @@ build/gen/sfx.6502 build/gen/sfx.json &: $(PRG) tools/mksfx.py tools/st_prg.py |
 build/gen/speech.6502 build/gen/speech_clips.6502 build/gen/speech_a.bin build/gen/speech_b.bin build/gen/speech_c.bin build/gen/speech.json &: $(PRG) build/gen/sfx.json tools/mkspeech.py tools/st_samples.py tools/st_prg.py | build/gen
 	$(PYTHON) -I tools/mkspeech.py $(PRG) build/gen/sfx.json build/gen
 
+# Interrogate's types, texts and glyphs, DOCKED's data (src/interrogate.6502),
+# from the ST's STAR.PRG.
+build/gen/interrogate.6502 build/gen/interrogate.json &: $(PRG) tools/mkinterrogate.py tools/mkpanel.py tools/st_prg.py | build/gen
+	$(PYTHON) -I tools/mkinterrogate.py $(PRG) build/gen/interrogate.6502 build/gen/interrogate.json
+
 # The level layouts (init_objects's), from the ST's STAR.PRG.
 build/gen/levels.6502: $(PRG) tools/mklevels.py tools/st_prg.py | build/gen
 	$(PYTHON) -I tools/mklevels.py $(PRG) build/gen
@@ -169,6 +175,7 @@ check: build/spike/SPIKE spike panel view rot sfx speech $(TARGET) build/gen/fro
 	node tools/disccheck.mjs
 	node tools/inputcheck.mjs
 	node tools/frontcheck.mjs
+	node tools/modalcheck.mjs
 
 # The sound effects on the disc against the ST's YM writes, captured in
 # Hatari (make sfxcapture: slow, needs Hatari), and their gates

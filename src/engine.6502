@@ -152,6 +152,7 @@ C3_PANEL = 4
     JSR frame                                   ; the last step's frame
 .logic
     JSR step_logic
+    JSR docked_step                             ; (docked.6502)
     INC steps : BNE counted_step
     INC steps+1
 .counted_step
@@ -195,5 +196,58 @@ C3_PANEL = 4
     INC frames : BNE done
     INC frames+1
 .done
+    RTS
+}
+
+\ pause_begin, pause_end: round what runs fields of its own inside a step
+\ (decision 17: the cheat prompt's waits, Interrogate's frames), so that
+\ the engine discards the fields it took, as if none had passed: no steps
+\ follow to catch up. (The count wraps as the fields counter does.)
+.pause_begin
+    LDA fields : STA paused_at
+    RTS
+.pause_end
+    LDA fields : SEC : SBC paused_at
+    CLC : ADC stepped : STA stepped
+    RTS
+
+\ wait_key (the ST's &00C0C): the next key made, as get_key has it, with
+\ no end to the wait: the cheat prompt's first, in effect a pause; and
+\ wait_key_timeout (&00BCA): the same, or &0D, the latch cleared, once
+\ KEY_WAIT fields have passed (counted in 16 bits). Each from the logic's
+\ bank, which get_key needs; the disc's read moves on meanwhile.
+KEY_WAIT = &5DC + 1                             ; (the ST's waits end at the first VBL past their count)
+.wait_key
+{
+    JSR pause_begin
+.wait
+    JSR disc_step
+    LDA key_latch : BEQ wait
+    JSR pause_end
+    JMP get_key
+}
+.wait_key_timeout
+{
+    LDA #LO(KEY_WAIT) : STA key_wait_left
+    LDA #HI(KEY_WAIT) : STA key_wait_left+1
+    JSR pause_begin
+    LDA fields : STA key_wait_at
+.wait
+    JSR disc_step
+    LDA fields : CMP key_wait_at : BEQ polled
+    STA key_wait_at
+    LDA key_wait_left : BNE count
+    DEC key_wait_left+1
+.count
+    DEC key_wait_left
+    LDA key_wait_left : ORA key_wait_left+1 : BEQ out
+.polled
+    LDA key_latch : BEQ wait
+    JSR pause_end
+    JMP get_key
+.out
+    STZ key_latch
+    JSR pause_end
+    LDA #&0D
     RTS
 }

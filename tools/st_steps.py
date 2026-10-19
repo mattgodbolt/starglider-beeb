@@ -49,12 +49,19 @@ A new game opens a frame of its own, newgame then level, before its
 first `top`: arm the capture on the title to have it. Every call of
 random8 (&046B2) and random32 (&04692) is logged with d0 (which random8
 adds to its state: some callers leave it over from earlier work) and the
-caller, so a transcription can see what it must reproduce.
+caller, so a transcription can see what it must reproduce. So is every
+key a wait for one returns (&00BCA, with its timeout, and &00C0C: the
+cheat prompt's) and every key Interrogate's frames take (&02B5E), with
+the VBL and the last point reached: the keys the port's routine is to be
+given where the ST's blocks, or runs frames of its own.
 
 steps.json: {"regions": [[name, address, length]...], "points": [...],
 "frames": [{"vbl", "segment", "points": {point: {region: hex}}, "d0":
 {point: d0.w}, "a0": {point: a0} (the points that log it), "rng":
-[[routine, d0, caller]...], "order": [point or "poke"...]}]}: "order" is
+[[routine, d0, caller]...], "keys": [[kind, d0.b, vbl, point]...],
+"order": [point or "poke"...]}]}: a key's kind is "timeout" (&00BCA),
+"wait" (&00C0C) or "interrogate" (&02B5E), its point the last reached
+before it; "order" is
 the points as they were reached, with a "poke" where a write landed. A
 point reached twice in a frame (a second mine) keeps the second.
 """
@@ -77,6 +84,9 @@ A0_POINTS = {"mine", "mined"}           # a0 logged too: the mine's record
 TAG_POINT = 0x5700                      # + the point's index
 TAG_RANDOM8, TAG_RANDOM32 = 0x5800, 0x5801
 TAG_POKE = 0x5802
+# the keys: (tag, kind, the text offset where d0 holds it)
+KEYS = [(0x5803, "timeout", 0x00C04), (0x5804, "wait", 0x00C30), (0x5805, "interrogate", 0x02B5E)]
+KEY_TAGS = {tag: kind for tag, kind, _ in KEYS}
 RANDOM8, RANDOM32 = 0x046B2, 0x04692
 POKE_AT = 0x04FE8                       # world_render's entry: just after `top`
 # (name, address, length): what each point dumps
@@ -115,6 +125,9 @@ def setup(d):
     for tag, off, name in ((TAG_RANDOM8, RANDOM8, "random8"), (TAG_RANDOM32, RANDOM32, "random32")):
         (d / f"{name}.ini").write_text(f"e ${tag:x}\ne d0&$ffff\ne (a7).l\n")
         arm.append(f"b pc = ${BASE + off:x} :trace :quiet :file {d / (name + '.ini')}")
+    for tag, kind, off in KEYS:
+        (d / f"key_{kind}.ini").write_text(f"e ${tag:x}\ne d0&$ff\ne VBL\n")
+        arm.append(f"b pc = ${BASE + off:x} :trace :quiet :file {d / ('key_' + kind + '.ini')}")
     (d / "arm.ini").write_text("\n".join(arm) + "\n")
     return d / "arm.ini"
 
@@ -162,7 +175,8 @@ def parse(path):
             if name in ("top", "newgame"):
                 if cur is not None:
                     frames.append(cur)
-                cur = {"segment": segment, "vbl": pending[1], "points": {}, "d0": {}, "rng": [], "order": []}
+                cur = {"segment": segment, "vbl": pending[1], "points": {}, "d0": {}, "rng": [], "keys": [],
+                       "order": []}
             if cur is not None:
                 cur["d0"][name] = pending[2] & 0xFFFF
                 cur["order"].append(name)
@@ -174,11 +188,16 @@ def parse(path):
                 cur["rng"].append(["random8" if tag == TAG_RANDOM8 else "random32",
                                    pending[1] & 0xFFFF, (pending[2] & 0xFFFFFFFF) - BASE])
             pending = []
+        elif tag in KEY_TAGS and len(pending) == 3:
+            if cur is not None:
+                cur["keys"].append([KEY_TAGS[tag], pending[1] & 0xFF, pending[2], point])
+            pending = []
         elif tag == TAG_POKE:
             if cur is not None:
                 cur["order"].append("poke")
             pending = []
-        elif not (TAG_POINT <= tag < TAG_POINT + len(POINTS)) and tag not in (TAG_RANDOM8, TAG_RANDOM32):
+        elif not (TAG_POINT <= tag < TAG_POINT + len(POINTS)) and tag not in (TAG_RANDOM8, TAG_RANDOM32) \
+                and tag not in KEY_TAGS:
             pending = []                            # some other output
     close_point()
     if cur is not None:

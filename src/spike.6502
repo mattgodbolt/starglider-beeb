@@ -68,6 +68,32 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 .input_step
 .frame_show
     RTS
+
+\ What runs fields of its own inside a step (decision 17) takes no time
+\ here: the engine's pauses, and DOCKED's reads (docked.6502), which the
+\ harness has loaded; Interrogate's frames draw nothing (interrogate.6502).
+\ The cheat prompt's waits and Interrogate's frames take the keys the
+\ ST's took, in turn, from spike_keys, where tools/logicrun.mjs puts the
+\ capture's (0 past the last).
+.pause_begin
+.pause_end
+.docked_wait
+.window_ready
+    RTS
+.wait_key
+.wait_key_timeout
+.int_key
+{
+.at
+    LDA spike_keys                              ; (moved on, and set by the harness)
+    INC at+1 : BNE same
+    INC at+2
+.same
+    RTS
+}
+spike_key_at = int_key.at
+SPIKE_KEYS = 1024
+.spike_keys  SKIP SPIKE_KEYS
 \ (the engine's interrupt, which the speech's hands on to: the harness takes
 \ none)
 .irq_handler

@@ -34,14 +34,16 @@ BIT_ABS   = &2C
 DISC_SECTORS = 10                   ; a track's
 
 \ disc_load: file X's read begun, from its start, to fe_dst in bank Y;
-\ disc_step moves it on.
+\ disc_step moves it on. disc_load_first: the same of its first fe_len
+\ bytes.
 .disc_load
+    LDA df_len_lo,X : STA fe_len
+    LDA df_len_hi,X : STA fe_len+1
+.disc_load_first
 {
     ZA_AUTO2 rem
     STY fe_bank
-    LDA df_len_lo,X : STA fe_len
-    LDA df_len_hi,X : STA fe_len+1
-    ORA fe_len : BEQ none
+    LDA fe_len : ORA fe_len+1 : BEQ none
     \ its first sector as track and sector: the sector number by ten
     LDA df_sect_lo,X : STA rem
     LDA df_sect_hi,X : STA rem+1

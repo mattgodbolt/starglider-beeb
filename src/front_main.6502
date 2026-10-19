@@ -21,7 +21,8 @@
     JMP front_title
 
 \ game_start: the front end's start of a game (the ST's L_01EFE, its fade
-\ out done): flight's files back in bank 7, a read a file; the screens the
+\ out done): any read going on done; flight's files back in bank 7, a
+\ read a file, the window picture its own (docked.6502); the screens the
 \ start's were, the cockpit on both, their windows empty, their panels to
 \ draw; the cockpit's colours faded in, as the ST's sub_039B2 fades to
 \ them once the cockpit's on both screens; then play. The key that started
@@ -29,6 +30,10 @@
 .game_start
 {
     LDX #&FF : TXS
+    JSR disc_wait
+    STZ ov_have
+    ASSERT OV_FLIGHT = 0
+    LDA #&FF : STA ov_reading
     LDX #FLIGHT_FILES - 1
 .load
     PHX
@@ -138,9 +143,11 @@ END_WAIT = &12C + 1                             ; (the ST's waits end at the fir
 }
 
 \ front_load: FRONT's read into bank 7 begun, once no clip of speech
-\ plays (its player reads two of its areas there).
+\ plays (its player reads two of its areas there), and any read going on
+\ is done (docked.6502's).
 .front_load
 {
+    JSR disc_wait
 .speaking
     PHP : SEI                                   ; (the player counts it down: read it whole)
     LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3

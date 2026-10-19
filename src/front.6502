@@ -16,9 +16,9 @@
 \ their count; these count fields.
 \ ***************************************************************************
 
-\ The ST's wait counts (&01EC2, &00BDA), as fields.
+\ The ST's wait counts (&01EC2, and &00BDA's: engine.6502's KEY_WAIT), as
+\ fields.
 TITLE_WAIT = &44C + 1
-KEY_WAIT   = &5DC + 1
 
 \ ---------------------------------------------------------------------------
 \ front_title (L_01E94): a fade out, the title's scene (sub_03B38), the

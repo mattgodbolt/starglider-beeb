@@ -1,0 +1,60 @@
+# Interrogate (I, docked: read_keys' &02A44), on the keys: teleported into
+# a silo's box (as tests/st/docked.txt), I in the tunnel and E; then at
+# the tunnel's end I, each object for a while and then quickly through
+# the rest, past the seventeenth back to the first, and E. Its frames run
+# inside read_keys, and tools/st_steps.py logs the key each of them takes,
+# for the port's Interrogate to be given the same.
+wait 38
+key 57
+wait 4
+debug w w $5c02e $1c30 $ffd0 $dc60
+debug w w $5c03c $0c10
+wait 0.3
+debug parse {arm}
+debug echo \nSEG tunnel\n
+wait 2
+key 0x17
+wait 1.5
+key 0x12
+wait 9
+debug echo \nSEG docked\n
+key 0x17
+wait 3
+key 57
+wait 2
+key 57
+wait 2
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 0.4
+key 57
+wait 1.5
+key 0x12
+wait 1.5
+debug echo \nSEG end\n
+quit

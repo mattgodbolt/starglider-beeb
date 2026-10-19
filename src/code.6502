@@ -9,6 +9,39 @@ INCLUDE "logic/random.6502"
 INCLUDE "logic/arith.6502"
 INCLUDE "step.6502"
 
+\ interrogate (&02A44): read_keys', docked: DOCKED's int_run
+\ (interrogate.6502), once docked.6502 has it in bank 7, with that bank
+\ and ANDY paged, within a pause (engine.6502: the engine discards the
+\ fields it takes); then the logic's bank and ANDY again.
+.interrogate
+    JSR pause_begin
+    JSR docked_wait
+    BANK_ANDY BANK_PIC
+    JSR int_run
+    JSR pause_end
+    BANK_ANDY BANK_LOGIC
+    RTS
+
+\ int_sincos, int_animate, int_frame_end: Interrogate's calls from DOCKED
+\ of sincos (for m_idx, into trig_sin and trig_cos) and animate_shapes, in
+\ the world's bank, and frame_end_logic, in the logic's, each with DOCKED
+\ paged again after (int_back).
+.int_sincos
+    BANK_ANDY BANK_WORLD
+    JSR sincos
+    MOVW trig_sin, m_sin : MOVW trig_cos, m_cos
+    BRA int_back
+.int_animate
+    BANK_ANDY BANK_WORLD
+    JSR animate_shapes
+    BRA int_back
+.int_frame_end
+    BANK_ANDY BANK_LOGIC
+    JSR frame_end_logic
+.int_back
+    BANK_ANDY BANK_PIC
+    RTS
+
 \ view_under: the draw phase's drawing besides the objects (view_under.6502),
 \ in the loading area's bank, with ANDY paged for what it reads.
 .view_under

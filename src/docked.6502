@@ -1,0 +1,93 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - Interrogate's place in bank 7
+\
+\ Interrogate (DOCKED, interrogate.6502) lies over the missile view's
+\ window picture in bank 7 while the player is docked, when no missile
+\ view can begin; the picture comes back once launched, before L can
+\ open the view again (it's refused through the launch's count). The
+\ reads go on in the background, from the engine's step: DOCKED's as the
+\ player docks, which the tunnel's flight in covers, and the picture's,
+\ the start of WINDOW, after the launch. Interrogate waits for DOCKED if
+\ it comes first (docked_wait), and L for the picture (window_ready).
+\ ***************************************************************************
+
+OV_FLIGHT = 0                       ; ov_have: the window picture
+OV_DOCKED = 1                       ; DOCKED
+
+\ docked_step: once a step (engine_run's), the read wanted begun, if no
+\ read is going on: DOCKED's while docked; else the picture's. A read
+\ done is what the place holds.
+.docked_step
+{
+    LDA fdc_state : BNE done                    ; a read going on
+    LDA ov_reading : BMI idle
+    STA ov_have
+    LDA #&FF : STA ov_reading
+.idle
+    LDX #OV_FLIGHT
+    LDA docked : BEQ want
+    INX
+    ASSERT OV_DOCKED = OV_FLIGHT + 1
+.want
+    CPX ov_have : BEQ done
+    STX ov_reading
+    LDA #LO(WIN_PIC) : STA fe_dst : LDA #HI(WIN_PIC) : STA fe_dst+1
+    LDY #BANK_PIC
+    TXA : BEQ picture
+    LDX #DF_DOCKED
+    JMP disc_load
+.picture
+    LDA #LO(win_pic_end - WIN_PIC) : STA fe_len
+    LDA #HI(win_pic_end - WIN_PIC) : STA fe_len+1
+    LDX #DF_WINDOW
+    JMP disc_load_first
+.done
+    RTS
+}
+
+\ docked_wait: code.6502's interrogate's, with the logic's bank paged:
+\ DOCKED in, its read waited for (and begun if it hasn't been); and its
+\ texts' colours, the view's as the panel has them (PC_VIEW).
+.docked_wait
+{
+.wait
+    JSR disc_step
+    JSR docked_step
+    LDA ov_have : CMP #OV_DOCKED : BNE wait
+    LDX #3
+.colour
+    LDY int_colours,X : LDA PC_VIEW,Y : STA int_mask,X
+    DEX : BPL colour
+    RTS
+.int_colours                                    ; (by line: interrogate.6502's)
+    EQUB INT_PROMPT_COLOUR, INT_NAME_COLOUR, INT_LINE1_COLOUR, INT_LINE2_COLOUR
+}
+
+\ window_ready: L's (logic/keys.6502), before its missile view begins: the
+\ picture back, its read waited for, should the launch's count not have
+\ covered it.
+.window_ready
+{
+.wait
+    JSR docked_step
+    LDA ov_reading : EOR #&FF : ORA ov_have : BEQ ready  ; (the picture held, nothing being read)
+    JSR disc_step
+    BRA wait
+.ready
+    RTS
+}
+ASSERT OV_FLIGHT = 0
+
+\ int_shape: Interrogate's draw_shape (render.6502), and int_key: the key
+\ an Interrogate frame takes (logic/keys.6502's get_key), from DOCKED,
+\ which is paged again after each (code.6502's int_back).
+.int_shape
+    JSR draw_shape
+    JMP int_back
+.int_key
+    BANK_ANDY BANK_LOGIC
+    JSR get_key
+    PHA
+    JSR int_back
+    PLA
+    RTS
