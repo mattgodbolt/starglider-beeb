@@ -656,6 +656,7 @@ async function child() {
         // at each start
         if (!carried) carried = CARRIED.map(([v, n]) => ram.slice(sym[v], sym[v] + n));
         else CARRIED.forEach(([v], i) => ram.set(carried[i], sym[v]));
+        pendingPokes = [];                              // (the last game's player's, unmade)
         gameSteps = 0;
         framesAtPlay = word(sym.frames);
     });
