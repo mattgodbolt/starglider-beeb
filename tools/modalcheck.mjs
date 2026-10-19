@@ -31,7 +31,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 const root = process.cwd();
 const { loadSymbols } = await import(pathToFileURL(path.join(root, "tools/beeb.mjs")).href);
-const { loadDisc, toGame, ssdFiles } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
+const { loadDisc, toGame, ssdFiles, fieldCycles } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
 const { TestMachine } = await import(pathToFileURL(path.join(root, "node_modules/jsbeeb/src/test-machine.js")).href);
 const sym = loadSymbols(path.join(root, "build/starglider.json"));
 const int = JSON.parse(fs.readFileSync(path.join(root, "build/gen/interrogate.json"), "utf8"));
@@ -47,7 +47,7 @@ const ram = cpu.ramRomOs;
 loadDisc(tm, disc, sym);
 
 const CYCLES = 2000000;
-const FIELD = CYCLES / 50;                              // (jsbeeb's, as measured below)
+const FIELD = fieldCycles(sym);                         // (the CRTC's, as loadDisc gives the TestMachine: checked below)
 const SHADOW = 0x8000;                                  // (jsbeeb's array keeps shadow RAM there on)
 let bad = 0;
 const fail = (what) => {

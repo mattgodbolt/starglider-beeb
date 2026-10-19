@@ -62,6 +62,12 @@
     BANK BANK_WORLD
     STZ dot_valid
     BANK BANK_PIC
+    \ The missile view leaves row 130 black for the rest of its game
+    \ (docs/research/st-panel.md, section 8), and the ST's new game copies
+    \ the whole picture to both screens (sub_039B2): main RAM's, the
+    \ port's one copy of it, gets the row back from the window picture's
+    \ last row (mview.6502), before the copy to shadow RAM's.
+    LDA #WIN_ROWS : TAY : JSR win_row
     JSR screen_copy
     STZ draw_bank : JSR window_clear
     LDA #ACCCON_X : STA draw_bank : JSR window_clear

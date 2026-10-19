@@ -109,4 +109,31 @@ for (let f = 0; f < frames; f++) {
   if (lit) { bad++; if (bad < 8) console.log(`frame ${f} buffer ${buf}: ${lit} bytes left, step ${ram[sym.steps] | (ram[sym.steps + 1] << 8)}`); }
 }
 console.log(`erasecheck: ${frames} frames, ${bad} with something left; ${mvFrames} of the missile view, ${mvBad} windows not the ST's, ${mvLines} lines and boxes erased from them`);
-process.exit(bad || mvBad || !mvFrames ? 1 : 0);
+
+// Row 130, the window's last, black on both screens after the missile view,
+// as the ST leaves it for the rest of the game (docs/research/st-panel.md,
+// section 8); and the cockpit's again on both at the next game's start, as
+// the ST's sub_039B2 copies the picture to both screens.
+const cockpit = fs.readFileSync(path.join(root, "build/gen/cockpit.bin"));
+const row130 = (base) => {
+  let lit = 0, wrong = 0;
+  for (let c = sym.WINDOW_COL0; c < sym.WINDOW_COL0 + sym.WINDOW_COLS; c++) {
+    const o = (130 >> 3) * 640 + c * 8 + (130 & 7);
+    if (ram[base + sym.SCREEN + o]) lit++;
+    if (ram[base + sym.SCREEN + o] !== cockpit[o]) wrong++;
+  }
+  return { lit, wrong };
+};
+let rowBad = 0;
+for (const base of [0, 0x8000])
+  if (row130(base).lit) { rowBad++; console.log(`erasecheck: after the missile view, row 130 isn't black on the ${base ? "shadow" : "main RAM's"} screen`); }
+tm.keyDown("Escape");
+await tm.runFor(0.1 * 2000000);
+tm.keyUp("Escape");
+await toGame(tm, sym);
+for (const base of [0, 0x8000]) {
+  const { wrong } = row130(base);
+  if (wrong) { rowBad++; console.log(`erasecheck: at the next game's start, row 130 on the ${base ? "shadow" : "main RAM's"} screen: ${wrong} bytes not the cockpit's`); }
+}
+if (!rowBad) console.log("erasecheck: row 130 black after the missile view, the cockpit's again at the next game's start");
+process.exit(bad || mvBad || !mvFrames || rowBad ? 1 : 0);
