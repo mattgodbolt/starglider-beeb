@@ -54,6 +54,13 @@
     PLX
     DEX : BPL load
 .loaded                                         ; (tools/disccheck.mjs)
+    \ The ground dots' rotation is WINDOW's code (view_under.6502), just
+    \ read in as the disc has it, unmade: the dots' cache in the world
+    \ bank (logic/worldlogic.6502's dot_drift) mustn't take it for the
+    \ last frame's, as it would for a game that starts with the camera and
+    \ height the last game ended with (the start's, after an Esc there).
+    BANK BANK_WORLD
+    STZ dot_valid
     BANK BANK_PIC
     JSR screen_copy
     STZ draw_bank : JSR window_clear
