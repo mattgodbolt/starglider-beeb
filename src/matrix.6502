@@ -44,7 +44,8 @@
 \ offset from the player turned back by h alone and negated: x -(cos h dx
 \ + sin h dz), y -dy, z sin h dx - cos h dz. From the world's positions,
 \ it takes four products where the rotated position and the matrix take
-\ nine.
+\ nine, and none for a heading square to the world's axes, as most still
+\ objects' are (fmul_trig).
 .ground_camera
 {
     ZA_AUTO2 dx, dz
@@ -55,14 +56,14 @@
     LDA ob_x_lo,X : SEC : SBC pl_x : STA dx : LDA ob_x_hi,X : SBC pl_x+1 : STA dx+1
     LDA pl_y : SEC : SBC ob_y_lo,X : STA objc+2 : LDA pl_y+1 : SBC ob_y_hi,X : STA objc+3
     LDA ob_z_lo,X : SEC : SBC pl_z : STA dz : LDA ob_z_hi,X : SBC pl_z+1 : STA dz+1
-    \ (fmul16 leaves its operands as they were, so each is set once)
-    MOVW mul_x, m_cos : MOVW mul_y, dx : JSR fmul16
+    \ (fmul_trig leaves its operands as they were, so each is set once)
+    MOVW mul_x, m_cos : MOVW mul_y, dx : JSR fmul_trig
     LDA #0 : SEC : SBC mul_r : STA objc : LDA #0 : SBC mul_r+1 : STA objc+1
-    MOVW mul_y, dz : JSR fmul16
+    MOVW mul_y, dz : JSR fmul_trig
     LDA #0 : SEC : SBC mul_r : STA objc+4 : LDA #0 : SBC mul_r+1 : STA objc+5
-    MOVW mul_x, m_sin : JSR fmul16
+    MOVW mul_x, m_sin : JSR fmul_trig
     SUBW objc, mul_r
-    MOVW mul_y, dx : JSR fmul16
+    MOVW mul_y, dx : JSR fmul_trig
     ADDW objc+4, mul_r
     RTS
 }

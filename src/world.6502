@@ -411,10 +411,11 @@ ENDMACRO
 }
 
 \ ---------------------------------------------------------------------------
-\ fmul_trig: fmul16 for build_matrix (render.6502), whose factors are
-\ sines, cosines and their products: a factor of 0 or +-16384 makes the
-\ product 0, the other or its negation, exactly, without the multiply. A
-\ level pitch, its sine 0 and its cosine 16384, gives most of them one.
+\ fmul_trig: fmul16 for build_matrix (render.6502) and ground_camera
+\ (matrix.6502), whose factors are sines, cosines and their products: a
+\ factor of 0 or +-16384 makes the product 0, the other or its negation,
+\ exactly, without the multiply. A level pitch, its sine 0 and its cosine
+\ 16384, gives most of them one, as does a heading square to the axes.
 .fmul_trig
 {
     LDA mul_y : BNE x_test
