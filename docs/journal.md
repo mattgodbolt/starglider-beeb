@@ -1442,3 +1442,26 @@ vertex's 830 cycles times bigger shapes; reusing face visibility from
 frame to frame would cut the most there, once main RAM has room (about
 250 bytes of code, faces needing the shapes bank paged).
 
+### The title song, both ways
+
+Decision 5 leaves the title song to Matt's ear, so `make song` renders
+both candidates as the BBC would play them, with what each costs
+(`docs/research/song.md`); the hooks stay silent.
+
+- **The ST's song** is resampled to 4,096 and 6,144 Hz and quantised to
+  one channel's sixteen levels as the speech is, then played through
+  jsbeeb's own SN76489 and audio path.
+- **David Lowe's tune** is captured from the Spectrum 128K's own player:
+  a pass is 23,040 ticks, two and a half minutes, and its three lists go
+  back to their starts together. Its channel A lives on the AY's envelope
+  and noise, which the SN lacks, and C's bass goes below the SN's lowest
+  note in 42% of its ticks, so the conversion emulates the envelope at the
+  tick and renders the bass two ways: nm's timer bass and octaves.
+- **A capture overwritten.** The capture and the AY reference render were
+  first both `zx_ay.json` in one directory, the second written over the
+  first as the first was read; the capture moved to `build/zx/song.json`.
+- **The key scan holds the ticks off.** The title scans the whole keyboard
+  with interrupts off, a few thousand cycles a field: a sample would come
+  in bursts there, and a bass edge late. Either choice would want that
+  scan let open.
+
