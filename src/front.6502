@@ -532,8 +532,10 @@ ASSERT HS_BYTES <= 256 AND hs_names = hs_scores + 40
 \ The end screen (sub_0747A): the ST's boxes round the table, each in a
 \ colour its timers move (sub_0752A each VBL, sub_0768A every four scan
 \ lines): its two greys (1 and 2) are logical 1, its rainbows and reds
-\ (3-6) logical 2; each field, logical 1 the nearest of the BBC's colours
-\ to grey 1's, logical 2 to rainbow 3's, as the VBL's sets them.
+\ (3-6) logical 2. Each band of four lines takes the nearest of the BBC's
+\ colours (tools/mkfront.py's) to grey 1's, for logical 1, and for logical
+\ 2 to rainbow 3's above the boxes' middle and rainbow 4's below it, where
+\ those are the boxes' (band_irq writes them).
 .end_on
 {
     ZA_AUTO1 y, n, c1
@@ -563,43 +565,131 @@ ASSERT HS_BYTES <= 256 AND hs_names = hs_scores + 40
     INC y : DEC n : BNE line
     INX : CPX #BOXES : BNE box
     LDA #ACCCON_X : TRB acccon
-    \ the VBL's state as sub_0747A sets it
+    \ the VBL's state as sub_0747A sets it, its bands made, and band_irq's
+    \ from the next vertical sync
     LDX #END_STATE - 1
 .zero
     STZ end_state,X
     DEX : BPL zero
+    JSR end_bands
+    SEI
+    LDA #LO(band_irq) : STA irq1v
+    LDA #HI(band_irq) : STA irq1v+1
+    CLI
     LDA #&FF : STA end_running
     RTS
 }
 .end_off
     STZ end_running
+    SEI
+    LDA #LO(irq_handler) : STA irq1v
+    LDA #HI(irq_handler) : STA irq1v+1
+    LDA #&20 : STA usrvia_ier                   ; T2's interrupt off
+    CLI
     LDA #LO(fe_colours) : LDX #HI(fe_colours)
     JMP palette_set
 
 \ end_step: fe_field's, while the end screen shows: sub_0752A's counts for
-\ the greys (every 3 VBLs, &2EC up 2) and the rainbow (every 2, &2EE down
-\ 2, from &28 after 0), and the colours they make.
+\ the greys (every 3 VBLs, &2EC up 2) and the rainbows (every 2: &2EE down
+\ 2, from &28 after 0; &2EF up 2, to 0 at &2A); then the bands.
 .end_step
 {
     INC end_grey_n : LDA end_grey_n : CMP #3 : BNE grey
     STZ end_grey_n
     LDA end_grey : CLC : ADC #2 : AND #&0E : STA end_grey
 .grey
-    INC end_rain_n : LDA end_rain_n : CMP #2 : BNE rain
+    INC end_rain_n : LDA end_rain_n : CMP #2 : BNE end_bands
     STZ end_rain_n
     LDA end_rain : SEC : SBC #2 : BPL down
     LDA #&28
 .down
     STA end_rain
+    LDA end_rain4 : CLC : ADC #2 : CMP #&2A : BNE up
+    LDA #0
+.up
+    STA end_rain4
+    \ (on into end_bands)
+}
+
+\ end_bands: each band's colours for band_irq, as sub_0768A steps them
+\ from the VBL's every four lines (the greys up, the rainbows down), its
+\ first interrupt taking the VBL's own: the ULA's bytes (physical colours
+\ EORed with 7).
+END_BANDS_TOP = 104 DIV BAND_LINES              ; (the boxes of 3 and 5 above, 4 and 6 below)
+.end_bands
+{
+    ZA_AUTO1 g, r, r4
+    LDA #&FF : STA band_1 - 1 : STA band_2 - 1   ; (so the first band's always written)
+    LDA end_grey : STA g
+    LDA end_rain : STA r
+    LDA end_rain4 : STA r4
+    LDX #0
+.band
+    LDA g : LSR A : TAY
+    LDA end_grey_phys,Y : EOR #7 : STA band_1,X
+    LDA r
+    CPX #END_BANDS_TOP : BCC rain
+    LDA r4
 .rain
-    LDA end_grey : LSR A : TAX
-    LDA end_grey_phys,X : STA end_colours + 1
-    LDA end_rain : AND #&1E : LSR A : TAX
-    LDA end_rain_phys,X : STA end_colours + 2
-    LDA fe_colours : STA end_colours
-    LDA fe_colours + 3 : STA end_colours + 3
-    LDA #LO(end_colours) : LDX #HI(end_colours)
-    JMP palette_set
+    AND #&1E : LSR A : TAY
+    LDA end_rain_phys,Y : EOR #7 : STA band_2,X
+    CPX #0 : BEQ next
+    LDA g : CLC : ADC #2 : AND #&0E : STA g
+    DEC r : DEC r
+    DEC r4 : DEC r4
+.next
+    INX : CPX #BANDS : BNE band
+    RTS
+}
+
+\ band_irq: IRQ1V while the end screen shows, as the ST's Timer B changes
+\ its colours every 4 lines (sub_0768A): User VIA T2, free out of play,
+\ comes every BAND_LINES lines from the screen's top (started at each
+\ vertical sync), and puts logical 1 and 2 in the band's colours (band_1
+\ and band_2, the ULA's bytes, end_bands's); anything else is the
+\ engine's (engine.6502). It can be here, in bank 7, as nothing pages
+\ another bank meanwhile but the interrupt itself (sound_vsync), which
+\ puts it back.
+BAND_LINES = 4
+BANDS = SCREEN_ROWS * 8 DIV BAND_LINES
+BAND_EARLY = 4                                  ; (its writes start later in it than the split's)
+BAND_FIRST = SYNC_TO_TOP * SCAN_US - 2 + SPLIT_ADJ - BAND_EARLY
+BAND_T2 = BAND_LINES * SCAN_US
+.band_irq
+{
+    ZA_INTERRUPT
+    LDA usrvia_ifr : AND #&20 : BEQ not_band
+    \ the band's colours first, to land in the line's blank, each only if
+    \ it changes (eight writes overrun the blank; each table has a byte no
+    \ colour is before it, for the first band's to be written)
+    PHX
+    LDX band_i
+    LDA band_1,X : CMP band_1 - 1,X : BEQ same_1
+    ORA #&20 : STA ula_pal : ORA #&10 : STA ula_pal     ; logical 1's entries: 2, 3, 7, 6
+    ORA #&40 : STA ula_pal : EOR #&10 : STA ula_pal
+.same_1
+    LDA band_2,X : CMP band_2 - 1,X : BEQ same_2
+    ORA #&80 : STA ula_pal : ORA #&10 : STA ula_pal     ; logical 2's: 8, 9, 13, 12
+    ORA #&40 : STA ula_pal : EOR #&10 : STA ula_pal
+.same_2
+    \ the next band's count from this one's due moment: T2 runs on past 0
+    LDA usrvia_t2cl : CLC : ADC #LO(BAND_T2) : TAX     ; (acknowledged)
+    LDA usrvia_t2ch : ADC #HI(BAND_T2)
+    STX usrvia_t2cl : STA usrvia_t2ch
+    INC band_i : LDA band_i : CMP #BANDS : BNE more
+    LDA #&20 : STA usrvia_ier                   ; the last: T2's interrupt off till the sync
+.more
+    PLX
+    LDA &FC                                     ; the interrupted A, which the OS kept
+    RTI
+.not_band
+    LDA sysvia_ifr : AND #2 : BEQ engine
+    STZ band_i
+    LDA #LO(BAND_FIRST) : STA usrvia_t2cl
+    LDA #HI(BAND_FIRST) : STA usrvia_t2ch       ; starts the count
+    LDA #&A0 : STA usrvia_ier                   ; T2's interrupt on
+.engine
+    JMP irq_handler                             ; (which takes the sync)
 }
 
 \ ---------------------------------------------------------------------------
@@ -967,8 +1057,13 @@ ASSERT SCREEN + SCREEN_ROWS * SCREEN_ROW = &8000
 .end_grey_n     SKIP 1      ; sub_0752A's $2F2 ...
 .end_grey       SKIP 1      ; ... $2EC
 .end_rain_n     SKIP 1      ; $2F3 ...
-.end_rain       SKIP 1      ; ... $2EE
+.end_rain       SKIP 1      ; ... $2EE ...
+.end_rain4      SKIP 1      ; ... $2EF
 END_STATE = P% - end_state
-.end_colours    SKIP 4      ; the colours for palette_set
+.band_i         SKIP 1      ; band_irq's next band
+                SKIP 1      ; (end_bands's &FF)
+.band_1         SKIP BANDS  ; by band: logical 1's colour, its byte for the ULA ...
+                SKIP 1
+.band_2         SKIP BANDS  ; ... and logical 2's
 .fe_down        SKIP BBC_KEYS   ; by key: non-zero while it's down
 ASSERT fe_state >= ANDY_TOP
