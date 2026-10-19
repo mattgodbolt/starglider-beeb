@@ -82,6 +82,9 @@ SECTION LogicWork, org = work_end, guard = NMI_PAGE, virtual = TRUE
 .sample_tacr  SKIP 1        ; {ST &2CF byte} the ST's Timer A control and data: its rate
 .sample_tadr  SKIP 1        ; {ST &2D0 byte}
 .sample_left  SKIP 4        ; {ST P&01E56 long in} bytes still to play, which the player counts down
+    \ Interrogate's (interrogate.6502)
+.int_entry    SKIP 1        ; {ST $1FA(a6) word8} the entry shown, 1-17
+.int_type     SKIP 1        ; {ST $1F8(a6) word8} its type: draw_shape's, which the title's scene and G's viewer set too
 .logic_work_end
 ENDSECTION
 

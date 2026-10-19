@@ -1375,3 +1375,36 @@ until the machine is switched off.
 byte with a model of the ST's printer, times the waits, checks the defined
 keys reach the logic as the ST's scancodes, and checks the high scores.
 
+### The cheat prompt, Interrogate and the model viewer
+
+The ST's last three stubs are in, each as decision 17 has it: the cheat
+prompt's waits and Interrogate's frames run inside read_keys, and the
+engine discards the fields they take, so no steps follow to catch up.
+`tools/st_steps.py` now logs every key the ST's waits return and every
+key an Interrogate frame takes, and two captures (`steps_cheat`,
+`steps_interrogate`) give the spike's prompt and Interrogate the same
+keys: every routine matches on every capture, the state Interrogate
+leaves included. G's wait runs out after 1,501 fields, as the ST's does
+after 1,501 VBLs.
+
+- **Interrogate lies over the missile view's window picture while
+  docked** (decision 47; DOCKED: its texts, glyphs and code from
+  STAR.PRG), read as the player docks, which the tunnel covers; the part
+  it covered is read back at the launch, done before the launch's count
+  ends.
+- **Its frames come at the ST's two VBLs** (decision 48). At first they
+  took three, as the four lines of text were printed every frame; now they
+  are printed again only when the last frame's object box reached them.
+- **A box aimed at the wrong screen.** Drawing one object outside
+  `view_objects` skipped `box_aim`, so `box_end` logged boxes onto the
+  other screen's erase list. `tools/modalcheck.mjs` now checks nothing of
+  an object is left behind the next.
+- **G's model viewer** is FRONT's (decision 50). It clears both screens as
+  the ST's does, so a game's start after it reads the cockpit back; its
+  numbers take the colour the ST's last print left.
+
+`tools/modalcheck.mjs`, in `make check`, covers all three on the disc: the
+prompt's sequence, wrong key and timeout; Interrogate's texts against the
+ST's printer and its reads timed; the viewer's keys and numbers; the
+cockpit read back byte for byte.
+

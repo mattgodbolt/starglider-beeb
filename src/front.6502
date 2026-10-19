@@ -16,23 +16,23 @@
 \ their count; these count fields.
 \ ***************************************************************************
 
-\ The ST's wait counts (&01EC2, &00BDA), as fields.
+\ The ST's wait counts (&01EC2, and &00BDA's: engine.6502's KEY_WAIT), as
+\ fields.
 TITLE_WAIT = &44C + 1
-KEY_WAIT   = &5DC + 1
 
 \ ---------------------------------------------------------------------------
 \ front_title (L_01E94): a fade out, the title's scene (sub_03B38), the
 \ title and credits passes counted from 0 and the last key forgotten; the
 \ title shown (sub_03B5A); then in turn the credits (sub_03B82) and the
 \ title again, each after TITLE_WAIT fields with no key, the song started
-\ at each if no sample plays. A key with a character: K the K screen, any
-\ other the game. (G opens the ST's model viewer in cheat mode, which the
-\ front end hasn't: G is any other key.)
+\ at each if no sample plays. A key with a character: G in cheat mode the
+\ model viewer (viewer.6502), K the K screen, any other the game.
 .front_title
 {
     LDX #&FF : TXS
     JSR fe_fade_out
     LDA #&64 : STA pl_y : STZ pl_y+1            ; sub_03B38's scene
+    LDA #&0E : STA int_type
     LDA #2 : JSR fe_frame_ends                  ; and sub_039A2's frames
     STZ title_count
     JSR fe_forget
@@ -53,6 +53,10 @@ KEY_WAIT   = &5DC + 1
     BRA pass
 .key
     AND #&DF
+    CMP #'G' : BNE not_g
+    LDX cheat_mode : BEQ start
+    JMP fe_viewer
+.not_g
     CMP #'K' : BNE start
     JMP fe_keys
 .start
@@ -855,8 +859,9 @@ BAND_T2 = BAND_LINES * SCAN_US
 }
 
 \ fe_colour: the ST's colour A (D_019F0) the printer's, as the title's
-\ four have it.
+\ four have it, and kept (fe_st_colour: G's viewer's).
 .fe_colour
+    STA fe_st_colour
     TAX : LDA fe_masks,X : STA tty_mask
     RTS
 
@@ -1052,6 +1057,7 @@ ASSERT SCREEN + SCREEN_ROWS * SCREEN_ROW = &8000
 \ FRONT's state (past &9000, so its copies of ANDY's can be made with ANDY
 \ paged).
 .fe_state
+.fe_st_colour   EQUB &FF    ; the ST's colour fe_colour set last (&FF: none since FRONT was read)
 .fe_elapsed     SKIP 2      ; fields counted from fe_wait_begin
 .fe_latch       SKIP 1      ; the last BBC key made (&FF: none)
 .title_count    SKIP 1      ; the title loop's passes ($29A)

@@ -1,0 +1,301 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - Interrogate (the ST's &02A44)
+\
+\ I, docked: the ST's tables entry by entry (tools/mkinterrogate.py), each
+\ object spinning as it comes in from afar under its name and two lines
+\ about it, frame after frame inside read_keys, as the ST's loop runs its
+\ own frames there (decision 17), until E. A frame is the ST's: the texts,
+\ the object, animate_shapes, the panel, frame_end; then the spin, the
+\ approach and a key: space the next entry, E the end, from which the
+\ flight keys run. No world_render, handler or collision runs meanwhile,
+\ and the engine discards the fields it takes (code.6502's interrogate),
+\ so no steps follow to catch up.
+\
+\ It's DOCKED's code, after its data, which docked.6502 reads over the
+\ missile view's window picture in bank 7 while the player is docked, and
+\ runs with that bank and ANDY paged. What it does to the logic's state is
+\ the ST's exactly: the entry and its type, what draw_shape's matrix
+\ leaves (laser.6502's draw_matrices says how), animate_shapes and
+\ frame_end's logic. tools/logicrun.mjs checks it in the spike, which
+\ draws nothing and gives it the keys the ST's frames took (spike.6502's
+\ int_key); the disc draws each frame through the engine's routines into
+\ the screen not shown, its erase list kept: the ST's texts, opaque, then
+\ the object, its lines ORed over them, then the panel.
+\ ***************************************************************************
+
+INT_Z0     = &1E00                  ; where each object starts (&02A78) ...
+INT_Z_STEP = &64                    ; ... the approach a frame ...
+INT_Z_NEAR = &400                   ; ... while z - this has bit 15 clear (&02B4C)
+INT_SPIN   = &40                    ; the heading's turn a frame (&02B46)
+INT_Y      = &50                    ; its height (&02A72)
+
+\ int_run: code.6502's interrogate's.
+.int_run
+{
+    JSR int_begin
+    STZ int_entry
+.next
+    \ (&02A52) the next entry, from the first again after the last
+    LDA int_entry : CMP #INT_ENTRIES : BNE more
+    STZ int_entry
+.more
+    STZ int_heading : STZ int_heading+1
+    LDA #LO(INT_Z0) : STA int_z : LDA #HI(INT_Z0) : STA int_z+1
+    INC int_entry
+    LDX int_entry : LDA int_types - 1,X : STA int_type
+    JSR int_find
+.frame
+    \ (&02A82) the texts and the object, then draw_shape's matrix: built
+    \ from the angles (0, heading, 0) unless they're the last one's, when
+    \ it leaves the heading's sine and cosine in trig_sin and trig_cos
+    JSR int_draw
+    LDA obm_pitch : ORA obm_pitch+1 : ORA obm_roll : ORA obm_roll+1 : BNE build
+    LDA obm_heading : CMP int_heading : BNE build
+    LDA obm_heading+1 : CMP int_heading+1 : BEQ kept
+.build
+    STZ obm_pitch : STZ obm_pitch+1 : STZ obm_roll : STZ obm_roll+1
+    MOVW obm_heading, int_heading
+    LDA int_heading : STA m_idx : LDA int_heading+1 : AND #&0F : STA m_idx+1
+    JSR int_sincos
+.kept
+    JSR int_animate
+    JSR int_panel
+    JSR int_frame_end
+    JSR int_show
+    \ the spin, and the approach until it's near
+    LDA int_heading : CLC : ADC #LO(INT_SPIN) : STA int_heading
+    LDA int_heading+1 : ADC #HI(INT_SPIN) : STA int_heading+1
+    LDA int_z : SEC : SBC #LO(INT_Z_NEAR) : LDA int_z+1 : SBC #HI(INT_Z_NEAR) : BMI near
+    LDA int_z : SEC : SBC #INT_Z_STEP : STA int_z
+    BCS near
+    DEC int_z+1
+.near
+    JSR int_key
+    CMP #' ' : BNE not_next
+    JMP next
+.not_next
+    CMP #'E' : BEQ leave
+    JMP frame
+.leave
+    JMP int_end
+}
+
+.int_heading SKIP 2         ; the object's heading ($17C) ...
+.int_z       SKIP 2         ; ... and depth ($198)
+
+IF DEFINED(SPIKE)
+\ (the spike draws nothing: spike.6502)
+.int_begin
+.int_find
+.int_draw
+.int_panel
+.int_show
+.int_end
+    RTS
+ELSE
+
+\ The four texts by line, as kept: the prompt, the name, the first line
+\ and the second.
+INT_LINES = 4
+FUNCTION int_cell(x, y) = SCREEN + (y DIV 8) * SCREEN_ROW + (x DIV 4) * 8 + (y MOD 8)
+
+\ int_begin: both screens' windows to be cleared when next drawn (the ST
+\ clears its view each frame, and this clears the docked texts), with
+\ nothing of Interrogate's on them, nor of the panel's texts; the first
+\ frame not held back.
+.int_begin
+{
+    STZ erase_stop : STZ erase_stop+1
+    STZ int_clear : STZ int_clear+1
+    LDX #2 * INT_LINES - 1
+.shown
+    STZ int_shown,X
+    DEX : BPL shown
+    STZ ps_texts : STZ ps_texts+1
+    LDA fields : SEC : SBC #INT_FIELDS : STA int_ready
+    RTS
+}
+
+\ int_end: both screens' windows cleared by the game's next frames, which
+\ takes Interrogate's texts away.
+.int_end
+    STZ erase_stop : STZ erase_stop+1
+    RTS
+
+\ int_find: the entry's name and lines.
+.int_find
+{
+    LDX int_entry
+    LDA int_name_lo - 1,X : STA int_str_lo + 1 : LDA int_name_hi - 1,X : STA int_str_hi + 1
+    LDA int_line1_lo - 1,X : STA int_str_lo + 2 : LDA int_line1_hi - 1,X : STA int_str_hi + 2
+    LDA int_line2_lo - 1,X : STA int_str_lo + 3 : LDA int_line2_hi - 1,X : STA int_str_hi + 3
+    RTS
+}
+
+\ int_draw: the frame's screen made ready (the step's frame, drawn and not
+\ yet shown, is drawn over, as the ST's first frame clears what its
+\ world_render drew; else the next screen, once the last frame is up) and
+\ erased; the texts, then the object at (0, INT_Y, z), its angles (0,
+\ heading, 0), as view_objects and draw_objects draw one (code.6502,
+\ render.6502), its box kept (box.6502). Its pitch has bits above the 12
+\ the matrix reads, unlike the player's, so draw_shape builds the object's
+\ own matrix.
+.int_draw
+{
+    LDA frame_drawn : BEQ flip
+    STZ frame_drawn
+    BRA erase
+.flip
+    JSR disc_step
+    LDA frame_ready : BNE flip
+    LDA draw_buffer : EOR #1 : STA draw_buffer
+    TAX : LDA frame.buffer_bank,X : STA draw_bank
+.erase
+    JSR screen_erase
+    BANK_ANDY BANK_PIC
+    \ the texts again unless this screen shows this entry's, and its last
+    \ frame's lines (all within its object's box) kept clear of them
+    LDX draw_buffer
+    LDA int_clear,X : BEQ print
+    LDA int_printed,X : CMP int_entry : BEQ printed
+.print
+    LDA int_entry : STA int_printed,X
+    JSR int_print
+.printed
+    JSR draw_begin
+    JSR box_aim                         ; (box.6502: its box onto this screen's list)
+    LDA int_type : STA otype
+    STZ tx : STZ tx+1
+    LDA #INT_Y : STA ty : STZ ty+1
+    MOVW tz, int_z
+    STZ ang_p : LDA pl_pitch+1 : CLC : ADC #&10 : AND #&F0 : STA ang_p+1
+    MOVW ang_h, int_heading
+    STZ ang_r : STZ ang_r+1
+    STZ mat_scaled
+    LDA erase_i : STA box_start
+    LDA #&FF : STA box_c0 : STA box_y0
+    STZ box_c1 : STZ box_y1 : STZ box_codes
+    JSR int_shape
+    JSR box_end
+    \ its lines clear of the texts: a box (none for an object cut at the
+    \ near plane, box_start 0) between the name's and the first line's rows
+    LDX draw_buffer
+    STZ int_clear,X
+    LDA box_start : BEQ crossed
+    LDA box_y0 : CMP #INT_NAME_Y + 8 : BCC crossed
+    LDA box_y1 : CMP #INT_LINE1_Y : BCS crossed
+    DEC int_clear,X
+.crossed
+    JMP draw_end
+}
+ASSERT INT_PROMPT_Y + 8 <= INT_NAME_Y AND INT_LINE1_Y + 8 <= INT_LINE2_Y
+
+\ int_panel: the panel drawn into the frame (cockpit.6502's, which puts
+\ the bank back).
+int_panel = panel_draw
+
+\ int_show: the frame shown from the next vertical sync, but no sooner
+\ than INT_FIELDS after the last: the ST's Interrogate frames take two
+\ VBLs or more, and the spin and the approach are a frame's.
+INT_FIELDS = 2
+.int_show
+{
+.paced
+    JSR disc_step
+    LDA fields : SEC : SBC int_ready : CMP #INT_FIELDS : BCC paced
+    LDA fields : STA int_ready
+    LDA #1 : STA frame_ready
+    INC frames : BNE done
+    INC frames+1
+.done
+    RTS
+}
+
+\ int_print: the four texts, each a cell a glyph from its place in its
+\ colour (code.6502's int_mask), opaque, and as many spaces after as this
+\ screen showed more of that line before (int_shown), so a shorter one
+\ leaves nothing of the last behind.
+.int_print
+{
+    ZA_AUTO2 s, p, q, g
+    ZA_AUTO1 line, cells, len, pad, at, mid, mask
+    LDA draw_bank : TSB acccon
+    LDX #INT_LINES - 1
+.each
+    STX line
+    LDA int_str_lo,X : STA s : LDA int_str_hi,X : STA s+1
+    LDA int_cell_lo,X : STA p : LDA int_cell_hi,X : STA p+1
+    LDA p : CLC : ADC #LO(SCREEN_ROW - 8) : STA q
+    LDA p+1 : ADC #HI(SCREEN_ROW - 8) : STA q+1
+    LDA int_split,X : STA at
+    LDA int_mask,X : STA mask
+    LDA draw_buffer : ASL A : ASL A : ORA line : TAX    ; (this screen's of the line)
+    LDA int_shown,X : STA pad
+    STZ cells
+    LDA #&FF : STA len                          ; (its end not yet found)
+.char
+    LDY cells
+    CPY len : BCS spaces
+    LDA (s),Y : CMP #&FF : BNE glyph
+    STY len
+.spaces
+    CPY pad : BCS done
+    LDA #INT_GLYPH_SPACE
+.glyph
+    \ the glyph's 16 bytes, its rows from the split on a character row down
+    STZ g+1
+    ASL A : ROL g+1 : ASL A : ROL g+1 : ASL A : ROL g+1 : ASL A : ROL g+1
+    CLC : ADC #LO(int_font) : STA g
+    LDA g+1 : ADC #HI(int_font) : STA g+1
+    LDY #0
+.column
+    TYA : CLC : ADC at : STA mid
+.upper
+    LDA (g),Y : AND mask : STA (p),Y
+    INY : CPY mid : BNE upper
+    TYA : AND #7 : BEQ next
+.lower
+    LDA (g),Y : AND mask : STA (q),Y
+    INY : TYA : AND #7 : BNE lower
+.next
+    CPY #16 : BNE column
+    LDA p : CLC : ADC #16 : STA p
+    BCC p_same
+    INC p+1
+.p_same
+    LDA q : CLC : ADC #16 : STA q
+    BCC q_same
+    INC q+1
+.q_same
+    INC cells
+    BRA char
+.done
+    LDA len : STA int_shown,X                   ; what this screen shows now
+    LDX line : DEX : BMI printed
+    JMP each
+.printed
+    LDA draw_bank : TRB acccon
+    RTS
+}
+ASSERT INT_LINES = 4                            ; (4 s + l)
+
+\ Each line's first cell (its top line's byte), the line from which it
+\ lies in the next character row, and its string (the prompt's always).
+.int_cell_lo
+    EQUB LO(int_cell(INT_PROMPT_X, INT_PROMPT_Y)), LO(int_cell(INT_NAME_X, INT_NAME_Y))
+    EQUB LO(int_cell(INT_LINE1_X, INT_LINE1_Y)), LO(int_cell(INT_LINE2_X, INT_LINE2_Y))
+.int_cell_hi
+    EQUB HI(int_cell(INT_PROMPT_X, INT_PROMPT_Y)), HI(int_cell(INT_NAME_X, INT_NAME_Y))
+    EQUB HI(int_cell(INT_LINE1_X, INT_LINE1_Y)), HI(int_cell(INT_LINE2_X, INT_LINE2_Y))
+.int_split
+    EQUB 8 - INT_PROMPT_Y MOD 8, 8 - INT_NAME_Y MOD 8, 8 - INT_LINE1_Y MOD 8, 8 - INT_LINE2_Y MOD 8
+ASSERT (INT_PROMPT_X OR INT_NAME_X OR INT_LINE1_X OR INT_LINE2_X) MOD 8 = 0
+.int_str_lo
+    EQUB LO(int_prompt) : SKIP INT_LINES - 1
+.int_str_hi
+    EQUB HI(int_prompt) : SKIP INT_LINES - 1
+.int_shown   SKIP 2 * INT_LINES     ; by screen s and line l, at 4 s + l: the cells it shows
+.int_clear   SKIP 2                 ; by screen: &FF if its last frame's lines missed the texts
+.int_printed SKIP 2                 ; ... and the entry its texts are
+.int_ready   SKIP 1                 ; the field count at the last frame made ready
+ENDIF

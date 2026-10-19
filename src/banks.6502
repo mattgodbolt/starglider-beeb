@@ -62,6 +62,7 @@ WIN_PIC = &9000
 ASSERT WIN_PIC >= ANDY_TOP AND WIN_PIC >= LOG + LOG_ENTRY * LOG_LINES
 SECTION WindowPic, org = WIN_PIC, filename = "WINDOW", guard = &C000, cmos = TRUE
 INCLUDE "../build/gen/window.6502"
+.win_pic_end                        ; (DOCKED lies over the picture while docked: below)
 IF P% < world_list_end
     SKIP world_list_end - P%
 ENDIF
@@ -73,6 +74,19 @@ INCLUDE "screen.6502"
 .speech_c
 INCBIN "../build/gen/speech_c.bin"
 ASSERT HI(speech_c) > HI(ANDY_TOP)
+ENDSECTION
+
+\ DOCKED: Interrogate (interrogate.6502), which docked.6502 reads over the
+\ missile view's window picture while the player is docked, when no
+\ missile view can begin: its texts and glyphs (tools/mkinterrogate.py),
+\ then its code, past the world bank's list phase as the window's is.
+SECTION Docked, org = WIN_PIC, filename = "DOCKED", guard = win_pic_end, cmos = TRUE
+INCLUDE "../build/gen/interrogate.6502"
+IF P% < world_list_end
+    SKIP world_list_end - P%
+ENDIF
+INCLUDE "interrogate.6502"
+.docked_end                         ; (what docked.6502 reads back of the picture)
 ENDSECTION
 
 \ The logic's bank: the rest of the game's logic, which needn't read the

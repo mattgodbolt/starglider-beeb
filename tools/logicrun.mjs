@@ -99,8 +99,10 @@ load("SHAPES", bank(need("BANK_SHAPES")));
 load("WORLD", bank(need("BANK_WORLD")));
 load("LOGIC", bank(need("BANK_LOGIC")));
 // (ground_dots rotates by the drawing's ground rotation, in the loading
-// area's bank with the view's code)
+// area's bank with the view's code; Interrogate is DOCKED's, which lies
+// over the window's picture, as while docked)
 load("WINDOW", bank(need("BANK_PIC")) + need("WIN_PIC") - 0x8000);
+load("DOCKED", bank(need("BANK_PIC")) + need("WIN_PIC") - 0x8000);
 
 const STUB = 0x0140;
 const STUB_DONE = STUB + 6;
@@ -326,6 +328,7 @@ for (const it of camera)
         }
     };
 
+const spikeKeys = need("spike_keys"), SPIKE_KEYS = need("SPIKE_KEYS"), keyAt = need("spike_key_at");
 ram[need("logic_bank")] = need(routine.bank) | need("ROMSEL_ANDY");
 ram[need("logic_call")] = need(routine.call) & 0xff;
 ram[need("logic_call") + 1] = need(routine.call) >> 8;
@@ -360,6 +363,16 @@ for (let n = 0; n < steps.frames.length; n++) {
     frames++;
     const given = (routine.inputs && regionsAt(fr, routine.inputs)) || entry;
     for (const it of items) it.put(it.input ? given : entry);
+    // the keys read_keys' waits and Interrogate's frames took, in turn,
+    // where the routine runs read_keys (the cheat prompt and Interrogate
+    // block or run frames of their own inside it): spike.6502's int_key
+    // gives them, then 0s
+    const keys = ["keys", "step"].includes(routineName) ? (fr.keys ?? []).filter((k) => k[3] === "render").map((k) => k[1]) : [];
+    if (keys.length >= SPIKE_KEYS) throw new Error(`frame ${n}: ${keys.length} keys, more than spike_keys holds`);
+    ram.fill(0, spikeKeys, spikeKeys + SPIKE_KEYS);
+    ram.set(keys, spikeKeys);
+    ram[keyAt + 1] = spikeKeys & 0xff;
+    ram[keyAt + 2] = spikeKeys >> 8;
     const rngD0 = need("rng_d0");
     const d0 = fr.d0 ?? {};                     // (older captures have no d0)
     ram[rngD0] = (d0[routine.from] ?? 0) & 0xff;

@@ -1,0 +1,409 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - G's model viewer (the ST's &031EE), from
+\ the title in cheat mode
+\
+\ One shape at a time on a black screen, turned by three spins, placed by
+\ the mouse's accumulators (here the stick's, input_step's in fe_field),
+\ its type and heading in numbers above it, until Q or Esc go back to the
+\ title (docs/research/st-logic.md, "The keys": viewer_keys &03DB8 and
+\ viewer_draw &0328C). Its frames are drawn through the renderer's
+\ draw_shape (render.6502, by docked.6502's int_shape) into both screens
+\ in turn, each line on its screen's erase list, and shown by the engine's
+\ interrupt as the game's are, no closer than VW_FIELDS apart: the ST's
+\ frames take two VBLs or more. Both screens are cleared whole, as the
+\ ST's are, main RAM's cockpit with them, which a game's start reads back
+\ (front_main.6502's game_start, by cockpit_lost). It's FRONT's, run with
+\ bank 7 paged and ANDY out.
+\ ***************************************************************************
+
+VW_Z0     = &200                    ; the place, and the accumulators (&03206) ...
+VW_Y0     = &50
+VW_SPIN0  = 4                       ; ... and the heading's spin (&03234)
+VW_EYE    = &0A                     ; the stereo eye's offset on x ($288, &03962)
+VW_LAST   = &1C                     ; the last type '.' steps to (&03EA8)
+VW_FIELDS = 2
+VW_NUM_X  = 32                      ; the type's number (&C90: x 32, y 20) ...
+VW_HEAD_X = 64                      ; ... and the heading's (&CA0)
+VW_NUM_Y  = 20
+VW_CELL   = SCREEN + (VW_NUM_Y DIV 8) * SCREEN_ROW + VW_NUM_Y MOD 8
+VW_SPLIT  = 8 - VW_NUM_Y MOD 8      ; a cell's rows from which it lies in the next character row
+
+\ fe_viewer (L_031EE): from the title's G in cheat mode.
+.fe_viewer
+{
+    \ No list phase has made the camera, a ground object's constants or its
+    \ slot since the start, and the viewer's shapes have pitches of their
+    \ own, so draw_shape doesn't read them; but baron follows the routines
+    \ it shares with the game into the game's, where they're read: made 0.
+    ZA_DISCARD cam, kmag, ksign
+    LDX #17
+.made
+    STZ cam,X : ZA_INDEXEDBY 0..17
+    CPX #10 : BCS next
+    STZ kmag,X : ZA_INDEXEDBY 0..9
+    CPX #5 : BCS next
+    STZ ksign,X : ZA_INDEXEDBY 0..4
+.next
+    DEX : BPL made
+    STZ slot
+    \ the spins, angles and place 0, then the place and the accumulators
+    \ (0, &50, &200) and the heading's spin
+    LDX #VW_WORDS - 1
+.zero
+    STZ vw_words,X
+    DEX : BPL zero
+    STZ mouse_x : STZ mouse_x+1
+    LDA #VW_Y0 : STA vw_y : STA mouse_y : STZ mouse_y+1
+    STZ speed_acc : LDA #HI(VW_Z0) : STA vw_z+1 : STA speed_acc+1
+    ASSERT LO(VW_Z0) = 0 AND HI(VW_Y0) = 0
+    LDA #VW_SPIN0 : STA vw_spin + 2
+    \ the switches kept from the last time, and the numbers' colour: the
+    \ last print's, the front end's since it was loaded, else the game's
+    LDA #BANK_PIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    LDA vw_kept_stereo : STA vw_stereo
+    LDA vw_kept_step : STA vw_step
+    LDA note_colour : TAY
+    BANK BANK_PIC
+    LDX fe_st_colour : BMI game
+    LDY vw_masks,X
+.game
+    STY vw_mask
+    \ both screens cleared whole, with two of frame_end's counts, their
+    \ erase lists empty; the cockpit's colours faded in (&06ACC)
+    STZ draw_bank : JSR screen_clear
+    LDA #ACCCON_X : STA draw_bank : JSR screen_clear
+    LDA #2 : JSR fe_frame_ends
+    LDA #&FF : STA cockpit_lost
+    LDA #ERASE_LINES : STA erase_stop : STA erase_stop+1
+    STZ dot_wipes : STZ dot_wipes+1
+    STZ frame_ready : STZ frame_drawn
+    LDA #1 : STA draw_buffer                    ; (the shadow screen is shown: main RAM's first)
+    JSR marks_wipe
+    LDA #LO(game_colours) : LDX #HI(game_colours) : JSR fe_fade_in
+    LDA fields : SEC : SBC #VW_FIELDS : STA vw_ready
+.frame
+    \ (&03258) the angles by the spins; the keys; the frame; animate_shapes
+    LDX #4
+.spin
+    LDA vw_ang,X : CLC : ADC vw_spin,X : STA vw_ang,X
+    LDA vw_ang+1,X : ADC vw_spin+1,X : STA vw_ang+1,X
+    DEX : DEX : BPL spin
+    JSR vw_keys
+    JSR vw_draw
+    JSR vw_show
+    JSR int_animate
+    BANK BANK_PIC
+    BRA frame
+}
+
+\ vw_keys (&03DB8): the key, waited for (1501 fields at most) in P's steps,
+\ else the last made if any.
+.vw_keys
+{
+    LDA vw_step : BEQ last
+    JSR fe_wait_key
+    BRA got
+.last
+    JSR fe_make
+    TXA : BCS got
+    LDA #0
+.got
+    CMP #'3' : BNE not_3
+    LDA vw_stereo : EOR #&FF : STA vw_stereo
+    RTS
+.not_3
+    CMP #'P' : BNE not_p
+    LDA vw_step : EOR #&FF : STA vw_step
+    RTS
+.not_p
+    CMP #'H' : BNE not_h
+    \ every face visible, or culled again, the beep then (&03FEA)
+    LDA all_faces : EOR #&FF : STA all_faces
+    BEQ beep
+    RTS
+.not_h
+    CMP #',' : BNE not_comma
+    LDA int_type : BEQ done
+    DEC int_type
+    RTS
+.not_comma
+    CMP #'.' : BNE not_stop
+    LDA int_type : CMP #VW_LAST : BCS done
+    INC int_type
+    RTS
+.not_stop
+    CMP #'Q' : BEQ quit
+    CMP #&1B : BNE not_quit
+.quit
+    JMP vw_quit
+.not_quit
+    LDY #0
+    JSR vw_stepped : BCS done
+    CMP #'R' : BNE not_r
+    LDX #5
+.spins
+    STZ vw_spin,X
+    DEX : BPL spins
+    BRA beep
+.not_r
+    CMP #'E' : BNE place
+    LDX #11
+.spins_angles
+    STZ vw_spin,X
+    DEX : BPL spins_angles
+    ASSERT vw_ang = vw_spin + 6
+.beep
+    LDA #&14 : LDX #1 : JMP sfx_start           ; (sfx_beep, &04B14)
+.place
+    \ any other key: the place the accumulators', then 8, 2, 4 or 6 on it
+    PHA
+    LDX #5
+.copy
+    LDA mouse_x,X : STA vw_pos,X
+    DEX : BPL copy
+    ASSERT mouse_y = mouse_x + 2 AND speed_acc = mouse_x + 4
+    PLA
+    LDY #VW_PLACE_KEYS
+    JMP vw_stepped
+.done
+    RTS
+}
+
+\ vw_stepped: key A among vw_steps' from entry Y to the end of its group,
+\ carry set if it's there: its word stepped (&03EB6-&03FB8), unless that
+\ is past the limit (above it for a step up, below it for one down), with
+\ the beep if it comes to 0. A kept if it isn't.
+.vw_stepped
+{
+.each
+    CMP vw_steps,Y : BEQ found
+    LDX vw_steps,Y : CPX #VW_END : BEQ none
+    TAX : TYA : CLC : ADC #VW_STEP : TAY : TXA
+    BRA each
+.none
+    CLC
+    RTS
+.found
+    LDX vw_steps+1,Y
+    LDA vw_steps+3,Y : BMI down
+    \ up: kept above the limit
+    LDA vw_steps+4,Y : CMP vw_words,X
+    LDA vw_steps+5,Y : SBC vw_words+1,X
+    BVC up_signed
+    EOR #&80
+.up_signed
+    BMI kept
+    BRA step
+.down
+    LDA vw_words,X : CMP vw_steps+4,Y
+    LDA vw_words+1,X : SBC vw_steps+5,Y
+    BVC down_signed
+    EOR #&80
+.down_signed
+    BMI kept
+.step
+    LDA vw_words,X : CLC : ADC vw_steps+2,Y : STA vw_words,X
+    LDA vw_words+1,X : ADC vw_steps+3,Y : STA vw_words+1,X
+    ORA vw_words,X : BNE kept
+    LDA #&14 : LDX #1 : JSR sfx_start
+.kept
+    SEC
+    RTS
+}
+\ vw_steps: each key's word (an offset in vw_words), step and limit, in two
+\ groups, each ended by VW_END, a key no key is.
+VW_STEP = 6
+VW_END  = &FF
+MACRO VW_KEY key, word, step, limit
+    EQUB key, word - vw_words, LO(step), HI(step), LO(limit), HI(limit)
+ENDMACRO
+.vw_steps
+    VW_KEY 'X', vw_spin, 4, &80                 ; the spins (&03EB6-&03F24)
+    VW_KEY 'S', vw_spin, -4, -&80
+    VW_KEY 'Y', vw_spin + 2, 4, &80
+    VW_KEY 'T', vw_spin + 2, -4, -&80
+    VW_KEY 'Z', vw_spin + 4, 4, &80
+    VW_KEY 'A', vw_spin + 4, -4, -&80
+    VW_KEY 'L', vw_z, &28, &1F40                ; nearer, farther (&03F3A, &03F50)
+    VW_KEY 'K', vw_z, -&28, 0
+    EQUB VW_END
+VW_PLACE_KEYS = P% - vw_steps
+    VW_KEY '6', vw_x, 4, &C8                    ; after the accumulators (&03F66-&03FA8)
+    VW_KEY '4', vw_x, -4, -&C8
+    VW_KEY '2', vw_y, 4, &C8
+    VW_KEY '8', vw_y, -4, -&C8
+    EQUB VW_END
+
+\ vw_quit: Q or Esc (&03FF2): once the last frame is up, the title loop.
+.vw_quit
+{
+.shown
+    LDA frame_ready : BNE shown
+    LDA #BANK_PIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    LDA vw_stereo : STA vw_kept_stereo
+    LDA vw_step : STA vw_kept_step
+    BANK BANK_PIC
+    JMP front_title
+}
+
+\ vw_draw (&0328C): the screen not shown, once the last frame is up,
+\ erased (its lines drawn again as zeros: no box or dot is kept here); the
+\ type and the heading in numbers; the shape, if the type has one, at the
+\ place, by the stereo eye's offset if 3 is on, its pitch with bits above
+\ the 12 the matrix reads, unlike the player's, so draw_shape builds its
+\ own matrix.
+.vw_draw
+{
+.shown
+    LDA frame_ready : BNE shown
+    LDA draw_buffer : EOR #1 : STA draw_buffer
+    TAX : LDA frame.buffer_bank,X : STA draw_bank
+    JSR screen_erase
+    JSR vw_numbers
+    JSR draw_begin
+    LDA int_type : BEQ none
+    STA otype
+    LDA vw_x : STA tx : LDA vw_x+1 : STA tx+1
+    LDA vw_stereo : BEQ eyes
+    LDA tx : CLC : ADC #VW_EYE : STA tx
+    BCC eyes
+    INC tx+1
+.eyes
+    LDA vw_y : STA ty : LDA vw_y+1 : STA ty+1
+    LDA vw_z : STA tz : LDA vw_z+1 : STA tz+1
+    LDA vw_ang : STA ang_p
+    LDA vw_ang+1 : AND #&0F : STA ang_p+1
+    LDA pl_pitch+1 : CLC : ADC #&10 : AND #&F0 : ORA ang_p+1 : STA ang_p+1
+    LDA vw_ang+2 : STA ang_h : LDA vw_ang+3 : STA ang_h+1
+    LDA vw_ang+4 : STA ang_r : LDA vw_ang+5 : STA ang_r+1
+    STZ mat_scaled
+    JSR int_shape
+    BANK BANK_PIC
+.none
+    JMP draw_end
+}
+
+\ vw_show: the frame shown from the next vertical sync, the fields' keys
+\ scanned meanwhile, no sooner than VW_FIELDS after the last, and counted
+\ (engine.6502's frames); frame_end's count.
+.vw_show
+{
+.paced
+    JSR fe_field
+    LDA fields : SEC : SBC vw_ready : CMP #VW_FIELDS : BCC paced
+    LDA fields : STA vw_ready
+    INC frames : BNE counted
+    INC frames+1
+.counted
+    LDA #1 : STA frame_ready
+    JMP fe_frame_ends
+}
+
+\ vw_numbers: the type in decimal (&04598: a space after one digit, which
+\ the ST's view clear takes away) and the heading's 12 bits in four digits
+\ (&04614), in their cells.
+.vw_numbers
+{
+    ZA_AUTO2 v
+    ZA_AUTO1 cell, n
+    LDA int_type : LDX #0
+.tens
+    CMP #10 : BCC units
+    SBC #10 : INX
+    BRA tens
+.units
+    STA n
+    LDY #VW_NUM_X DIV 8 : STY cell
+    TXA : BEQ unit
+    ORA #'0' : JSR digit
+.unit
+    LDA n : ORA #'0' : JSR digit
+    LDA cell : CMP #VW_NUM_X DIV 8 + 2 : BEQ heading
+    LDA #' ' : JSR digit
+.heading
+    LDA #VW_HEAD_X DIV 8 : STA cell
+    LDA vw_ang+2 : STA v : LDA vw_ang+3 : AND #&0F : STA v+1
+    LDX #3
+.power
+    LDY #'0'
+.subtract
+    LDA v : SEC : SBC vw_powers_lo,X : PHA
+    LDA v+1 : SBC vw_powers_hi,X : BCC place
+    STA v+1 : PLA : STA v
+    INY
+    BRA subtract
+.place
+    PLA
+    TYA : JSR digit
+    DEX : BPL power
+    RTS
+.digit
+    PHX
+    LDX cell : INC cell
+    JSR vw_char
+    PLX
+    RTS
+}
+.vw_powers_lo
+    EQUB LO(1), LO(10), LO(100), LO(1000)
+.vw_powers_hi
+    EQUB HI(1), HI(10), HI(100), HI(1000)
+
+\ vw_char: character A in cell X of the numbers' row (8 pixels a cell from
+\ x 0), opaque, in vw_mask, on the screen being drawn: the colour font's
+\ rows, those from VW_SPLIT on in the next character row.
+.vw_char
+{
+    ZA_AUTO2 g, p, q
+    ZA_AUTO1 t
+    PHA
+    TXA : ASL A : ASL A : ASL A : ASL A         ; (two columns of 8 bytes a cell)
+    CLC : ADC #LO(VW_CELL) : STA p
+    LDA #HI(VW_CELL) : ADC #0 : STA p+1
+    LDA p : CLC : ADC #LO(SCREEN_ROW - 8) : STA q
+    LDA p+1 : ADC #HI(SCREEN_ROW - 8) : STA q+1
+    PLA : SEC : SBC #FONT_FIRST : STZ g+1
+    ASL A : ROL g+1 : ASL A : ROL g+1 : ASL A : ROL g+1
+    CLC : ADC #LO(fe_font) : STA g
+    LDA g+1 : ADC #HI(fe_font) : STA g+1
+    LDA draw_bank : TSB acccon
+    LDY #0
+.row
+    LDA (g),Y : STA t
+    LSR A : LSR A : LSR A : LSR A : TAX
+    LDA fe_glyph.spread,X : AND vw_mask : JSR put
+    TYA : ORA #8 : TAY
+    LDA t : AND #15 : TAX
+    LDA fe_glyph.spread,X : AND vw_mask : JSR put
+    TYA : AND #7 : TAY
+    INY : CPY #8 : BNE row
+    LDA draw_bank : TRB acccon
+    RTS
+.put
+    PHA : TYA : AND #7 : CMP #VW_SPLIT : PLA
+    BCS lower
+    STA (p),Y
+    RTS
+.lower
+    STA (q),Y
+    RTS
+}
+
+\ The viewer's colours for the ST's: the view's (the panel's PC_VIEW).
+.vw_masks
+    EQUB VIEW_MASKS
+
+\ The viewer's state: the spins ($1E6-$1EA), the angles ($17A-$17E) and the
+\ place ($194-$198), words; the switches; the colour; the pace.
+.vw_words
+.vw_spin    SKIP 6
+.vw_ang     SKIP 6
+.vw_pos
+.vw_x       SKIP 2
+.vw_y       SKIP 2
+.vw_z       SKIP 2
+VW_WORDS = P% - vw_words
+.vw_stereo  SKIP 1          ; 3's ($2CE)
+.vw_step    SKIP 1          ; P's ($2CC)
+.vw_mask    SKIP 1          ; the numbers' colour, as a MODE 1 byte's bits
+.vw_ready   SKIP 1          ; the field count at the last frame made ready

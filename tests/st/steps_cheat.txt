@@ -1,0 +1,96 @@
+# The cheat prompt (Backspace or Delete, read_keys' &02894), on the keys:
+# its waits (&00C0C, then &00BCA's, each 1501 VBLs at most) block inside
+# read_keys, and tools/st_steps.py logs each key they return, for the
+# port's prompt to be given the same.
+#
+# Q first, as the prompt's effects would stop the keyboard's interrupts
+# under EmuTOS (docs/research/st-logic.md, "Corrections to st.md"); F
+# fixes the sight and / stops the craft, which the cheat mode's toggle
+# needs. Then: a first key that isn't J; J S space A R G, the first entry
+# (the count 1); the same from Backspace, the second (the count back to 0,
+# the energy, shields and laser filled, cheat mode on); a wrong key third
+# (Z for space), and the four keys it swallows; and J S space A R with
+# nothing more, G's wait running out, then a key for the wait after it.
+wait 38
+key 57
+wait 3
+debug parse {arm}
+debug echo \nSEG cheat\n
+wait 1
+key 0x10
+wait 1.5
+key 0x21
+wait 1.5
+down 0x35
+wait 1.5
+up 0x35
+wait 1
+# a first key that isn't J
+key 0x53
+wait 0.5
+key 0x25
+wait 1.5
+# the first entry
+key 0x53
+wait 0.5
+key 0x24
+wait 0.3
+key 0x1f
+wait 0.3
+key 57
+wait 0.3
+key 0x1e
+wait 0.3
+key 0x13
+wait 0.3
+key 0x22
+wait 1.5
+# the second, from Backspace: cheat mode on
+key 0x0e
+wait 0.5
+key 0x24
+wait 0.3
+key 0x1f
+wait 0.3
+key 57
+wait 0.3
+key 0x1e
+wait 0.3
+key 0x13
+wait 0.3
+key 0x22
+wait 1.5
+# a wrong key third, and the four it swallows
+key 0x53
+wait 0.5
+key 0x24
+wait 0.3
+key 0x1f
+wait 0.3
+key 0x2c
+wait 0.3
+key 0x02
+wait 0.3
+key 0x03
+wait 0.3
+key 0x04
+wait 0.3
+key 0x05
+wait 1.5
+# G's wait runs out (1501 VBLs), then the wait after it takes K
+key 0x53
+wait 0.5
+key 0x24
+wait 0.3
+key 0x1f
+wait 0.3
+key 57
+wait 0.3
+key 0x1e
+wait 0.3
+key 0x13
+wait 31
+key 0x25
+wait 1.5
+debug echo \nSEG end\n
+quit

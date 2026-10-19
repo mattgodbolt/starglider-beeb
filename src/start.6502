@@ -59,6 +59,9 @@ SIGHT_CY = 68
     ASSERT logic_work_end - work_end <= 256
     BANK_ANDY BANK_LOGIC
     JSR andy_clear
+    \ the colour the ST's last print leaves, as it loads (D_019F0's 6), for
+    \ G's model viewer (viewer.6502)
+    LDA PC_VIEW + 6 : STA note_colour
     \ the high scores and the game's end in words in ANDY, for the front
     \ end and the panel (front_andy.6502)
     LDX #hs_init_end - hs_init - 1
@@ -79,6 +82,7 @@ SIGHT_CY = 68
     STZ pl_x,X
     DEX : BPL player
     STZ n_slots : STZ docked : STZ silo_missile : STZ all_faces
+    STZ cockpit_lost                            ; (the cockpit's on main RAM's screen: loaded above)
     \ what the ST's start-up sets (init_resolution's sight centre, the
     \ sound on), and the beam's colour as the program loads; the front
     \ end's title loop counts its frame_ends from 0 (front.6502)
@@ -286,6 +290,8 @@ DF_WINDOW = 6
 DF_SPEECH = 7
     EQUS "FRONT  "
 DF_FRONT = 8
+    EQUS "DOCKED "
+DF_DOCKED = 9
 DISC_FILES = (P% - disc_names) DIV 7
 ASSERT DISC_FILES <= DISC_MAX
 
