@@ -618,12 +618,12 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 \ with: shapecode.6502.)
 
 \ far_place: the centre (sc_0, sc_0q), and the vertices' reach on the
-\ screen (plus one) from it against each edge of the window: wholly
-\ inside it, far_inside's bit 7 says no edge needs the window's clip;
-\ wholly outside, C set says the object draws nothing. It comes before
-\ the object's faces and its matrix's scaling, which an object outside
-\ doesn't need, and leaves proj_x set for the object's depth, for
-\ far_setup's B.
+\ screen (with its roundings' slack) from it against each edge of the
+\ window: wholly inside it, far_inside's bit 7 says no edge needs the
+\ window's clip; wholly outside, C set says the object draws nothing. It
+\ comes before the object's faces and its matrix's scaling, which an
+\ object outside doesn't need, and leaves proj_x set for the object's
+\ depth, for far_setup's B.
 \
 \ A vertex within a radius r of the centre goes 128 (dx - X0 dz / 128) /
 \ tz across by B, so up to 128 r / tz (pq, the radius on the screen)
@@ -638,7 +638,17 @@ ZA_AUTO 6, sc_bsign             ; ... and signs
 \ has every vertex past it, and every edge is one the clip rejects.
 \ (1 + c / 256 is at least the root of 1 + (c / 128)^2 up to 4/3 of 128;
 \ 1 + c / 128 is, everywhere)
+\
+\ The reach is made of truncated pixels, each short of the true by under
+\ one: pq (so the radius is under pq + 1, which adds under 1 + 2/3), pq
+\ |X0| / 256, and |X0| as the centre's c (which adds pq / 256 more), and
+\ the centre and each vertex are truncated to pixels. A vertex's pixels
+\ from the centre's are a whole number under 4 2/3 past pq + pq |c| / 256
+\ as truncated, so at most 4; FAR_SLACK is one more, for B's rounding
+\ (far_setup's). (tools/soak.mjs measures how near the vertices come to
+\ it: docs/journal.md, "The soak".)
 FAR_C_MAX = 128 * 4 DIV 3
+FAR_SLACK = 5
 .far_place
 {
     ZA_AUTO1 plo
@@ -726,10 +736,10 @@ FAR_C_MAX = 128 * 4 DIV 3
     LDA #&80 : STA far_inside
 .cut
     CLC : RTS
-\ far_reach: A (low) and Y (high) = pq + pq |c| / 256 rounded up, plus
-\ one, for the centre's c = sc_0,X (pq the multiplicand), or past
-\ FAR_C_MAX pq + pq |c| / 128 rounded up, plus one; C set if |c| is 256
-\ or more.
+\ far_reach: A (low) and Y (high) = pq + pq |c| / 256 rounded down, plus
+\ FAR_SLACK, for the centre's c = sc_0,X (pq the multiplicand), or past
+\ FAR_C_MAX pq + pq |c| / 128 rounded up, plus FAR_SLACK; C set if |c| is
+\ 256 or more.
 .far_reach
     LDA sc_0+1,X : ZA_INDEXEDBY {0, 2}
     BEQ c_pos
@@ -756,7 +766,7 @@ FAR_C_MAX = 128 * 4 DIV 3
     CLC : ADC pq : BCC c_pq                 ; ... + pq ...
     INY : CLC
 .c_pq
-    ADC #2 : BCC c_near                     ; ... + 2
+    ADC #FAR_SLACK : BCC c_near             ; ... + FAR_SLACK
     INY
 .c_near
     CLC : RTS
