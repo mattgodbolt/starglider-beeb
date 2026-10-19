@@ -11,7 +11,12 @@
 #                 (tools/inputcheck.mjs), its front end's flows
 #                 (tools/frontcheck.mjs), the cheat prompt, Interrogate
 #                 and G's model viewer (tools/modalcheck.mjs), its sound
-#                 effects (make sfx) and its speech (make speech)
+#                 effects (make sfx), its speech (make speech), and a
+#                 short soak (tools/soak.mjs)
+#   make soak     the whole disc played by a random player for a long time,
+#                 a seed a process, watched for crashes, hangs, memory
+#                 written where it shouldn't be and state the ST can't
+#                 reach (tools/soak.mjs; SOAK_SEEDS, SOAK_SECS, SOAK_JOBS)
 #   make sfx      the disc's sound effects against the ST's YM writes
 #                 (tools/sfxcheck.mjs, on build/sfx's capture)
 #   make speech   the disc's speech against its packed levels, and a WAV of
@@ -60,7 +65,7 @@ BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short 
 TARGET   = build/starglider.ssd
 DISC     = starglider.ssd
 
-.PHONY: all run disc check spike logic view panel rot sfx speech sfxcapture steps memory fps scenes fetch venv clean
+.PHONY: all run disc check spike logic view panel rot sfx speech sfxcapture steps memory fps scenes fetch venv clean soak
 
 all: $(TARGET) build/spike/SPIKE
 
@@ -169,13 +174,35 @@ build/st build/gen build/spike:
 build/scenes/%/beeb.json: build/scenes/%/scenes.json $(PRG) tools/mkscene.py tools/st_render.py
 	$(PYTHON) -I tools/mkscene.py $(PRG) $< $@
 
-check: build/spike/SPIKE spike panel view rot sfx speech $(TARGET) build/gen/front.json
+check: build/spike/SPIKE spike panel view rot sfx speech $(TARGET) build/gen/front.json build/starglider.lst
 	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike
 	node tools/erasecheck.mjs
 	node tools/disccheck.mjs
 	node tools/inputcheck.mjs
 	node tools/frontcheck.mjs
 	node tools/modalcheck.mjs
+	node tools/soak.mjs --seeds $(CHECK_SOAK_SEEDS) --jobs 4 --secs $(CHECK_SOAK_SECS) --allow $(SOAK_ALLOW) --out build/soak/check
+
+# baron's listing of the disc's program, which tells tools/soak.mjs each
+# file's code from its data and variables (it checks the disc's files
+# against it). The stamp isn't the disc's: only !BOOT holds it.
+build/starglider.lst: $(SOURCES) $(GEN) build/gen/cockpit.bin build/gen/front.6502 build/gen/front_init.6502 build/gen/panel_start.6502 | build
+	$(BARON) -v -o build/listing.ssd --title STARGLIDER --opt 3 src/main.6502 > $@
+
+# The whole disc played for a long time by a random player, a process a
+# seed (tools/soak.mjs): every instruction, write and step watched. Two
+# kinds of what it finds are reported, not failed on, until Matt has
+# settled them: the palette split late (the vertical sync's interrupt held
+# off), and a game's start not the first game's (the missile view's row
+# 130 kept from game to game).
+SOAK_SEEDS ?= 1-24
+SOAK_SECS  ?= 600
+SOAK_JOBS  ?= 12
+SOAK_ALLOW ?= split,fresh
+CHECK_SOAK_SEEDS = 1-4
+CHECK_SOAK_SECS  = 180
+soak: $(TARGET) build/starglider.lst
+	node tools/soak.mjs --seeds $(SOAK_SEEDS) --jobs $(SOAK_JOBS) --secs $(SOAK_SECS) --allow $(SOAK_ALLOW)
 
 # The sound effects on the disc against the ST's YM writes, captured in
 # Hatari (make sfxcapture: slow, needs Hatari), and their gates
