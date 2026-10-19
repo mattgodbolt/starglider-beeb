@@ -12,8 +12,9 @@
 #                 (tools/frontcheck.mjs), the cheat prompt, Interrogate
 #                 and G's model viewer (tools/modalcheck.mjs), the level
 #                 change's flash and fade (tools/flashcheck.mjs), its sound
-#                 effects (make sfx), its speech (make speech), and a
-#                 short soak (tools/soak.mjs)
+#                 effects (make sfx), its speech (make speech), the
+#                 raster on jsbeeb's CRTC and the palette split on it
+#                 (tools/fieldcheck.mjs), and a short soak (tools/soak.mjs)
 #   make soak     the whole disc played by a random player for a long time,
 #                 a seed a process, watched for crashes, hangs, memory
 #                 written where it shouldn't be and state the ST can't
@@ -186,7 +187,8 @@ check: build/spike/SPIKE spike panel view rot sfx speech $(TARGET) build/gen/fro
 	node tools/frontcheck.mjs
 	node tools/modalcheck.mjs
 	node tools/flashcheck.mjs
-	node tools/soak.mjs --seeds $(CHECK_SOAK_SEEDS) --jobs 4 --secs $(CHECK_SOAK_SECS) --allow $(SOAK_ALLOW) --out build/soak/check
+	node tools/fieldcheck.mjs
+	node tools/soak.mjs --seeds $(CHECK_SOAK_SEEDS) --jobs 4 --secs $(CHECK_SOAK_SECS) $(SOAK_ALLOWING) --out build/soak/check
 
 # baron's listing of the disc's program, which tells tools/soak.mjs each
 # file's code from its data and variables (it checks the disc's files
@@ -195,19 +197,18 @@ build/starglider.lst: $(SOURCES) $(GEN) build/gen/cockpit.bin build/gen/front.65
 	$(BARON) -v -o build/listing.ssd --title STARGLIDER --opt 3 src/main.6502 > $@
 
 # The whole disc played for a long time by a random player, a process a
-# seed (tools/soak.mjs): every instruction, write and step watched. Two
-# kinds of what it finds are reported, not failed on, until Matt has
-# settled them: the palette split late (the vertical sync's interrupt held
-# off), and a game's start not the first game's (the missile view's row
-# 130 kept from game to game).
+# seed (tools/soak.mjs): every instruction, write and step watched, and
+# anything it finds fails it. SOAK_ALLOW names kinds of what it finds to
+# report without failing (split,fresh, say), while one is looked into.
 SOAK_SEEDS ?= 1-24
 SOAK_SECS  ?= 600
 SOAK_JOBS  ?= 12
-SOAK_ALLOW ?= split,fresh
+SOAK_ALLOW ?=
+SOAK_ALLOWING = $(if $(SOAK_ALLOW),--allow $(SOAK_ALLOW))
 CHECK_SOAK_SEEDS = 1-4
 CHECK_SOAK_SECS  = 180
 soak: $(TARGET) build/starglider.lst
-	node tools/soak.mjs --seeds $(SOAK_SEEDS) --jobs $(SOAK_JOBS) --secs $(SOAK_SECS) --allow $(SOAK_ALLOW)
+	node tools/soak.mjs --seeds $(SOAK_SEEDS) --jobs $(SOAK_JOBS) --secs $(SOAK_SECS) $(SOAK_ALLOWING)
 
 # The sound effects on the disc against the ST's YM writes, captured in
 # Hatari (make sfxcapture: slow, needs Hatari), and their gates

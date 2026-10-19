@@ -79,13 +79,9 @@ ASSERT (SCREEN AND &7F) = 0 AND (SCREEN_ROW AND &7F) = 0 AND WINDOW_COL0 * 8 + 7
 ASSERT window_clear >= &8000                    ; (it sets X)
 
 \ t1_at(y): the high byte of T1 (the split's timer, engine.6502) below
-\ which the screen's line y has begun, to the nearest of its steps. T1
-\ reaches 0 SPLIT_LEAD microseconds before the panel's first line, as the
-\ split's interrupt takes that long to its writes and the blank they land
-\ in (measured on jsbeeb, as SPLIT_ADJ is: docs/journal.md, "The level
-\ change's flash", 2026-10-18; tools/flashcheck.mjs checks where the
-\ strobe falls).
-SPLIT_LEAD = 52
+\ which the screen's line y has begun, to the nearest of its steps: T1
+\ reaches 0 SPLIT_LEAD microseconds before the panel's first line, every
+\ field (tools/flashcheck.mjs checks where the strobe falls).
 FUNCTION t1_at(y) = ROUND(((PANEL_LINE - y) * SCAN_US - SPLIT_LEAD) / 256)
 
 IF NOT(DEFINED(SPIKE))

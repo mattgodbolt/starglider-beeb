@@ -1605,3 +1605,43 @@ than &1DF. It found four things.
 
 The soak reports the split and a new game's differences (row 130) without
 failing, until they're settled; everything else fails it.
+
+### The split in step with the raster
+
+The soak's two open problems, fixed; the soak now allows nothing it finds.
+
+- **The field.** jsbeeb's full video, booted from !BOOT as a Master boots
+  it, gives MODE 1 a field of 312 lines with screen_mode's R8 of 0, as R4,
+  R9 and R5 make it: 19,968 µs from sync to sync. The MOS's interlace makes
+  it 312.5, which is what jsbeeb's TestMachine counts, as it has no CRTC.
+  `tools/disc.mjs` now gives it engine.6502's FIELD_US, and
+  `tools/fieldcheck.mjs`, in `make check`, reads the CRTC's registers and
+  measures the field on the full video.
+- **T1 runs free.** The split's T1 runs at the field's period from the
+  start, so the split stays put however late the vertical sync's interrupt
+  comes. install_irq starts it at a sync's flag, which it polls for, and
+  then trims the poll's lateness by reading T1 at the flag over eight
+  fields. Since then T1 times out at SPLIT_LEAD before the panel's first
+  line in every field, to within its microsecond.
+- **The writes held to their moment.** A tick that waited for the split's
+  flag handed the split to irq_handler sooner than an interrupt's own way,
+  so its writes began in line 128's display. irq_handler now waits for T1's
+  count to show SPLIT_HOLD past 0 before it writes.
+- **A race in the effects' tick.** A tick whose interrupt came just before
+  the split's time-out read T1 just after it, when its count was already
+  the next field's, ran its tick, and the split came a line late, about ten
+  times in four hours of play. sound_tick now looks at the split's flag
+  after the count.
+- **The disc's NMIs** still hold the split while the disc reads in play
+  (decision 55).
+- **Row 130.** game_start draws the window picture's last row into main
+  RAM's screen before the copy to the shadow screen, with no disc time, so
+  each game starts with row 130 the cockpit's on both screens, as the ST's
+  sub_039B2 copies the whole picture.
+
+Over 24 seeds of ten minutes: before, 1.35% of splits more than 20 µs
+after the earliest and 0.53% more than a scan line, the worst 344 µs; after,
+none more than 20 µs late but for the disc's NMIs, the worst 15 µs beyond
+them. A further 16 emulated hours (376 games, 412 dockings, 197 missiles,
+201 Interrogates, 311 cheat prompts) found nothing (2026-10-19).
+

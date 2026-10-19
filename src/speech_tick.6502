@@ -49,7 +49,7 @@
     LDA sp_due_hi + 1 : ADC #HI(SPEECH_PERIOD) : STA sp_due_hi + 1
     BRA sp_owe
 .sp_near
-    \ (until its flag, or T1 past 0 without one, as no split was due)
+    \ (until its flag, or T1 past 0 without one, should it have been taken)
     BIT usrvia_ifr : BVS sp_yield
     LDA usrvia_t1ch : BEQ sp_near
     BRA sp_more
@@ -73,7 +73,7 @@
     RTI
 .sp_split
     \ the split near: its flag, then the engine, back to the count; or T1
-    \ past 0 without one, as no split was due
+    \ past 0 without one, should it have been taken
     BIT usrvia_ifr : BVS sp_split_first
     LDA usrvia_t1ch : BEQ sp_split
     BIT usrvia_ifr : BVS sp_split_first         ; (should it have come between)

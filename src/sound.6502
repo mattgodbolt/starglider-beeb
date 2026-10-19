@@ -73,13 +73,15 @@ ENV_TWO       = 32
 \ it starts again; at the effect's end (the sweeps or halves d1 gave) the
 \ timer stops and channel A's volume goes to 0. A and X.
 \ A tick due within 256 microseconds of the palette split (User VIA T1's
-\ count, which runs on past 0, its high byte 0) lets the split go first,
-\ which the tick would hold up past its window: it waits for the split's
-\ flag, for the interrupt to take it at once (engine.6502), and leaves its
-\ own for the interrupt to come back to.
+\ count, which runs on past 0, its high byte 0), or one that the split's
+\ time-out has passed since the interrupt looked for it, lets the split go
+\ first, which the tick would hold up past its window: it waits for the
+\ split's flag, for the interrupt to take it at once (engine.6502), and
+\ leaves its own for the interrupt to come back to.
 .sound_tick
 {
-    LDA usrvia_t1ch : BNE clear                 ; (its low byte read would acknowledge it)
+    LDA usrvia_t1ch : BEQ split                 ; (its low byte read would acknowledge it)
+    BIT usrvia_ifr : BVC clear                  ; (its count then is the next field's)
 .split
     BIT usrvia_ifr : BVC split
     RTS

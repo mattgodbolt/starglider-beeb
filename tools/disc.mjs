@@ -17,9 +17,17 @@ export function ssdFiles(path) {
     return files;
 }
 
+// The field as the CRTC makes it for the disc (engine.6502's FIELD_US:
+// MODE 1's rows, with screen_mode's interlace off), in 2MHz cycles, which
+// tools/fieldcheck.mjs measures on jsbeeb's full video. The TestMachine
+// has no CRTC: its field is a count of cycles, the MOS's interlaced 312.5
+// lines unless it's told.
+export const fieldCycles = (sym) => 2 * sym.FIELD_US;
+
 export function loadDisc(tm, path, sym) {
     tm.loadDiscData(fs.readFileSync(path));
     const cpu = tm.processor;
+    cpu.video.fieldCycles = fieldCycles(sym);
     cpu.ramRomOs.set(ssdFiles(path).SG, 0x0e00);
     cpu.pc = sym.start;
 }

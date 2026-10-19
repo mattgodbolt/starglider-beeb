@@ -139,19 +139,64 @@ INCLUDE "../build/gen/panel_start.6502"
 \ install_irq: engine.6502's irq_handler on IRQ1V, and only the vertical
 \ sync's and the split's interrupts on: nothing goes to the OS, whose IRQ
 \ entry (MOS 3.20, &E59E) reads nothing but IRQ1V, so HAZEL can stay
-\ paged over its code.
+\ paged over its code. The split's T1 runs free from here on, at the
+\ field's period, in step with the vertical sync (engine.6502). It starts
+\ at a sync's flag, polled for, with the count from the flag to the
+\ split's moment (SPLIT_SYNC), and so late by however long the poll took
+\ to see the flag. Then it's read at each of SYNC_TRIES flags, and the most
+\ it reads is what a poll that saw the flag at once would, SYNC_SEEN after
+\ it: what that is over SPLIT_SYNC less SYNC_SEEN is how late, and one
+\ count is shortened by it. (It starts at the second sync, so that a
+\ whole field has passed under screen_mode's registers.)
+SYNC_TRIES = 8                      ; (the poll's lag at the flag differs from field to field)
+SYNC_SEEN  = 7                      ; (measured on jsbeeb: docs/journal.md, "The split in step with the raster", 2026-10-19)
+ASSERT LO(SPLIT_SYNC) >= 32 AND LO(SPLIT_SYNC) < 256 - 32   ; (the reads, a poll's few microseconds off it, don't wrap)
 .install_irq
+{
+    ZA_AUTO1 seen
     SEI
     LDA #&7F : STA sysvia_ier : STA usrvia_ier  ; anything not serviced would
                                                 ; hold IRQ asserted
     LDA #LO(irq_handler) : STA irq1v
     LDA #HI(irq_handler) : STA irq1v+1
-    LDA usrvia_acr : AND #&3F : STA usrvia_acr  ; T1 one-shot
-    LDA #2 : STA sysvia_ifr                     ; a vertical sync already flagged
+    LDA usrvia_acr : AND #&3F : ORA #&40 : STA usrvia_acr  ; T1 free-running
+    LDA #LO(SPLIT_SYNC) : STA usrvia_t1cl
+    JSR sync_flag : JSR sync_flag
+    LDA #HI(SPLIT_SYNC) : STA usrvia_t1ch       ; starts the count
+    LDA #LO(SPLIT_LATCH) : STA usrvia_t1ll
+    LDA #HI(SPLIT_LATCH) : STA usrvia_t1lh
+    \ how late
+    STZ seen
+    LDX #SYNC_TRIES
+.try
+    JSR sync_flag
+    LDA usrvia_t1cl
+    CMP seen : BCC fewer
+    STA seen
+.fewer
+    DEX : BNE try
+    \ the next count shorter by it, and a field's again once T1 has it
+    LDA seen : SEC : SBC #LO(SPLIT_SYNC - SYNC_SEEN) : STA seen
+    LDA #LO(SPLIT_LATCH) : SEC : SBC seen : STA usrvia_t1ll
+    LDA #HI(SPLIT_LATCH) : SBC #0 : STA usrvia_t1lh
+    LDA #&40
+.taken
+    BIT usrvia_ifr : BEQ taken                  ; (T1 is bit 6: its time-out, and the shorter count begun)
+    LDA #LO(SPLIT_LATCH) : STA usrvia_t1ll
+    LDA #HI(SPLIT_LATCH) : STA usrvia_t1lh
+    LDA usrvia_t1cl                             ; acknowledged
+    LDA #2 : STA sysvia_ifr                     ; (the syncs polled for)
     LDA #&82 : STA sysvia_ier                   ; CA1: the vertical sync
     LDA #&C0 : STA usrvia_ier                   ; T1: the split
     CLI
     RTS
+\ sync_flag: the next vertical sync's flag, polled for
+.sync_flag
+    LDA #2 : STA sysvia_ifr                     ; a vertical sync already flagged
+.flag
+    BIT sysvia_ifr : BEQ flag
+    RTS
+}
 
 \ input_init: each axis read, and taken as where the stick is, for the
 \ accumulators to move from; the conversions the interrupt reads begun

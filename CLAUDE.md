@@ -144,6 +144,10 @@ the ST's mouse moves.
   another slot's exploding byte. And it copies random32's state into zero
   page for its own `h_random32`: anything the handlers call takes numbers
   from that, never from random32 or rng32 directly.
+- User VIA T1 runs free at the field's period, put in step with the raster
+  by `install_irq` alone: nothing else writes its counter, or the split
+  moves. Its latch reloads at time-out, so after the split T1 reads the
+  next field's count.
 - `box_end` logs an object's box onto whichever screen `box_aim` last
   aimed at: call `box_aim` before drawing an object outside
   `view_objects` (Interrogate, the viewer).

@@ -38,14 +38,20 @@ const fail = (what) => {
 };
 
 const m = await machine();
-// the split's lateness: from User VIA T1's start (its high byte written at
-// the vertical sync) to the split's first palette write
-let t1at = null, splits = [];
+// the split's lateness: from the vertical sync's start to the split's first
+// palette write, by its own code (engine.6502's irq_handler)
+let syncAt = null, splits = [];
+const setVBlankInt = m.cpu.sysvia.setVBlankInt;
+m.cpu.sysvia.setVBlankInt = function (level) {
+    if (level) syncAt = m.now();
+    return setVBlankInt.call(this, level);
+};
 m.cpu.debugWrite.add((addr) => {
-    if (addr === 0xfe65) t1at = m.now();
-    else if (addr === 0xfe21 && t1at !== null && m.now() - t1at > 1000) {
-        splits.push(m.now() - t1at);
-        t1at = null;
+    if (addr !== sym.ula_pal || syncAt === null) return false;
+    const pc = m.cpu.oldPcArray[m.cpu.oldPcIndex];
+    if (pc >= sym.irq_handler && pc < sym["irq_handler.not_split"]) {
+        splits.push(m.now() - syncAt);
+        syncAt = null;
     }
     return false;
 });

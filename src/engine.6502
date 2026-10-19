@@ -29,32 +29,57 @@ ASSERT SHOTS >= 4 * MAX_STEPS           ; every shot a frame's steps fire kept f
 \ (PANEL_COLOUR_3), so its four ULA entries (10, 11, 14 and 15: MODE 1
 \ picks among a logical colour's four by the pixels beside it) are
 \ written in the horizontal blank before the panel's first scan line.
-\ T1 is started at the vertical sync, which screen_mode puts
-\ SYNC_TO_TOP scan lines before the screen's first. The entries' bytes
-\ for each side are in c3_ula (c3_set's), which the front end, whose
-\ screens have no split, makes the same (front_main.6502's palette_set):
-\ the split goes on beneath it, as sound_tick and the speech's tick time
-\ themselves by it.
+\ User VIA T1 times it, running free at the field's period from a start in
+\ step with the vertical sync (start.6502's install_irq), so that it comes
+\ at the same place on the raster every field, however long anything
+\ holds off the sync's interrupt. The entries' bytes for each side are in
+\ c3_ula (c3_set's), which the front end, whose screens have no split,
+\ makes the same (front_main.6502's palette_set): the split goes on
+\ beneath it, as sound_tick and the speech's tick time themselves by it.
 VIEW_COLOUR_3  = 7                  ; white
 PANEL_COLOUR_3 = 4                  ; blue
 PANEL_LINE     = VIEW_YMAX + 1
+\ The raster: the vertical sync begins SYNC_TO_TOP scan lines before the
+\ screen's first (screen_mode's R7), and the System VIA flags it at its
+\ end, VSYNC_LINES on (the MOS's sync width, R3, and CA1's falling edge,
+\ its PCR); a field is MODE 1's 39 character rows of 8 lines (the MOS's R4
+\ and R9) with no adjust (R5), and no half line, as screen_mode turns
+\ interlace off. (tools/fieldcheck.mjs measures them on jsbeeb's CRTC.)
 SYNC_TO_TOP    = (39 - (34 - (32 - SCREEN_ROWS) DIV 2)) * 8
+VSYNC_LINES    = 2
 SCAN_US        = 64
-\ SPLIT_ADJ is measured on jsbeeb, the middle of the window in which the
-\ writes land in the blank (docs/journal.md, "The cockpit", 2026-10-18):
-\ -D SPLIT_SWEEP=n builds with n instead, and main.6502's split_test.
+FIELD_US       = 39 * 8 * SCAN_US
+\ SPLIT_LEAD: T1 reaches 0 that many microseconds before the panel's first
+\ line, the time the split's interrupt takes to its writes, set so that
+\ they land in the middle of the blank. SPLIT_HOLD: the writes wait until
+\ that long after T1's 0, the interrupt's quickest way to them, as a tick
+\ that waited for the split and hands it on (sound.6502, speech_tick.6502)
+\ comes sooner. Both measured on jsbeeb's full video (docs/journal.md, "The
+\ split in step with the raster", 2026-10-19), and tools/fieldcheck.mjs
+\ checks where the writes land: -D SPLIT_SWEEP=n builds with n for
+\ SPLIT_LEAD, and main.6502's split_test.
 IF DEFINED(SPLIT_SWEEP)
-    SPLIT_ADJ = SPLIT_SWEEP
+    SPLIT_LEAD = SPLIT_SWEEP
 ELSE
-    SPLIT_ADJ = -222
+    SPLIT_LEAD = 49
 ENDIF
-SPLIT_T1 = (SYNC_TO_TOP + PANEL_LINE) * SCAN_US - 2 + SPLIT_ADJ
+SPLIT_HOLD = 22
+\ T1's count from the sync's flag to the split's moment, and its latch, a
+\ field's (a count of n times out n + 2 microseconds on, the VIA's
+\ free-running period)
+SPLIT_SYNC  = (SYNC_TO_TOP - VSYNC_LINES + PANEL_LINE) * SCAN_US - SPLIT_LEAD - 2
+SPLIT_LATCH = FIELD_US - 2
+\ (the hold reads the count's low byte alone, which turns over
+\ LO(SPLIT_LATCH) microseconds after T1's 0: a split held off longer would
+\ wait a turn more, which the soak would find, but nothing holds it off
+\ half so long)
+ASSERT LO(SPLIT_LATCH) >= SPLIT_HOLD + 128
 
 \ (start.6502's install_irq puts irq_handler on IRQ1V, once.)
 
 \ irq_handler: the split, when T1 comes; at each vertical sync the view's
-\ colours back, T1 started, the field counted, a frame drawn shown from
-\ it, by ACCCON's D (TSB and TRB, which the line drawer's X changes can't
+\ colours back, the field counted, a frame drawn shown from it, by
+\ ACCCON's D (TSB and TRB, which the line drawer's X changes can't
 \ split), with its colour 0 (decision 24: the ST writes its flash as its
 \ frame is shown), the controls read (input.6502) and the sound's field
 \ (sound.6502); between, the sound effect's ticks, on System VIA T1 while
@@ -67,7 +92,9 @@ SPLIT_T1 = (SYNC_TO_TOP + PANEL_LINE) * SCAN_US - 2 + SPLIT_ADJ
     TXA : PHA
 .dispatch
     BIT usrvia_ifr : BVC not_split              ; (T1 is bit 6)
+.hold
     LDA usrvia_t1cl                             ; acknowledged
+    CMP #LO(SPLIT_LATCH - SPLIT_HOLD) + 1 : BCS hold
     FOR i = 0..3
         LDA c3_ula + C3_PANEL + i : STA ula_pal
     NEXT
@@ -81,8 +108,6 @@ SPLIT_T1 = (SYNC_TO_TOP + PANEL_LINE) * SCAN_US - 2 + SPLIT_ADJ
 .not_sound
     LDA sysvia_ifr : AND #2 : BEQ done
     STA sysvia_ifr                              ; acknowledged
-    LDA #LO(SPLIT_T1) : STA usrvia_t1cl
-    LDA #HI(SPLIT_T1) : STA usrvia_t1ch         ; starts the count
     FOR i = 0..3
         LDA c3_ula + C3_VIEW + i : STA ula_pal
     NEXT

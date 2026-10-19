@@ -656,8 +656,12 @@ END_BANDS_TOP = 104 DIV BAND_LINES              ; (the boxes of 3 and 5 above, 4
 \ puts it back.
 BAND_LINES = 4
 BANDS = SCREEN_ROWS * 8 DIV BAND_LINES
+\ BAND_ADJ: the palette split's adjustment when the vertical sync's
+\ interrupt started its timer, as it starts the bands' (docs/journal.md,
+\ "The cockpit", 2026-10-18)
+BAND_ADJ = -222
 BAND_EARLY = 4                                  ; (its writes start later in it than the split's)
-BAND_FIRST = SYNC_TO_TOP * SCAN_US - 2 + SPLIT_ADJ - BAND_EARLY
+BAND_FIRST = SYNC_TO_TOP * SCAN_US - 2 + BAND_ADJ - BAND_EARLY
 BAND_T2 = BAND_LINES * SCAN_US
 .band_irq
 {

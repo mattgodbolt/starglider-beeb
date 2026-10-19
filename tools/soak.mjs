@@ -72,6 +72,9 @@ const flag = (name) => {
 };
 const SECS = Number(opt("secs", "300"));
 const SEEDS = opt("seeds", null);
+// a split late, in cycles: LATE is speechcheck's measure; a scan line later
+// is a line of the panel in the view's colour
+const LATE = 40, SCAN = 128;
 
 if (SEEDS) await parent();
 else await child();
@@ -117,16 +120,43 @@ async function parent() {
     );
     const bad = results.filter((x) => x.code !== 0);
     const emu = results.reduce((s, x) => s + (x.r ? x.r.secs : 0), 0);
+    console.log(spread(results.filter((x) => x.r).map((x) => x.r.splits)));
     console.log(`soak: ${results.length} seeds, ${(emu / 60).toFixed(1)} minutes emulated in ${((Date.now() - t0) / 60000).toFixed(1)} minutes; ` +
         `${bad.length} found something`);
     process.exit(bad.length ? 1 : 0);
+}
+
+// the splits' spread over every seed, by what was going on: how many came
+// more than LATE (speechcheck's late) and more than a scan line after each
+// seed's earliest, the worst beyond the disc's NMIs, and the worst of the
+// sync's interrupt then; and apart, those the NMIs held so late
+function spread(all) {
+    const by = {};
+    const KEYS = ["n", "late", "line", "held", "heldLine"], WORST = ["worst", "worstHeld", "worstSync"];
+    for (const s of all)
+        for (const [ctx, b] of Object.entries(s.by)) {
+            const t = (by[ctx] ??= Object.fromEntries([...KEYS, ...WORST].map((k) => [k, 0])));
+            for (const k of KEYS) t[k] += b[k] ?? 0;
+            for (const k of WORST) t[k] = Math.max(t[k], b[k] ?? 0);
+        }
+    const sum = (k) => Object.values(by).reduce((s, b) => s + b[k], 0);
+    const most = (k) => Math.max(0, ...Object.values(by).map((b) => b[k])) / 2;
+    const pc = (a, n) => `${((100 * a) / Math.max(1, n)).toFixed(2)}%`;
+    const n = sum("n");
+    return [`splits: ${n}, ${pc(sum("late"), n)} more than ${LATE / 2}us after the earliest, ${pc(sum("line"), n)} more than a scan line, ` +
+        `the worst ${most("worst")}us beyond the disc's NMIs; held by them, ${pc(sum("held"), n)} more than ${LATE / 2}us, ` +
+        `${pc(sum("heldLine"), n)} a line, the worst ${most("worstHeld")}us`,
+        ...Object.entries(by).sort(([, a], [, b]) => b.n - a.n).map(([ctx, b]) =>
+            `  ${ctx}: ${b.n}, ${pc(b.late, b.n)} late, ${pc(b.line, b.n)} a line, the worst ${b.worst / 2}us beyond the NMIs; ` +
+            `held ${pc(b.held, b.n)}, ${pc(b.heldLine, b.n)} a line, the worst ${b.worstHeld / 2}us (the sync's interrupt ${b.worstSync / 2}us)`)].join("\n");
 }
 
 // a seed's line, its problems', and a line for each allowed kind's
 function summary(r) {
     const head = `seed ${r.seed}: ${r.secs.toFixed(0)}s, ${r.steps} steps, ${r.frames} frames, ${r.games} games, ` +
         `levels to ${r.maxLevel}, ${r.dockings} dockings, ${r.missiles} missiles, deepest stack &${r.minS.toString(16)}, ` +
-        `splits ${r.splits.n} (${r.splits.late} late, the worst by ${r.splits.worst} cycles), worst field ${r.worstField}, ` +
+        `splits ${r.splits.n} (${r.splits.late} late, the worst by ${r.splits.worst} cycles beyond the disc's NMIs; ` +
+        `${r.splits.held ?? 0} held by them, the worst by ${r.splits.worstHeld ?? 0}), worst field ${r.worstField}, ` +
         `a vertex past its reach by ${r.reachPast}; ` +
         Object.entries(r.entered ?? {}).map(([p, n]) => `${p} ${n}`).join(", ");
     const allowed = new Set(r.allow ?? []);
@@ -148,7 +178,7 @@ async function child() {
     const ALLOW = new Set(opt("allow", "").split(",").filter(Boolean));   // kinds of problem reported, not failed on
     const census = new Map();
     const { loadSymbols } = await import(pathToFileURL(path.join(root, "tools/beeb.mjs")).href);
-    const { loadDisc, ssdFiles } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
+    const { loadDisc, ssdFiles, fieldCycles } = await import(pathToFileURL(path.join(root, "tools/disc.mjs")).href);
     const { TestMachine } = await import(pathToFileURL(path.join(root, "node_modules/jsbeeb/src/test-machine.js")).href);
     const disc = path.join(root, "build/starglider.ssd");
     const sym = loadSymbols(path.join(root, "build/starglider.json"));
@@ -165,7 +195,7 @@ async function child() {
     const cpu = tm.processor;
     const ram = cpu.ramRomOs;
     const CYCLES = 2000000;
-    const FIELD = cpu.video.fieldCycles;                // (the TestMachine's field: it has no CRTC)
+    const FIELD = fieldCycles(sym);                     // (the TestMachine's, which loadDisc sets)
     const SHADOW = 0x8000;                              // (jsbeeb's array keeps shadow RAM there on)
     const now = () => cpu.cycleSeconds * CYCLES + cpu.currentCycles;
     const secs = () => now() / CYCLES;
@@ -417,6 +447,10 @@ async function child() {
         }
         if (op === 0x40 && intStack.length && cpu.s === intStack[intStack.length - 1].s - 3) {
             const e = intStack.pop();
+            if (e.vector === NMI0) {
+                nmis.push([e.at, now() + 6]);           // (with the RTI's own six cycles)
+                if (nmis.length > 8) nmis.shift();
+            }
             if (cpu.romsel !== e.romsel && cpu.romsel !== e.bankNow)
                 problem("interrupt", `romsel${e.vector}`, `an interrupt (to &${e.vector.toString(16)}) returned with ROMSEL &${cpu.romsel.toString(16)}, ` +
                     `taken with &${e.romsel.toString(16)} (bank_now &${e.bankNow.toString(16)})`);
@@ -432,7 +466,7 @@ async function child() {
             if (armed) problem("brk", `${this.pc}`, `BRK at &${((this.pc - 1) & 0xffff).toString(16)} (${where(physPc((this.pc - 1) & 0xffff))})`, { stop: true });
             return brk.call(this, isIrq);
         }
-        const e = { s: this.s, romsel: this.romsel, acccon: this.acccon, bankNow: ram[sym.bank_now], vector: 0 };
+        const e = { s: this.s, romsel: this.romsel, acccon: this.acccon, bankNow: ram[sym.bank_now], vector: 0, at: now() };
         brk.call(this, isIrq);
         e.vector = this.pc;
         intStack.push(e);
@@ -446,50 +480,59 @@ async function child() {
     const WIN_X0 = sym.WINDOW_COL0, WIN_X1 = sym.WINDOW_COL0 + sym.WINDOW_COLS;
     let loading = null;                                 // the image the disc's NMI routine is filling
     let lastField = 0, worstField = 0;
-    let t1at = 0;
     // The palette split must land in the horizontal blank between the view's
     // last line and the panel's first (engine.6502), a fixed time from the
     // vertical sync's start, which jsbeeb's TestMachine keeps (it has no
-    // CRTC: its field is a count of cycles). Each split's last write is
-    // timed from the sync, and how much later than the earliest is counted
-    // by what else was going on: a read's NMIs, speech, an effect's ticks, a
-    // key held (the vertical sync's longest work). LATE is speechcheck's
-    // measure of late; a scan line later is a line of the panel in the
-    // view's colour.
-    const LATE = 40, SCAN = 128;
-    let splitN = 0, vsyncAt = 0;
+    // CRTC: its field is a count of cycles, the CRTC's: tools/disc.mjs).
+    // Each split's last write by the split's own code (irq_handler's: not
+    // the level flash's strobe, nor its put-back below the split) is timed
+    // from the sync, and how much later than the earliest is counted by
+    // what else was going on: a read's NMIs, speech, an effect's ticks, a
+    // key held (the vertical sync's longest work). The sync's interrupt is
+    // timed too, by its count of the field, which the split no longer waits
+    // on. The disc's NMIs, which nothing holds off, are timed from their
+    // entry to their RTI: a split no later than LATE beyond the time they
+    // took since its earliest moment is theirs, and counted apart (held);
+    // one later than that is a problem. (LATE and SCAN, above.)
+    const SPLIT0 = sym.irq_handler, SPLIT1 = sym["irq_handler.not_split"];
+    const nmis = [];
+    const nmiTime = (from, to) => nmis.reduce((t, [a, b]) => t + Math.max(0, Math.min(b, to) - Math.max(a, from)), 0);
+    let splitN = 0, vsyncAt = 0, syncNow = 0;
     const setVBlankInt = cpu.sysvia.setVBlankInt;
     cpu.sysvia.setVBlankInt = function (level) {
         if (level) vsyncAt = now();
         return setVBlankInt.call(this, level);
     };
-    const splits = { n: 0, least: Infinity, leastT1: Infinity, leastSync: Infinity, by: {} };
+    const splits = { n: 0, least: Infinity, leastSync: Infinity, by: {} };
     const context = () => ["disc", "speech", "effect", "key"].filter((_, i) =>
         [ram[sym.fdc_state], word(sym.sample_left) | word(sym.sample_left + 2), ram[sym.ta_kind], ram[sym.keys_held]][i]).join("+") || "none";
-    let syncHistory = null;
     function syncLate(v) {
         splits.leastSync = Math.min(splits.leastSync, v);
-        syncHistory = v - splits.leastSync > SCAN ? { late: v - splits.leastSync, routines: pcRoutines() } : null;
+        syncNow = v - splits.leastSync;
     }
-    function splitAt(d, t1) {
+    function splitAt(d) {
         const ctx = context();
-        const b = (splits.by[ctx] ??= { n: 0, late: 0, line: 0, worst: 0, worstT1: 0, worstSync: 0 });
+        const b = (splits.by[ctx] ??= { n: 0, late: 0, line: 0, held: 0, heldLine: 0, worst: 0, worstHeld: 0, worstSync: 0 });
         splits.n++;
         b.n++;
         splits.least = Math.min(splits.least, d);
-        splits.leastT1 = Math.min(splits.leastT1, t1);
         if (splits.n < 100) return;
         const late = d - splits.least;
-        if (late > LATE) b.late++;
-        b.worst = Math.max(b.worst, late);
-        b.worstT1 = Math.max(b.worstT1, t1 - splits.leastT1);
-        b.worstSync = Math.max(b.worstSync, d - t1 - splits.leastSync);
-        if (late > SCAN) {
-            b.line++;
-            problem("split", `late:${ctx}`, `the palette split ${late} cycles after its earliest from the vertical sync ` +
-                `(${ctx}; ${d - t1 - splits.leastSync} of them the sync's interrupt's, ${t1 - splits.leastT1} the split's)`,
-                { detail: { split: pcRoutines(), sync: syncHistory } });
+        // (from the earliest less a line: the interrupt's way to the split)
+        const own = late - nmiTime(vsyncAt + splits.least - SCAN, now());
+        b.worstSync = Math.max(b.worstSync, syncNow);
+        b.worst = Math.max(b.worst, own);
+        if (late > LATE && own <= LATE) {
+            b.held++;
+            if (late > SCAN) b.heldLine++;
+            b.worstHeld = Math.max(b.worstHeld, late);
+            return;
         }
+        if (late <= LATE) return;
+        b.late++;
+        if (late > SCAN) b.line++;
+        problem("split", `late:${ctx}`, `the palette split ${late} cycles after its earliest from the vertical sync, ` +
+            `${own} beyond the disc's NMIs (${ctx}; the sync's interrupt ${syncNow} after its earliest)`, { detail: { split: pcRoutines() } });
     }
     // the last instructions run, by routine, the latest last
     function pcRoutines() {
@@ -505,17 +548,14 @@ async function child() {
     const NMI0 = 0x0d00, NMI1 = sym.NMI_PAGE + 0x40;
     cpu.debugWrite.add((addr, val) => {
         if (addr >= 0xfc00 && addr < 0xff00) {
-            if (addr === 0xfe65) {
-                t1at = now();
-                splitN = 0;
-                // the vertical sync's interrupt, late: what ran meanwhile
-                if (phase === "play" && armed) syncLate(t1at - vsyncAt);
-            } else if (addr === 0xfe21 && t1at && now() - t1at > 1000) {
-                // the split's four writes, after the vertical sync's: when, from
-                // the sync's start, and from T1's
-                if (++splitN === 4) {
-                    if (phase === "play") splitAt(now() - vsyncAt, now() - t1at);
-                    t1at = 0;
+            if (addr === 0xfe21) {
+                // the split's four writes: when the last lands, from the
+                // sync's start
+                const pc = cpu.oldPcArray[cpu.oldPcIndex];
+                if (pc < SPLIT0 || pc >= SPLIT1) splitN = 0;
+                else if (++splitN === 4) {
+                    if (phase === "play") splitAt(now() - vsyncAt);
+                    splitN = 0;
                 }
             }
             return;
@@ -525,6 +565,7 @@ async function child() {
         const phys = cpu.memLook[so] + addr;
         if (phys === sym.fields) {
             const t = now();
+            if (phase === "play" && armed) syncLate(t - vsyncAt);
             if (lastField && armed) {
                 const gap = t - lastField;
                 if (Math.abs(gap - FIELD) > Math.abs(worstField)) worstField = gap - FIELD;
@@ -1407,7 +1448,8 @@ async function child() {
         minSAt: where(minSAt),
         worstField,
         splits: { n: splits.n, least: splits.least, late: byCtx.reduce((s, b) => s + b.late, 0),
-            worst: Math.max(0, ...byCtx.map((b) => b.worst)), by: splits.by },
+            worst: Math.max(0, ...byCtx.map((b) => b.worst)), held: byCtx.reduce((s, b) => s + b.held, 0),
+            worstHeld: Math.max(0, ...byCtx.map((b) => b.worstHeld)), by: splits.by },
         problems: [...problems.values()],
         allow: [...ALLOW],
         screenOut: Object.fromEntries(screenRules),
