@@ -70,8 +70,9 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
     RTS
 
 \ What runs fields of its own inside a step (decision 17) takes no time
-\ here: the engine's pauses, and DOCKED's reads (docked.6502), which the
-\ harness has loaded; Interrogate's frames draw nothing (interrogate.6502).
+\ here: the engine's pauses, DOCKED's reads (docked.6502), which the
+\ harness has loaded, and the level change's look (code.6502's
+\ level_flash); Interrogate's frames draw nothing (interrogate.6502).
 \ The cheat prompt's waits and Interrogate's frames take the keys the
 \ ST's took, in turn, from spike_keys, where tools/logicrun.mjs puts the
 \ capture's (0 past the last).
@@ -79,6 +80,7 @@ SECTION Spike, org = &0E00, filename = "SPIKE", guard = MAIN_TOP, cmos = TRUE
 .pause_end
 .docked_wait
 .window_ready
+.level_flash
     RTS
 .wait_key
 .wait_key_timeout

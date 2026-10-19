@@ -41,33 +41,157 @@ WINDOW_COL0 = VIEW_XMIN DIV 4
 WINDOW_COLS = VIEW_XMAX DIV 4 + 1 - WINDOW_COL0
 ASSERT VIEW_XMIN MOD 4 = 0 AND VIEW_XMAX MOD 4 = 3
 
+\ (each character row starts at a multiple of &80, so the window's first
+\ column and the line in the row are ORed into its address's low byte)
+ASSERT (SCREEN AND &7F) = 0 AND (SCREEN_ROW AND &7F) = 0 AND WINDOW_COL0 * 8 + 7 < &80
+
 \ window_clear: the view's window cleared, on the screen draw_bank names:
-\ the cockpit around it stays.
+\ the cockpit around it stays; window_fill: filled with A's byte (the
+\ level change's, flash_look).
 .window_clear
+    LDA #0
+.window_fill
 {
     ZA_AUTO2 p
-    ZA_AUTO1 y, cols
+    ZA_AUTO1 y, v
+    STA v
     LDA draw_bank : TSB acccon
     LDA #VIEW_YMIN : STA y
 .line
     \ the scan line's first window byte: its character row, its line in
-    \ the row, then the first column
+    \ the row and the first column
     LDA y : LSR A : LSR A : LSR A : TAX
-    LDA y : AND #7 : CLC : ADC screen_row_lo,X : STA p
-    LDA screen_row_hi,X : ADC #0 : STA p+1
-    LDA p : CLC : ADC #LO(WINDOW_COL0 * 8) : STA p
-    LDA p+1 : ADC #HI(WINDOW_COL0 * 8) : STA p+1
-    LDA #WINDOW_COLS : STA cols
+    LDA y : AND #7 : ORA #WINDOW_COL0 * 8 : ORA screen_row_lo,X : STA p
+    LDA screen_row_hi,X : STA p+1
+    LDX #WINDOW_COLS
     LDY #0
 .byte
-    LDA #0 : STA (p),Y
+    LDA v : STA (p),Y
     TYA : CLC : ADC #8 : TAY
-    BNE next
+    BCC next
     INC p+1
 .next
-    DEC cols : BNE byte
+    DEX : BNE byte
     INC y : LDA y : CMP #VIEW_YMAX + 1 : BNE line
     LDA draw_bank : TRB acccon
     RTS
 }
 ASSERT window_clear >= &8000                    ; (it sets X)
+
+\ t1_at(y): the high byte of T1 (the split's timer, engine.6502) below
+\ which the screen's line y has begun, to the nearest of its steps. T1
+\ reaches 0 SPLIT_LEAD microseconds before the panel's first line, as the
+\ split's interrupt takes that long to its writes and the blank they land
+\ in (measured on jsbeeb, as SPLIT_ADJ is: docs/journal.md, "The level
+\ change's flash", 2026-10-18; tools/flashcheck.mjs checks where the
+\ strobe falls).
+SPLIT_LEAD = 52
+FUNCTION t1_at(y) = ROUND(((PANEL_LINE - y) * SCAN_US - SPLIT_LEAD) / 256)
+
+IF NOT(DEFINED(SPIKE))
+\ ---------------------------------------------------------------------------
+\ flash_look (sub_026B2, docs/research/st-logic.md): what the level change
+\ shows, around level_start's frame_end and before its init_objects, from
+\ code.6502's level_flash, a pause of its own as the ST's blocks. The ST
+\ fills its view with colour 15 (white) in the screen not shown and shows
+\ it, strobes colour 15 with not.w 65,536 times, sets it to &555 and fades
+\ it by &111 a VBL to 0, then puts it back. Here the window is filled with
+\ logical 3, white above the split, and only its ULA entry 15, the one a
+\ byte all logical 3 picks, is written, in the window's lines alone, so
+\ the score above (logical 3 too) and the panel below keep theirs: the
+\ strobe for the ST's FLASH_FIELDS fields and on to its FLASH_ROW, and the
+\ fade a field a step, each the nearest of white and black, as decision
+\ 41's fades switch at their midpoint. Colour 15 comes back at the next
+\ vertical sync, whose logical 3 is the window's white again.
+FLASH_FIELDS = 16                   ; the ST's strobe: its whole fields ...
+FLASH_ROW    = 37                   ; ... and the line it ends on in the next
+FLASH_WHITE  = ula_entry(15, 7)
+FLASH_BLACK  = ula_entry(15, 0)
+
+.flash_look
+{
+    ZA_AUTO1 n
+    \ the level's frame up (or the last drawn, if its step drew none)
+    \ while the other screen is filled, as the ST shows its frame for the
+    \ field its fill takes; a step that drew none shows its flash on the
+    \ frame that's up, as the ST's would have
+    LDA flash_pending : BEQ up
+    STA frame_ready
+.up
+    JSR disc_step
+    LDA frame_ready : BNE up
+    \ the window filled on the other screen, shown with colour 0 black
+    \ (the ST's frame_end writes $242, which is 0 here), and cleared whole
+    \ when next drawn
+    LDA draw_buffer : EOR #1 : STA draw_buffer
+    TAX : LDA frame.buffer_bank,X : STA draw_bank
+    STZ erase_stop,X
+    LDA #&FF : JSR window_fill
+    INC frame_ready
+    \ the strobe
+    LDA #FLASH_FIELDS + 1 : STA n
+.strobe
+    JSR flash_field
+    LDA #0                              ; on to the split
+    DEC n : BNE whole
+    LDA #t1_at(FLASH_ROW)
+.whole
+    LDX #FLASH_WHITE : LDY #FLASH_BLACK
+    JSR flash_part
+    LDA n : BNE strobe
+    \ the fade, from &555 on the strobe's last line
+    LDA #FADE_STEPS : STA n
+    BRA step
+.fade
+    JSR flash_field
+.step
+    LDX n : LDA fade_colours - 1,X : TAX : TAY
+    LDA #&FF : JSR flash_part
+    DEC n : BNE fade
+    \ (on into flash_field: colour 15 back)
+.flash_field
+    LDA #1 : JMP fields_wait
+\ the fade's colours, from &000 to &555
+.fade_colours
+FOR v = 0..5
+    EQUB ula_entry(15, (v * 2 > 7) * 7)
+NEXT
+FADE_STEPS = P% - fade_colours
+}
+
+\ flash_part: entry 15 X then Y in turn, from the window's first line,
+\ until T1's high byte is below A, or T1 has passed the split (A 0), where
+\ it reloads from its latch: then the panel's own entry 15 again, which
+\ the split wrote but a store of this loop's may have followed, its
+\ interrupt having come between the loop's test and that store. A store
+\ every 10 cycles, 5us, as the ST's not.w passes come (so the strobe's
+\ dashes fall across the lines as the ST's do), four a test, each field's
+\ begun a quarter of a pass later than the last's, as the ST's, which
+\ isn't in step with the raster, drifts across it.
+.flash_part
+{
+    STA stop+1
+.first
+    LDA usrvia_t1ch : CMP #t1_at(VIEW_YMIN) : BCS first
+    LDA fields : AND #3
+.drift
+    DEC A : BPL drift                           ; (5 cycles a step)
+.loop
+    STX ula_pal
+    LDA usrvia_t1ch                             ; (the 1MHz bus's: 5 or 6 cycles)
+    STY ula_pal
+    CMP #t1_at(VIEW_YMIN) : BCS split
+    NOP
+    STX ula_pal
+.stop
+    CMP #0 : BCC done                           ; patched
+    NOP
+    STY ula_pal
+    BIT 0 : BRA loop                            ; (6 cycles)
+.done
+    RTS
+.split
+    LDA c3_ula + C3_PANEL + 3 : STA ula_pal     ; (c3_set's last entry is 15)
+    RTS
+}
+ENDIF

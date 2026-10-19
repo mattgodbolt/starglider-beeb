@@ -1465,3 +1465,36 @@ both candidates as the BBC would play them, with what each costs
   in bursts there, and a bass edge late. Either choice would want that
   scan let open.
 
+### The level change's flash
+
+The ST's sub_026B2, which level_start calls before init_objects at every
+level change and every game's start, was transcribed for its state but
+not shown. Watched in Hatari field by field (docs/research/st-logic.md,
+"The level flash"):
+
+- the level's frame is up one field while view_flash_white fills the
+  other buffer's window with colour 15;
+- colour 15, white, is then strobed with not.w 65,536 times, a pass every
+  5 µs, which puts dashes of 40 pixels across every line, shifted 32
+  pixels a line and drifting 16 a field;
+- that lasts 16.5 fields, to line 37 of the 17th;
+- then comes &555, and the fade by &111 a field to &000 at V+21;
+- colour 15 is back at V+22, when init_objects runs, and the window is
+  white until the new level's first frame.
+
+The port (`src/screen.6502`'s flash_look, from code.6502's level_flash,
+a pause as decision 17's are) fills the window with logical 3 on the
+screen not shown, and shows it with colour 0 black. It then writes only
+the ULA's entry 15, the one a byte all logical 3 picks, and only in the
+window's lines, timed by the split's T1, so the score above and the
+panel below keep theirs (decision 52). The strobe stores every 10 cycles,
+the ST's 5 µs, so its dashes fall across the lines as the ST's do; at 24
+cycles they stood in vertical bands. Each field starts it a quarter of a
+pass later, as the ST's drifts. The fade takes decision 41's rule
+(decision 53). The logic is untouched: the spike's level_flash does
+nothing, and every routine still matches on all 27 captures.
+
+`tools/flashcheck.mjs`, in `make check`, logs every palette write on
+jsbeeb at a game's start and at a level change the score forces, and
+checks them against the ST's field by field.
+

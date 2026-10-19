@@ -18,9 +18,20 @@ INCLUDE "step.6502"
     JSR docked_wait
     BANK_ANDY BANK_PIC
     JSR int_run
+.paused
     JSR pause_end
     BANK_ANDY BANK_LOGIC
     RTS
+
+IF NOT(DEFINED(SPIKE))
+\ level_flash: what level_start shows (screen.6502's flash_look), likewise
+\ in a pause, from the logic's bank and back. (The spike's does nothing.)
+.level_flash
+    JSR pause_begin
+    BANK_ANDY BANK_PIC
+    JSR flash_look
+    BRA paused
+ENDIF
 
 \ int_sincos, int_animate, int_frame_end: Interrogate's calls from DOCKED
 \ of sincos (for m_idx, into trig_sin and trig_cos) and animate_shapes, in

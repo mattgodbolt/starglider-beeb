@@ -49,7 +49,6 @@ ELSE
     SPLIT_ADJ = -222
 ENDIF
 SPLIT_T1 = (SYNC_TO_TOP + PANEL_LINE) * SCAN_US - 2 + SPLIT_ADJ
-FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
 
 \ (start.6502's install_irq puts irq_handler on IRQ1V, once.)
 
