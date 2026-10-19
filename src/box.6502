@@ -17,18 +17,18 @@
 \ the bank meanwhile.
 \ ***************************************************************************
 
-\ box_aim: box_end's stores onto the erase list of the screen draw_buffer
-\ names, as draw_begin's erase_aim aims line_plot's (objects_view calls it
-\ each frame, before the objects).
+\ box_aim: box_log's stores onto the erase list of the screen draw_buffer
+\ names, as draw_begin's erase_aim aims line_plot's (sight_draw calls it
+\ each frame, before the sight, and objects_view before the objects).
 .box_aim
     LDA draw_buffer : CLC : ADC #HI(ERASE_LIST)
     ASSERT EF_LO = 0 AND EF_HI = 1 AND EF_ROW = 2 AND EF_DX = 3 AND EF_DY = 4 AND EF_CODE = 5
-    STA box_end.f_lo+2 : ADC #2
-    STA box_end.f_hi+2 : ADC #2
-    STA box_end.f_row+2 : ADC #2
-    STA box_end.f_dx+2 : ADC #2
-    STA box_end.f_dy+2 : ADC #2
-    STA box_end.f_code+2
+    STA box_log.f_lo+2 : ADC #2
+    STA box_log.f_hi+2 : ADC #2
+    STA box_log.f_row+2 : ADC #2
+    STA box_log.f_dx+2 : ADC #2
+    STA box_log.f_dy+2 : ADC #2
+    STA box_log.f_code+2
     RTS
 
 \ box_end: the object just drawn, its entries from box_start on, erased by
@@ -104,8 +104,20 @@ BOX_FIXED = 27
 .replayed
     RTS
 .boxed
-    \ the entry, at box_start: the cell of its first line and column, its
-    \ first line in the cell's character row, its columns and lines
+    \ the entry, at box_start
+    LDA w : LDY h
+    JMP box_log
+}
+
+\ box_log: an erase list's box at X (box_end's, and sight_draw's in
+\ view_under.6502), on the screen box_aim aimed at, and the list on from
+\ below it: the cell of its first line (box_y0) and column (box_c0), its
+\ first line in the cell's character row, its columns (A more) and lines
+\ (Y more).
+.box_log
+{
+    ZA_AUTO1 w, h, lo, hi
+    STA w : STY h
     LDA box_y0 : LSR A : LSR A : LSR A : TAY
     STZ hi
     LDA box_c0 : ASL A : ASL A : ROL hi : ASL A : ROL hi    ; 8 bytes a column (C = 0 after)
