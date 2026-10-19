@@ -657,6 +657,7 @@ async function child() {
         if (!carried) carried = CARRIED.map(([v, n]) => ram.slice(sym[v], sym[v] + n));
         else CARRIED.forEach(([v], i) => ram.set(carried[i], sym[v]));
         gameSteps = 0;
+        framesAtPlay = word(sym.frames);
     });
     mark("engine_run.wait", "Main", () => {
         if (phase !== "play") markPhase("play")();
@@ -795,11 +796,11 @@ async function child() {
     // last bolt's target and shots (none drawn: their counts are 0), the
     // laser's last box (written, never read), the last missile's view, the
     // last speech asked for, Interrogate's entry, the K screen's keys, the
-    // ground dots the last missile view saved, the free stack past its top;
-    // and the port's own calls' vectors
-    const CARRIES = /^(ob_\w+\+14[01]|dots_[xz]_(lo|hi)|docked_silo|bolt_target_[xy]|shot_\w+|laser_\w+|m_\w+|sample_\w+|int_entry|def_\w+|logic_vec|world_vec)(\+\d+)?$/;
+    // cheat's count of entries, the ground dots the last missile view saved,
+    // the free stack past its top; and the port's own calls' vectors
+    const CARRIES = /^(ob_\w+\+14[01]|dots_[xz]_(lo|hi)|cheat_count|docked_silo|bolt_target_[xy]|shot_\w+|laser_\w+|m_\w+|sample_\w+|int_entry|def_\w+|logic_vec|world_vec)(\+\d+)?$/;
     const carries = (a) => CARRIES.test(varName(a)) || (a >= sym.free_stack + ram[sym.free_n] && a < sym.free_stack + sym.SLOTS);
-    let gameSteps = -1, freshRef = null, carried = null;
+    let gameSteps = -1, freshRef = null, carried = null, freshDrawn = null, freshSkipped = 0, framesAtPlay = 0;
     const trace = {}, rtrace = {};
     const FRESH = [
         ["main RAM's screen", SCREEN, 0x8000], ["the shadow screen", SHADOW + SCREEN, 0x10000],
@@ -813,13 +814,20 @@ async function child() {
         const l = lastAt(VARS, a);
         return l ? (l.addr === a ? l.name : `${l.name}+${a - l.addr}`) : `&${a.toString(16)}`;
     };
+    // (the screens are compared only when the same frames were drawn: which
+    // steps draw one goes by the time they take, decision 14, and so by the
+    // drawing's caches, which a game may leave the next)
     function fresh() {
         const now = FRESH.map(([, a, b]) => ram.slice(a, b));
+        const drawn = `${word(sym.frames) - framesAtPlay} ${ram[sym.draw_buffer]}`;
         if (!freshRef) {
             freshRef = now;
+            freshDrawn = drawn;
             return;
         }
+        if (drawn !== freshDrawn) freshSkipped++;
         FRESH.forEach(([name, a], i) => {
+            if (i < 2 && drawn !== freshDrawn) return;
             const diff = [];
             for (let j = 0; j < now[i].length; j++) if (now[i][j] !== freshRef[i][j] && !(i >= 2 && carries(a + j))) diff.push(j);
             if (!diff.length) return;
@@ -1392,6 +1400,7 @@ async function child() {
         erases,
         mvWindows,
         reachPast,
+        freshSkipped,
         minS,
         minSAt: where(minSAt),
         worstField,
