@@ -68,6 +68,11 @@ make sfx        # the sound effects on the disc against the ST's YM writes,
 make sfxcapture # capture the ST's effects in Hatari (slow; build/sfx/all)
 make song       # the title song's two candidates as the SN76489 would play
                 # them, WAVs in build/song (docs/research/song.md)
+make soak       # the whole disc played by a random player, a seed a process
+                # (tools/soak.mjs; SOAK_SEEDS, SOAK_SECS, SOAK_JOBS): the PC,
+                # every write, the stack, the interrupts, the logic's state,
+                # the erase, each new game's start against the first's; a
+                # short one is in make check
 make memory     # what each region of the memory map holds (src/memory.6502)
 make fps        # the disc's frames and steps a second
 make scenes     # capture the scenes in Hatari (slow; needs ../hatari)

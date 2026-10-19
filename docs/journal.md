@@ -1498,3 +1498,110 @@ nothing, and every routine still matches on all 27 captures.
 jsbeeb at a game's start and at a level change the score forces, and
 checks them against the ST's field by field.
 
+## 2026-10-19
+
+### The soak
+
+`tools/soak.mjs` plays the whole disc on jsbeeb's Master for as long as
+it's asked, with a player whose every choice comes from a seed and the
+machine's state, so that a seed and its seconds replay a run exactly. It
+flies (turning, climbing, diving, at every speed), fires, launches and
+steers missiles, steers at silos to dock or is put at a silo's mouth,
+interrogates, takes missiles and launches; it enters the cheat right,
+wrong and timed out, freezes the enemies and takes points in cheat mode,
+changes level by points or by the score's level byte (as far as 34), dies
+by the ground, the enemies or game_over, and presses Esc; on the title it
+waits out the credits, defines keys, starts by any key and looks at the
+models. Hooks on jsbeeb's CPU watch:
+
+- **Every instruction**: the PC at the start of an instruction of the
+  file in memory there, or the MOS's interrupt entry; no BRK; the stack's
+  depth, and each waiting loop's stack; each interrupt's ROMSEL and
+  ACCCON at its RTI. Baron's listing (`build/starglider.lst`, which the
+  tool checks against the disc's files) says which bytes are code, data
+  and variables.
+- **Every write**: code and tables written only by the disc's loads and
+  the routines that patch them (`PATCHED` and `KEPT`, from a census of
+  every write by writer and target, `--census`); the screens outside the
+  view's window only by the panel, the cockpit's copy, the missile view's
+  window and, out of play, the front end on the shadow screen.
+- The vertical sync's gaps, and the palette split's time from the sync.
+- **Each step's top**: the logic's state in the ST's ranges (the level,
+  player_flight's clamps, the free stack, the lists, the objects' types
+  and explosions, the scores' BCD).
+- **Each erase**, as erasecheck has it, and **each far vertex** taken as
+  inside the window: that it is, and how near it comes to its reach.
+- **Each new game**: the player idles, and 40 steps in everything the game
+  holds, the screens, the objects and the logic's variables, must be the
+  first game's. What the ST carries from game to game is made the same at
+  each start (the frame count, the turn, the player's place and speed, F,
+  Q, H, the shapes' animation), or left out where it changes nothing then.
+- **The engine**: steps and frames moving on, and a heartbeat from every
+  waiting loop.
+
+A process plays about ten times faster than real time, so many seeds run
+at once: `make soak` runs 24 seeds of ten minutes, and `make check` four of
+three minutes.
+
+It has played about 135 hours, the last 32 on the disc as it now is: 96
+seeds of 20 minutes, 688 games, a million steps, 838 dockings, 428
+missiles, 410 Interrogates, 605 cheat prompts, 62 of G's viewer, level 34
+in 21 of them (2026-10-19). Nothing hung or crashed: no BRK, no PC outside
+code, no write on code or a table but the patches, no interrupt that left
+the bank or ACCCON changed, no field missed, no step outside the ST's
+ranges, no erase that left the view unclean; the stack went no deeper
+than &1DF. It found four things.
+
+- **A far object's vertex past its reach** (fixed). far_place calls a far
+  object wholly inside the window when its vertices' reach is, and then
+  its edges go unclipped and box_end's box is its vertices'. The reach was
+  the formula's, rounded up, plus one, but its pixels are truncated (pq,
+  its product, |c| for |X0|, the centre and each vertex), and now and then
+  a vertex came out a pixel past it: at the window's right edge, x 304.
+  Its lines were drawn onto the cockpit's frame there, and its box's
+  erase cut the frame, on main RAM's screen, which keeps the cockpit for
+  every game after: four times in about 56 hours of play before the fix.
+  `FAR_SLACK` covers the truncations and B's rounding, and the vertices
+  now come no nearer than two pixels inside the reach. make spike's lines
+  are unchanged, and its objects take 1-2% more cycles, as more objects
+  near the edges are clipped (measured 2026-10-19).
+- **The dots' rotation unmade at a game's start** (fixed). The ground
+  dots' rotation is WINDOW's code, which a game's start reads from the
+  disc as assembled, before ground_setup has made it for any camera; the
+  dots' cache in the world bank knew nothing of that. A game that started
+  with the camera and height the last one ended with (the start's own,
+  after an Esc or a game's end there) took the rotation for the last
+  frame's, and decided and drew its dots by the unmade one until the
+  player turned or climbed. Its dots were kept and respawned wrongly, so
+  the random numbers and everything after went another way than a fresh
+  game's, and the ST's. game_start clears dot_valid now. (Before the fix
+  seed 45 showed it in 40 seconds: a game, Esc at its start, another.)
+- **Row 130 black in every later game** (open). The ST's missile view
+  leaves row 130 black for the rest of its game (st-panel.md, section 8),
+  and the port's does the same. But the ST copies the cockpit picture to
+  both screens at each new game (sub_039B2), and the port's screens get
+  main RAM's, its only copy, so after the first missile view the row stays
+  black in every game to the session's end, or to G's viewer, after which
+  the cockpit is read again. It can come back at game_start from the
+  window picture's last row in WINDOW, or by reading COCKPIT again: a call
+  for Matt.
+- **The palette split late with the vertical sync** (open). The split
+  runs on User VIA T1, which the vertical sync's interrupt starts, so the
+  split is as late as that interrupt. Over the 32 hours 0.53% of splits
+  came more than a scan line after the earliest: 17% of fields while
+  speech plays, 7% while the disc reads, 1.7% while an effect ticks, and
+  0.03% else; the worst nearly six lines. The sync's interrupt waits for
+  the speech's tick (speech_irq takes the T2 tick first), an effect's
+  tick (sound_tick), the disc's NMIs, and sfx_begin's and sample_start's
+  writes of the chip with interrupts off, which split_clear keeps from
+  the split but not from the sync (the worst). The split's own interrupt
+  is late only beside the disc's NMIs and an effect's tick. CE2 accepted
+  an NMI's few microseconds (its decision 50); these are lines of the
+  panel's top in the view's colour. The options, for Matt: hold the chip's
+  writes off the sync as split_clear holds them off the split; or run T1
+  free at the field's period, set once, so that the split no longer waits
+  on the sync's interrupt (jsbeeb's TestMachine runs a field of 312.5
+  lines, the CRTC 312, so the checks would need its field set to 312).
+
+The soak reports the split and a new game's differences (row 130) without
+failing, until they're settled; everything else fails it.
