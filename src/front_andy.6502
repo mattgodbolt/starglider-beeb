@@ -1,9 +1,10 @@
 \ ***************************************************************************
 \ STARGLIDER for the BBC Master - what the front end keeps in ANDY from
 \ game to game, past the panel's: the high scores, the pilot rating's last
-\ accuracy (the ST's $29E), and the game's end in words, as the panel's
+\ accuracy (the ST's $29E), the game's end in words, as the panel's
 \ glyphs, for panel_game_over, which prints them before the front end is
-\ loaded. The start puts the scores and the words there (start.6502).
+\ loaded, and G's model viewer's switches. The start puts the scores and
+\ the words there (start.6502).
 \ ***************************************************************************
 
 SECTION FrontAndy, org = panel_andy_end, guard = ANDY_TOP, virtual = TRUE
@@ -12,5 +13,7 @@ SECTION FrontAndy, org = panel_andy_end, guard = ANDY_TOP, virtual = TRUE
 .rating_pct   SKIP 1        ; the last accuracy, kept for a game with no shot fired
 .go_power     SKIP GO_POWER_BYTES       ; the energy's end (mkpanel.py's GAME_OVER) ...
 .go_shields   SKIP GO_SHIELDS_BYTES     ; ... and the shields'
+.vw_kept_stereo SKIP 1      ; the viewer's 3 ($2CE: the start's 0) ...
+.vw_kept_step SKIP 1        ; ... and P ($2CC), as the ST keeps them
 .front_andy_end
 ENDSECTION

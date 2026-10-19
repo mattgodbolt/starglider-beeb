@@ -21,16 +21,24 @@
     JMP front_title
 
 \ game_start: the front end's start of a game (the ST's L_01EFE, its fade
-\ out done): any read going on done; flight's files back in bank 7, a
-\ read a file, the window picture its own (docked.6502); the screens the
-\ start's were, the cockpit on both, their windows empty, their panels to
-\ draw; the cockpit's colours faded in, as the ST's sub_039B2 fades to
-\ them once the cockpit's on both screens; then play. The key that started
-\ it was the front end's, and isn't the game's.
+\ out done): any read going on done; the cockpit read back into main RAM's
+\ screen if G's model viewer cleared it (viewer.6502); flight's files back
+\ in bank 7, a read a file, the window picture its own (docked.6502); the
+\ screens the start's were, the cockpit on both, their windows empty,
+\ their panels to draw; the cockpit's colours faded in, as the ST's
+\ sub_039B2 fades to them once the cockpit's on both screens; then play.
+\ The key that started it was the front end's, and isn't the game's.
 .game_start
 {
     LDX #&FF : TXS
     JSR disc_wait
+    LDA cockpit_lost : BEQ cockpit
+    LDA #LO(SCREEN) : STA fe_dst : LDA #HI(SCREEN) : STA fe_dst+1
+    LDX #DF_COCKPIT : LDY #BANK_PIC
+    JSR disc_load
+    JSR disc_wait
+    STZ cockpit_lost
+.cockpit
     STZ ov_have
     ASSERT OV_FLIGHT = 0
     LDA #&FF : STA ov_reading

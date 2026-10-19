@@ -78,9 +78,10 @@ OV_DOCKED = 1                       ; DOCKED
 }
 ASSERT OV_FLIGHT = 0
 
-\ int_shape: Interrogate's draw_shape (render.6502), and int_key: the key
-\ an Interrogate frame takes (logic/keys.6502's get_key), from DOCKED,
-\ which is paged again after each (code.6502's int_back).
+\ int_shape: draw_shape (render.6502) for Interrogate and G's model viewer
+\ (viewer.6502), and int_key: the key an Interrogate frame takes
+\ (logic/keys.6502's get_key). From bank 7, which is paged again after
+\ each (code.6502's int_back).
 .int_shape
     JSR draw_shape
     JMP int_back

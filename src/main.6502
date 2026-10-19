@@ -129,6 +129,8 @@ SECTION GameWork, org = logic_work_end, guard = NMI_PAGE, virtual = TRUE
 .ov_have      SKIP 1        ; what it holds (OV_*) ...
 .ov_reading   SKIP 1        ; ... and what's being read into it (&FF: none)
 .int_mask     SKIP 4        ; Interrogate's texts' colours, by line, as MODE 1 bytes' bits
+    \ G's model viewer's (viewer.6502)
+.cockpit_lost SKIP 1        ; non-zero once it has cleared main RAM's screen, the cockpit's
 ENDSECTION
 
 INCLUDE "banks.6502"
@@ -145,5 +147,6 @@ IF P% < world_list_end
 ENDIF
 .front_code
 INCLUDE "front.6502"
+INCLUDE "viewer.6502"
 ENDSECTION
 ASSERT front_code >= world_list_end

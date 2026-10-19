@@ -9,9 +9,9 @@
 #                 disc's erasing (tools/erasecheck.mjs), its own disc
 #                 reader (tools/disccheck.mjs), its controls
 #                 (tools/inputcheck.mjs), its front end's flows
-#                 (tools/frontcheck.mjs), the cheat prompt and
-#                 Interrogate (tools/modalcheck.mjs), its sound effects
-#                 (make sfx) and its speech (make speech)
+#                 (tools/frontcheck.mjs), the cheat prompt, Interrogate
+#                 and G's model viewer (tools/modalcheck.mjs), its sound
+#                 effects (make sfx) and its speech (make speech)
 #   make sfx      the disc's sound effects against the ST's YM writes
 #                 (tools/sfxcheck.mjs, on build/sfx's capture)
 #   make speech   the disc's speech against its packed levels, and a WAV of

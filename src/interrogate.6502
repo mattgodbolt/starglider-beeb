@@ -106,6 +106,7 @@ FUNCTION int_cell(x, y) = SCREEN + (y DIV 8) * SCREEN_ROW + (x DIV 4) * 8 + (y M
 .int_begin
 {
     STZ erase_stop : STZ erase_stop+1
+    STZ int_clear : STZ int_clear+1
     LDX #2 * INT_LINES - 1
 .shown
     STZ int_shown,X
@@ -135,9 +136,10 @@ FUNCTION int_cell(x, y) = SCREEN + (y DIV 8) * SCREEN_ROW + (x DIV 4) * 8 + (y M
 \ yet shown, is drawn over, as the ST's first frame clears what its
 \ world_render drew; else the next screen, once the last frame is up) and
 \ erased; the texts, then the object at (0, INT_Y, z), its angles (0,
-\ heading, 0), as draw_objects draws one (render.6502), its box kept
-\ (box.6502). Its pitch has bits above the 12 the matrix reads, unlike
-\ the player's, so draw_shape builds the object's own matrix.
+\ heading, 0), as view_objects and draw_objects draw one (code.6502,
+\ render.6502), its box kept (box.6502). Its pitch has bits above the 12
+\ the matrix reads, unlike the player's, so draw_shape builds the object's
+\ own matrix.
 .int_draw
 {
     LDA frame_drawn : BEQ flip
@@ -151,8 +153,17 @@ FUNCTION int_cell(x, y) = SCREEN + (y DIV 8) * SCREEN_ROW + (x DIV 4) * 8 + (y M
 .erase
     JSR screen_erase
     BANK_ANDY BANK_PIC
+    \ the texts again unless this screen shows this entry's, and its last
+    \ frame's lines (all within its object's box) kept clear of them
+    LDX draw_buffer
+    LDA int_clear,X : BEQ print
+    LDA int_printed,X : CMP int_entry : BEQ printed
+.print
+    LDA int_entry : STA int_printed,X
     JSR int_print
+.printed
     JSR draw_begin
+    JSR box_aim                         ; (box.6502: its box onto this screen's list)
     LDA int_type : STA otype
     STZ tx : STZ tx+1
     LDA #INT_Y : STA ty : STZ ty+1
@@ -166,8 +177,18 @@ FUNCTION int_cell(x, y) = SCREEN + (y DIV 8) * SCREEN_ROW + (x DIV 4) * 8 + (y M
     STZ box_c1 : STZ box_y1 : STZ box_codes
     JSR int_shape
     JSR box_end
+    \ its lines clear of the texts: a box (none for an object cut at the
+    \ near plane, box_start 0) between the name's and the first line's rows
+    LDX draw_buffer
+    STZ int_clear,X
+    LDA box_start : BEQ crossed
+    LDA box_y0 : CMP #INT_NAME_Y + 8 : BCC crossed
+    LDA box_y1 : CMP #INT_LINE1_Y : BCS crossed
+    DEC int_clear,X
+.crossed
     JMP draw_end
 }
+ASSERT INT_PROMPT_Y + 8 <= INT_NAME_Y AND INT_LINE1_Y + 8 <= INT_LINE2_Y
 
 \ int_panel: the panel drawn into the frame (cockpit.6502's, which puts
 \ the bank back).
@@ -274,5 +295,7 @@ ASSERT (INT_PROMPT_X OR INT_NAME_X OR INT_LINE1_X OR INT_LINE2_X) MOD 8 = 0
 .int_str_hi
     EQUB HI(int_prompt) : SKIP INT_LINES - 1
 .int_shown   SKIP 2 * INT_LINES     ; by screen s and line l, at 4 s + l: the cells it shows
+.int_clear   SKIP 2                 ; by screen: &FF if its last frame's lines missed the texts
+.int_printed SKIP 2                 ; ... and the entry its texts are
 .int_ready   SKIP 1                 ; the field count at the last frame made ready
 ENDIF
