@@ -235,6 +235,13 @@ says how):
 - Generated code with patched operands: assert that each copy's labels
   sit at the same offsets (`mkrotate.py`) when one routine patches them
   all through a pointer.
+- Baron parses the body of a false `IF`: a `FUNCTION` called there must
+  exist in both builds (so `ula_entry` is in `defs.6502`), though the
+  symbols it names needn't.
+- The 6522's T1 reloads from its latch at time-out in one-shot mode too
+  (jsbeeb as the chip): after the split, `usrvia_t1ch` reads high again,
+  never negative. Never read T1's low counter outside the interrupt: it
+  acknowledges T1, and the split can be lost.
 - The engine's step is a loop, so a variable baron thinks a step might
   read before writing (a value made only on paths a flag or the carry
   chooses) is kept from step to step, through the drawing and all the

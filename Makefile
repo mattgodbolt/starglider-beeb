@@ -10,7 +10,8 @@
 #                 reader (tools/disccheck.mjs), its controls
 #                 (tools/inputcheck.mjs), its front end's flows
 #                 (tools/frontcheck.mjs), the cheat prompt, Interrogate
-#                 and G's model viewer (tools/modalcheck.mjs), its sound
+#                 and G's model viewer (tools/modalcheck.mjs), the level
+#                 change's flash and fade (tools/flashcheck.mjs), its sound
 #                 effects (make sfx) and its speech (make speech)
 #   make sfx      the disc's sound effects against the ST's YM writes
 #                 (tools/sfxcheck.mjs, on build/sfx's capture)
@@ -176,6 +177,7 @@ check: build/spike/SPIKE spike panel view rot sfx speech $(TARGET) build/gen/fro
 	node tools/inputcheck.mjs
 	node tools/frontcheck.mjs
 	node tools/modalcheck.mjs
+	node tools/flashcheck.mjs
 
 # The sound effects on the disc against the ST's YM writes, captured in
 # Hatari (make sfxcapture: slow, needs Hatari), and their gates

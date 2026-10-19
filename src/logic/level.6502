@@ -3,10 +3,11 @@
 \ the new game's set-up (&039FA)
 \
 \ level_start is the level flash's logic (&026B2: its frame_end; the rest
-\ of it is the palette's) and init_objects (&0A6AE): every record cleared,
-\ the free-record stack given records 0-9, the level's layout copied from
-\ record 10 on with each type's set-up (an energy tower made a group of
-\ six), and the silo's tunnel and its missile placed at random. new_game
+\ of it only shows, code.6502's level_flash, which the spike's leaves out)
+\ and init_objects (&0A6AE): every record cleared, the free-record stack
+\ given records 0-9, the level's layout copied from record 10 on with each
+\ type's set-up (an energy tower made a group of six), and the silo's
+\ tunnel and its missile placed at random. new_game
 \ (&039FA) is what a game starts from, before its first level_start: its
 \ frame_end (&039B2's), the random numbers seeded, the ground dots
 \ scattered, the game's state, the player's start, the dots scattered
@@ -34,6 +35,7 @@ ENDMACRO
 
 .level_start
     JSR frame_end_logic                         ; the flash's (&026B6)
+    JSR level_flash                             ; and the rest of it
     \ (on into init_objects)
 
 \ init_objects (&0A6AE)

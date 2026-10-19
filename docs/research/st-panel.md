@@ -271,7 +271,11 @@ full).
 - **The level change** (&026B2): fill the window with colour 15 and show
   it; strobe colour 15 with `not.w` 65,536 times; set colour 15 to &555
   and fade it by &111 a VBL; restore colour 15. All colour-15 panel pixels
-  flash with it.
+  flash with it. Measured field by field in st-logic.md, "The level
+  flash": the level's frame up one field, the strobe (dashes of 40 pixels
+  across the window) for 16.5 fields, &555 to &000 a field each, the
+  window white until the new level's first frame. Built in
+  src/screen.6502's flash_look.
 
 ## Corrections to the other research files
 

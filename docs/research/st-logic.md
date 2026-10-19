@@ -42,7 +42,7 @@ ranges touch the same variable or field, both are listed.*
 | &02290 | play_title_song (sub_02290) | $A0 = star (&1F7B4), $A4 = &2BC00, &2CF = 4, &2D0 = 5, then sample_start. sample_start returns without starting anything if sound $2CB is off. | sample_start &01A50 |
 | &022BA | define_keys (L_022BA) and key_echo (sub_02362) | Clears the shown screen (sub_00F80) and prints 'DEFINE AGAV CONTROLS'. It prompts for six keys, waiting in sub_049A4 for a raw scancode (no timeout, D_01852 not cleared), and stores each scancode in $2DA (Decrease Altitude), $2DB (Increase Altitude), $2D8 (Bank Left), $2D9 (Bank Right), $2DC (Accelerate) and $2DD (Decelerate). sub_02362 clears D_01852, patches the ASCII D_015F6[scancode-1] into D_02500 and prints it. Then 'Thank you...' and sub_00BCA (ASCII, 1500-VBL timeout returning &0D): 'E' returns to the title, 'Y' starts the game (L_01EFE), anything else starts again. | sub_00F80, sub_0117E, sub_049A4, sub_02362, sub_00BCA |
 | &0260C | level_message | If $298 != 0 and missile view $2C8 is clear: $298 -= 1. sub_04598 writes the level $296 as decimal text into D_0266E (and its end pointer into $D0(a6)). It prints '    LEVEL   '+number at 0(a6)+&4B18 (mono &4B30), which is line 120, x 48, and 'YOU NOW HAVE MANUAL CONTROL!' (&00082) at 0(a6)+&1F4C (mono &1F58), which is line 50, x 24. 0(a6) is the frame just rendered, which frame_end then shows. The count is frozen during missile view. | sub_04598, sub_0112E |
-| &026B2 | level_flash (sub_026B2) | view_flash_white (fills the view in 0(a6) with colour 15), then frame_end. That frame_end adds 1 to $1E2, writes $242 to colour 0, clears $242 and swaps buffers. It saves colour 15 (&FF825E), sets it to &777 and NOTs it 65,536 times (dbra d1 from &FFFF; d2=0 adds no second pass), so it ends at &777. Then colour 15 = &555, followed by wait_vbl and -&111 until (colour & &777)==0, which is 5 VBLs. Then it restores colour 15. Apart from the frame_end it is presentation and wall-clock time only. | view_flash_white &09D38, frame_end &08EC2, wait_vbl &0A54A |
+| &026B2 | level_flash (sub_026B2) | view_flash_white (fills the view in 0(a6) with colour 15), then frame_end. That frame_end adds 1 to $1E2, writes $242 to colour 0, clears $242 and swaps buffers. It saves colour 15 (&FF825E), sets it to &777 and NOTs it 65,536 times (dbra d1 from &FFFF; d2=0 adds no second pass), so it ends at &777. Then colour 15 = &555, followed by wait_vbl and -&111 until (colour & &777)==0: six waits, the first ending the strobe's last field, then &444 to &000 a field each. Then it restores colour 15. Apart from the frame_end it is presentation and wall-clock time only; measured field by field under "The level flash", below. | view_flash_white &09D38, frame_end &08EC2, wait_vbl &0A54A |
 | &02506 | debug_memory_map (unreached) | Undecoded bytes inside D_02500. It prints 'Start' (text base), 'End' (&4B6D8) and 'Stack' (a7) through &04A8A, at 0(a6)+&7A0/&DE0/&1420. Nothing references it. | &04A8A, sub_0112E |
 | &02680 | delay / sfx_tester / wait_sample_end (unreached) | &02680: move.w #$D000,d0; dbra d0,*; rts, a delay. &0268A: a sound-effect tester: d2=0; each key in sub_00BCA plays sfx_start(d2, 1) and d2++; 'Q' returns to the title. &026A8: tst.l D_01E56; bne *; rts, which waits for a sample to end. None is referenced (searched branches and relocations). | sub_00BCA, sfx_start |
 | &0A6AE | init_objects | Clears the 140 64-byte records at $129A(a6) (dbra from &8B, 16 clr.l each). It writes pointers to records 0-9 (absolute addresses &5D19A+64n) into the longs at &94C-&973, sets $9C = &974 (the stack top: pops use -(a1), so record 9 is the first given out) and $25C = 10. From record 10 it copies the layout at level_lists[$296] (&17C88): each 8-byte entry gives type to +00, sector x*&290 (mulu.w, low word) to +04, sector z*&290 to +08 and hit points to +30, then the per-type set-up runs (&0A894-&0AA92). A zero type word ends the layout. $1D8 = records used (entries + 5 per tower + 10). Then it sets up the tunnel object at absolute &1218 (type 22, +02=&FF, +04/+08/+0C from three random8 calls, +06/+0A/+0E/+10/+1C=0, +24 and +14 bytes cleared) and the silo's missile at absolute &1258 (type 24, +02=&FF, +04/+08 random8, +06/+0A/+0C=0, +0E=&400, +10/+1C=0, +24 cleared). It does not touch the player, the level, the score, $C4 or the missile-view flags. A level change therefore wipes records 0-9 (missiles in flight) and anything exploding. | sub_0A88E (random8), once per layout entry of type 2, 14, 5, 17 or 3, and five times for &1218/&1258 |
@@ -95,7 +95,7 @@ ranges touch the same variable or field, both are listed.*
 - &1E4 (VBL count) is read only by the title wait, the game-over wait and the level flash's fade (wait_vbl). No logic state depends on it.
 - D_01E56 (sample bytes left, counted down by the Timer A interrupt at 6144 or 9830 Hz) gates the speech warnings and sfx_start (&0209A effect 3, &020C4 effect 1); sfx_start also tests &29C, the VBL-counted lockout. That depends on real time, but it writes only sound state: &A0, &A4, &2CF, &2D0, D_01E56, D_01B00, vector &134, the YM and MFP, and sfx_start's $2D1 and D_019F2-D_01A06 (no game reader found). Leave all of it out of the comparison.
 - Step boundary: the post-frame logic (&01F30-&020B6) runs after frame_end, and $242 and $D4 carry over it. A step taken from frame_loop (&01F10) to the next frame_loop includes that logic. A level change re-enters through &01F06 and init_objects and still reaches &01F10.
-- The level flash's 65,536-pass colour-15 loop and its 5-VBL fade are wall-clock time only.
+- The level flash's 65,536-pass colour-15 loop and its fade (six wait_vbl calls) are wall-clock time only.
 
 ### What it reads of the renderer's
 
@@ -114,6 +114,42 @@ ranges touch the same variable or field, both are listed.*
 - The key-state array &017C2 is not read in the range. sub_00A9E's start-up clear covers only &017C2-&017C5 (bge at &00AC2).
 - No joystick is read.
 - ESC is handled in read_keys (&0271A, then &03FF2): it pops the return address and jumps to the title (&01E94), with no game-over screen or high score.
+
+### The level flash
+
+*sub_026B2, run in Hatari on 2026-10-18 (EmuTOS 1.3, 1 MB, the .stx): a
+game started from the title and, 4 s in, the score's level byte &0150D
+poked (Hatari &11ECB); breakpoints at &026B2, &026B6, &026BA, &026C8,
+&026E2, &026EE, &02706, &01F0A, &01F10, frame_end (&08EC2, &08ED2) and
+swap_screens printing the VBL count, Hatari's line in the frame (HBL;
+display line 0 is HBL 63), FrameCycles and the palette; and a screenshot
+at every VBL from the flash's entry (Hatari draws palette writes within a
+line). The port is src/screen.6502's flash_look, checked by
+tools/flashcheck.mjs.*
+
+V is the first field that shows the filled view.
+
+| Field | What shows | Measured |
+|---|---|---|
+| V-1 | the level change's own frame, once | its frame_end swapped at HBL 254 of the field before (line 191, where wait_raster_192 lets go); sub_026B2 began at HBL 255. view_flash_white's movem.l fill of the window (x 16-303, y 10-128) in the other buffer took 38,464 cycles (75 lines), so it ends in V-1 whenever the swap falls (always between HBL 254 and the VBL), and the flash's frame_end waits for V-1's HBL 254: the level's frame is up exactly one field |
+| V-1, HBL 254 | colour 0 | the flash's frame_end writes $242, which is 0 here (the post-frame tests that could set it were skipped), and swaps |
+| V to V+15 | the window, every line, in dashes of colour 15 white and black | the strobe began at HBL 255 of V-1. A pass is not.w abs.l (20 cycles), two nops (8) and dbra (12 on the ST's 4-cycle bus): 40 cycles, 5 us, 40 low-res pixels, so colour 15 changes every 40 pixels along a line. A line (512 cycles) is 6.4 pass pairs, so each line's dashes sit 32 pixels on from the line above's and the pattern repeats every 5 lines, its strongest alias a slope of 8 pixels a line; a field (160,256 cycles) moves it 16 pixels. The interrupts break it up: the 65,536 passes took 2,644,976 cycles (40.36 a pass), 16.50 fields |
+| V+16 | the strobe to display line 37 (x about 152), then &555 | the strobe ended at HBL 100, FrameCycles 51,408 |
+| V+17 to V+21 | &444, &333, &222, &111, &000, a whole field each | each written at its VBL's line 0, before the display, by the fade's wait_vbl loop |
+| V+22 | colour 15 back (&777, the cockpit's), so the filled window white again | restored at the VBL; init_objects ran from there for 110,848 cycles (level 1 to 2's layout) |
+| V+22 to V+25 | the white window | the new level's first frame drawn into the other buffer, swapped at V+25's HBL 254 |
+| V+26 | the new level's first frame | |
+
+- Every colour-15 pixel strobes and fades with the window: outside it, the
+  scanner's player dot (160,164) and sixteen pixels of the picture's panel
+  (rows 193 and 196). The score and the rest of the panel keep their
+  colours.
+- Nothing else runs meanwhile: no logic and no panel. The VBL interrupt
+  goes on (the VBL count, the sound's VBL work), and so would a sample's
+  Timer A interrupt, whose share would lengthen the strobe.
+- The same runs at every game's start (L_01F06 after start_game's
+  sub_039FA, whose sub_039B2 has faded the cockpit in), and, in the missile
+  view's lock-up (decision 18), at the end of every frame.
 
 ### Corrections to st.md
 
