@@ -137,16 +137,16 @@ INCLUDE "banks.6502"
 
 \ The front end (front.6502), bank 7's out of play, past the zeros that
 \ keep the OS from taking it for a ROM's header: its data first, which may
-\ lie in the bank's first 4K and below world_list_end, then its code,
-\ which mustn't (baron#29, banks.6502).
+\ lie in the bank's first 4K, then its code, which mustn't: parts of it
+\ run with ANDY paged.
 SECTION Front, org = &8000, filename = "FRONT", guard = &C000, cmos = TRUE
     EQUD 0, 0
 INCLUDE "../build/gen/front.6502"
-IF P% < world_list_end
-    SKIP world_list_end - P%
+IF P% < ANDY_TOP
+    SKIP ANDY_TOP - P%
 ENDIF
 .front_code
 INCLUDE "front.6502"
 INCLUDE "viewer.6502"
 ENDSECTION
-ASSERT front_code >= world_list_end
+ASSERT front_code >= ANDY_TOP

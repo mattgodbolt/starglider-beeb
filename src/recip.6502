@@ -9,7 +9,6 @@
 \ that brings z down to m.
 \ ***************************************************************************
 
-FUNCTION bitlen(n) = FLOOR(LOG(n) / LOG(2) + 0.0000001) + 1
 FUNCTION rcp_exact(m) = MIN({ROUND(2^24 / m), 65535})
 
 ALIGN 256
@@ -33,16 +32,16 @@ NEXT
 .zsmall_idx
     EQUB 0, 0
 FOR z = 2..255
-    EQUB (z << (9 - bitlen(z))) - 256
+    EQUB (z << (9 - BITLEN(z))) - 256
 NEXT
 .zsmall_sh
     EQUB 0, 0
 FOR z = 2..255
-    EQUB 8 + bitlen(z)
+    EQUB 8 + BITLEN(z)
 NEXT
 \ z >= 256: by its high byte, the shift that leaves 9 bits (m), 0-6
 .zhigh_sh
     EQUB 0
 FOR h = 1..127
-    EQUB bitlen(h) - 1
+    EQUB BITLEN(h) - 1
 NEXT

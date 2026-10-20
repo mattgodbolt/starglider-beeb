@@ -220,17 +220,9 @@ says how):
   reload what you were holding there.
 - `ROL` and `ASL` don't touch V; `BIT abs,Y`, `STY abs,X` and `STA zp,Y`
   don't exist (baron says "No such addressing mode" or uses abs,Y).
-- Baron matches ZA_CANJUMP, ZA_CANCALL and the other control-flow
-  annotations to their jumps by address alone (waitingforvsync/baron#29):
-  in banks that share addresses, an annotated jump in one lends its
-  targets to any jump at the same address in another. Keep annotated
-  jumps' addresses clear of the other banks' code (the logic bank starts
-  past the world bank's list phase), or route them through main RAM.
-  Issue #1 lists the workarounds to undo once it's fixed: add to it.
-- A list symbol as a ZA_CANJUMP or ZA_CANCALL target resolves its labels
-  only in the annotation's own section (waitingforvsync/baron#30): name
-  targets in another section one by one (`tools/mkhandlers.py` writes
-  the handlers' dispatch so).
+- `../baron` is shared with `../nm` and `../chuckie-egg-2-beeb`: leave it
+  at the release the README names, and try an unreleased baron from a
+  build of its own, named by `BARON` in `local.mk`.
 - A patched `JSR` wants `ZA_CANCALL`, as a patched `JMP` wants
   `ZA_CANJUMP`. `ZA_DISCARD` takes a whole variable, not an alias for
   part of one.
