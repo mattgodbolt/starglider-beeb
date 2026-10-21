@@ -653,9 +653,7 @@ ASSERT LO(512) = 0
     \ the high word, A:pq, >> (Y + 1)
 .shift
     \ (patched by far_recip: each way in is on the way from right7, which
-    \ is all baron need follow, so the jump needs no ZA_CANJUMP, which in
-    \ this bank would lend its targets to another bank's jump at its
-    \ address: baron#29)
+    \ is all baron need follow, so the jump needs no ZA_CANJUMP)
     JMP right7
 .right7
     LSR A : ROR pq

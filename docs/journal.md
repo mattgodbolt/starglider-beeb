@@ -475,6 +475,8 @@ lost, went there as a comment. Until it's fixed, the logic bank's code
 starts past the world bank's list phase, where the rotations' annotated
 jumps are (`world_list_end` in `src/banks.6502`). Any annotated jump
 elsewhere in the banks needs the same care.
+(Rich fixed it on 2026-10-20, and the workaround went: "Baron's fixes",
+below.)
 
 ### The object handlers
 
@@ -1645,3 +1647,41 @@ none more than 20 µs late but for the disc's NMIs, the worst 15 µs beyond
 them. A further 16 emulated hours (376 games, 412 dockings, 197 missiles,
 201 Interrogates, 311 cheat prompts) found nothing (2026-10-19).
 
+## 2026-10-20
+
+### Baron's fixes
+
+Rich fixed the four baron issues the port raised: annotations matched by
+address alone (waitingforvsync/baron#29), a list's labels resolved only
+in the annotation's own section (#30), a list referring forward that
+never settled (#31), and an indexed base below its variable (#32). The
+fixes are in baron's 7d663a7 and 3a9d509, ahead of its next release. With
+them, the workarounds our issue #1 listed go:
+
+- **No bank's code waits for the list phase's end.** The logic bank,
+  WINDOW, DOCKED and FRONT each started their code past `world_list_end`,
+  so that no jump in them shared an address with one of the rotations'
+  annotated jumps in the world bank. The label and the padding are gone.
+  FRONT's code still lies past ANDY's top, since parts of it run with
+  ANDY paged. Every gap the padding had kept was full of data by now, so
+  the banks gain no room today. What changes is that code may go
+  anywhere in them, including below &9000 for code that runs with ANDY
+  out (docs/plan.md, section 3).
+- **The two dispatches go home.** `handler_dispatch` is back beside
+  `object_handlers` in the world bank, its `ZA_CANJUMP` the list
+  `HANDLERS` again, which `tools/mkhandlers.py` writes with the tables
+  (no `build/gen/dispatch.6502`). init_objects' `set_up` jumps through
+  its own table again. Main RAM gets back the six bytes they took.
+- **`BITLEN`.** Baron now has `BITLEN(x)` built in, exactly
+  floor(log2 x) + 1, and reserves the name. `src/recip.6502` used its
+  own `bitlen` and now uses baron's.
+
+With only `BITLEN` changed, 7d663a7 assembled the disc byte for byte as
+0.5.3 does. It also brought one new warning: an immediate that takes a
+`ZA_AUTO` variable's address, as the line drawer's `LDX #line_scr` does
+to patch an `ORA (zp),Y`, read as an unchecked indexed access. Rich fixed
+that too (waitingforvsync/baron#33, 8d09f3c). On 8d09f3c the branch,
+`baron06`, passes `make check` and `make logic`. Baron released it all
+as v0.6.0 on 2026-10-21, which the README now names. nm and Chuckie Egg
+2, which build from the same `../baron`, assemble every disc byte for byte
+as they did on 0.5.3 but for !BOOT's stamp, so `../baron` moved to it.

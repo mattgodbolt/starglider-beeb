@@ -1,7 +1,6 @@
 \ ***************************************************************************
 \ STARGLIDER for the BBC Master - the panel's data and state (panel.6502
-\ has its code): data only, so it may lie below world_list_end in the
-\ logic's bank, where code mustn't (baron#29, banks.6502)
+\ has its code)
 \ ***************************************************************************
 
 ASSERT P% >= ANDY_TOP                       ; (ANDY hides the bank's first 4K)

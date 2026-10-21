@@ -419,7 +419,7 @@ def main():
     L.append("    EQUB " + ", ".join(str(PHYS[hues[nearest(c, hues, True)]]) for c in rainbow))
     L.append("")
 
-    # the title, last (it may run on past world_list_end)
+    # the title, last (it may run on past ANDY's top, where the code starts)
     scr = mkcockpit.screen(title_screen(args.tra, args.title))
     packed = pack(scr)
     L.append(f"\\ the title (option {args.title!r}: {', '.join(names_)}), packed")

@@ -148,6 +148,12 @@ ZA_AUTO 4, h_rng
     BRA next
 }
 
+\ handler_dispatch: object_handlers' call of the handler X names
+\ (handler_gate's number, in handler_tab)
+.handler_dispatch
+    JMP (handler_tab - 2,X)
+    ZA_CANJUMP HANDLERS
+
 \ HMOVE, h_move: on by the velocity, in x and z (in line for the
 \ commonest movers).
 MACRO HMOVE
