@@ -84,6 +84,7 @@ INCLUDE "engine.6502"
 INCLUDE "input.6502"
 INCLUDE "sound.6502"
 INCLUDE "speech.6502"
+INCLUDE "song_irq.6502"
 ASSERT P% <= &3000                  ; (the interrupt runs them)
 INCLUDE "cockpit.6502"
 INCLUDE "disc.6502"
@@ -148,5 +149,17 @@ ENDIF
 .front_code
 INCLUDE "front.6502"
 INCLUDE "viewer.6502"
+.front_end
 ENDSECTION
 ASSERT front_code >= ANDY_TOP
+\ G's model viewer draws through draw_shape, which calls WINDOW's
+\ near_outside (box.6502) with bank 7 paged: FRONT, loaded over WINDOW,
+\ must leave it there, as the viewer comes only after a game has loaded it.
+ASSERT front_end <= near_outside
+
+\ The title song (song.6502, decision 56), over the lists and the objects
+\ out of play: the front end loads it beside FRONT, and lets it go at a
+\ game's start.
+SECTION Song, org = LISTS, filename = "SONG", guard = SCREEN, cmos = TRUE
+INCLUDE "song.6502"
+ENDSECTION

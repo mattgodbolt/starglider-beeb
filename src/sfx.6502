@@ -8,9 +8,10 @@
 \ ***************************************************************************
 
 \ sfx_begin: sfx_start's effect Y with count X: nothing while a sample
-\ plays, with the sound off ($2CB), or while a noise's lock lasts (&29C),
-\ nor for the effects nothing starts, which the port leaves out; else the
-\ effect's record. A noise's sets the lock, its period and its envelope
+\ plays, or the title song, which is a sample on the ST (decision 57), with
+\ the sound off ($2CB), or while a noise's lock lasts (&29C), nor for the
+\ effects nothing starts, which the port leaves out; else the effect's
+\ record. A noise's sets the lock, its period and its envelope
 \ from the top, on all three channels, and leaves a Timer A effect
 \ ticking under it, as on the ST; a Timer A effect's (&0052E, &00626,
 \ &00180) sets its timer, its count, and tone A at its level, the noise
@@ -20,6 +21,7 @@
     JSR split_clear
     PHP : SEI                                   ; (the field's count changes sample_left)
     LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3 : BNE done
+    LDA song_on : BNE done
     LDA sound_on : BEQ done
     LDA sfx_lock : BNE done
     LDA sfx_record_at,Y : CMP #&FF : BEQ done
@@ -140,10 +142,7 @@ SAMPLE_ENERGY  = 4                  ; the energy low
 .len
     LDA sample_len,X : STA sample_left,X
     DEX : BPL len
-    LDA bank_now : PHA
-    BANK BANK_LOGIC
-    LDY #SFX_QUIET : JSR sfx_record
-    PLA : STA bank_now : STA romsel
+    JSR sfx_quiet
     JSR speech_begin
     LDA #SN_TONE1 OR 1 : JSR sn_write
     LDA #0 : JSR sn_write                       ; tone 1's period 1

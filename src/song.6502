@@ -1,0 +1,520 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the title song (decision 5): David Lowe's
+\ tune from the Spectrum 128K, its player transcribed, and the AY's
+\ registers it makes converted to the SN76489's
+\
+\ SONG, in the lists' and the objects' memory, which nothing uses out of
+\ play: the front end loads it beside FRONT, and a game's start lets it go
+\ (decision 56). The player is the Z80's in bank 6 (&C000-&C27A; docs/
+\ research/song.md, "David Lowe's tune"), routine for routine, playing the
+\ tune's own data (tools/mksongdata.py's, build/gen/song.6502) into a copy
+\ of the AY's registers. Each tick then makes the SN's registers from them
+\ as tools/mksong.py's zx_bass models it, which is what Matt chose by ear
+\ (decision 5): each AY channel on the SN's tone channel of its number,
+\ its period scaled by the chips' clocks (SONG_K), its volume through
+\ ym2sn.py's table (sg_volume), the envelope's level counted at the tick,
+\ the noise as loud as the loudest channel the mixer gives it to; a note
+\ below the SN's lowest played at its pitch by a timer switching its
+\ volume (song_irq.6502), or with no timer taken up octaves (decision 61).
+\ Only what changes is written. The tick is song_irq.6502's, at
+\ SONG_TICK_US, and its work runs with interrupts on and ACCCON's X clear
+\ (decision 60). The front end's calls, which start it and stop it
+\ (song_start, song_stop), are FRONT's (front.6502).
+\ ***************************************************************************
+
+ASSERT SONG_ENV_BITS = 8            ; (envelope: E's bytes one up are E in its units)
+SN_PERIODS = 1024                   ; the SN's periods, 10 bits
+
+\ bass_stop: channel X's bass ended, if it plays: its timer's interrupt
+\ off, and the attenuation its edges left kept as the chip's. Interrupts
+\ off; X is kept.
+.bass_stop
+{
+    LDA bass_half_hi,X : BEQ done
+    LDY bass_via,X
+    LDA #&20 : STA sysvia_ier,Y                 ; T2's interrupt off
+    STZ bass_half_lo,X : STZ bass_half_hi,X
+    LDA bass_lvl,X : ORA bass_phase,X : AND #SN_OFF : STA sg_att,X
+.done
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ song_work: a tick (song_irq.6502's): the player's three channels in the
+\ Z80's order (&C083 on), then the chip from the AY's registers, the
+\ channels and then the noise, as the model writes them.
+.song_work
+{
+    STZ sg_restart
+    JSR play_a
+    LDX #0 : JSR play_bc
+    LDX #1 : JSR play_bc
+    JSR envelope
+    STZ sg_noise_level
+    LDX #0 : JSR channel
+    LDX #1 : JSR channel
+    LDX #2 : JSR channel
+    JSR noise
+.worked                                         ; (tools/songcheck.mjs)
+    RTS
+}
+
+\ play_a (&C088): channel A, its list of patterns, each a byte skipped and
+\ then steps of a register list's address and the ticks to wait after it,
+\ to one whose address's high byte is &FF; the list's &FF its start again.
+.play_a
+{
+    LDA sg_a_on : BNE stepping
+.next                                           ; (&C08F)
+    INC sg_a_list : BNE listed
+    INC sg_a_list+1
+.listed
+    LDA sg_a_list : STA song_ptr : LDA sg_a_list+1 : STA song_ptr+1
+    LDA (song_ptr) : CMP #&FF : BNE pattern
+    LDA #LO(sg_list_a - 1) : STA sg_a_list      ; (&C0D2)
+    LDA #HI(sg_list_a - 1) : STA sg_a_list+1
+    BRA next
+.pattern
+    TAX
+    LDA sg_pat_lo,X : STA sg_a_step : LDA sg_pat_hi,X : STA sg_a_step+1
+    LDA #1 : STA sg_a_on
+.stepping                                       ; (&C0A7)
+    LDA sg_a_wait : BEQ step
+    DEC sg_a_wait
+    RTS
+.step
+    LDA sg_a_step : STA song_ptr : LDA sg_a_step+1 : STA song_ptr+1
+    LDY #2 : LDA (song_ptr),Y : CMP #&FF : BNE regs
+    STZ sg_a_on                                 ; (&C0CC: the pattern's end)
+    BRA next
+.regs
+    LDY #3 : LDA (song_ptr),Y : STA sg_a_wait
+    LDA sg_a_step : CLC : ADC #3 : STA sg_a_step
+    BCC stepped
+    INC sg_a_step+1
+.stepped
+    LDY #1 : LDA (song_ptr),Y : TAX
+    INY : LDA (song_ptr),Y : STA song_ptr+1 : STX song_ptr
+    \ (on into pairs)
+}
+\ pairs (&C195): the register and value pairs at song_ptr, to an &FF, into
+\ the AY's; register 13's restarts the envelope. Y is left the &FF's
+\ offset.
+.pairs
+{
+    LDY #0
+.pair
+    LDA (song_ptr),Y : CMP #&FF : BEQ done
+    TAX
+    INY : LDA (song_ptr),Y : STA sg_ay,X
+    CPX #13 : BNE next
+    DEC sg_restart                              ; (from 0: non-zero)
+.next
+    INY : BRA pair
+.done
+    RTS
+}
+
+\ play_bc (&C0E2, &C1BD): channel B (X 0) or C (X 1), its list of patterns,
+\ each after an instrument's &C9 and number if it has one; a pattern's
+\ notes each a period and the ticks it lasts after its own, to an &FF; an
+\ instrument register and value pairs to an &FF, then the volumes a note
+\ steps through, a tick each, to an &FF, where it holds.
+.play_bc
+{
+    LDA sg_on,X : BNE playing
+.list                                           ; (&C0E9)
+    LDA sg_list_lo,X : STA song_ptr : LDA sg_list_hi,X : STA song_ptr+1
+    JSR ptr_next
+    LDA (song_ptr) : CMP #&FF : BNE listed
+    LDA sg_start_lo,X : STA song_ptr            ; (&C1AF: its start again)
+    LDA sg_start_hi,X : STA song_ptr+1
+    JSR ptr_next
+    LDA (song_ptr)
+.listed
+    CMP #&C9 : BNE pattern
+    \ an instrument (&C17E): its pairs, its volumes from past them
+    JSR ptr_next
+    LDA song_ptr : PHA : LDA song_ptr+1 : PHA
+    LDA (song_ptr) : TAY
+    LDA sg_ins_lo,Y : STA song_ptr : LDA sg_ins_hi,Y : STA song_ptr+1
+    PHX : JSR pairs : PLX
+    TYA : SEC : ADC song_ptr : STA sg_vols_lo,X : STA sg_vol_lo,X
+    LDA song_ptr+1 : ADC #0 : STA sg_vols_hi,X : STA sg_vol_hi,X
+    PLA : STA song_ptr+1 : PLA : STA song_ptr
+    JSR ptr_next
+.pattern
+    LDA song_ptr : STA sg_list_lo,X : LDA song_ptr+1 : STA sg_list_hi,X
+    LDA (song_ptr) : TAY
+    LDA sg_pat_lo,Y : STA sg_pat_at_lo,X : LDA sg_pat_hi,Y : STA sg_pat_at_hi,X
+.playing                                        ; (&C103)
+    LDA sg_wait,X : BEQ note
+    DEC sg_wait,X
+.volume                                         ; (&C10E)
+    LDA sg_vol_lo,X : STA song_ptr : LDA sg_vol_hi,X : STA song_ptr+1
+    LDA (song_ptr) : CMP #&FF : BEQ held
+    STA sg_ay + 9,X
+    INC sg_vol_lo,X : BNE held
+    INC sg_vol_hi,X
+.held
+    RTS
+.note                                           ; (&C12A)
+    LDA sg_pat_at_lo,X : STA song_ptr : LDA sg_pat_at_hi,X : STA song_ptr+1
+    LDA (song_ptr) : CMP #&FF : BNE period
+    STZ sg_on,X                                 ; (the pattern's end)
+    JMP list
+.period
+    LDY sg_note_reg,X
+    STA sg_ay,Y
+    LDA #1 : STA sg_on,X
+    TAY : LDA (song_ptr),Y : PHA
+    INY : LDA (song_ptr),Y : STA sg_wait,X
+    LDY sg_note_reg,X : PLA : STA sg_ay + 1,Y
+    LDA sg_pat_at_lo,X : CLC : ADC #3 : STA sg_pat_at_lo,X
+    BCC moved
+    INC sg_pat_at_hi,X
+.moved
+    LDA sg_vols_lo,X : STA sg_vol_lo,X          ; (&C1A8: the volumes from their start)
+    LDA sg_vols_hi,X : STA sg_vol_hi,X
+    BRA volume
+}
+\ ptr_next: song_ptr on a byte.
+.ptr_next
+    INC song_ptr : BNE ptr_done
+    INC song_ptr+1
+.ptr_done
+    RTS
+
+\ ---------------------------------------------------------------------------
+\ The conversion: tools/mksong.py's convert, a tick's.
+
+\ envelope: the envelope's level, sg_env_level: its steps since register
+\ 13's write, sg_env_q, are floor(n C / E) after n ticks (mksongdata.py's
+\ SONG_ENV_STEP is C), counted a tick at a time, E from registers 11 and
+\ 12; and the level there by the shape in register 13 (bits 8 continue, 4
+\ attack, 2 alternate, 1 hold, as the AY's: mksong.py's envelope), made
+\ again only when it steps, and no more once a shape that holds has.
+.envelope
+{
+    LDA sg_restart : BEQ counting
+    STZ sg_env_q : STZ sg_env_q+1
+    STZ sg_env_r : STZ sg_env_r+1 : STZ sg_env_r+2
+    STZ sg_env_held
+    LDA sg_ay + 13 : BIT #8 : BNE shaped        ; (shapes 0-7 are 9's or 15's)
+    AND #4 : BEQ falls
+    LDA #15
+    BRA shaped
+.falls
+    LDA #9
+.shaped
+    STA sg_shape
+    LSR A : LSR A : AND #1 : STA sg_up          ; attack: rising
+    BRA level
+.counting
+    LDA sg_env_held : BEQ count
+    RTS
+.count
+    CLC
+    LDA sg_env_r : ADC #LO(SONG_ENV_STEP) : STA sg_env_r
+    LDA sg_env_r+1 : ADC #HI(SONG_ENV_STEP) : STA sg_env_r+1
+    LDA sg_env_r+2 : ADC #SONG_ENV_STEP >> 16 : STA sg_env_r+2
+    SEC                                         ; (E in its units has a low byte of 0)
+    LDA sg_env_r+1 : SBC sg_ay + 11 : TAX
+    LDA sg_env_r+2 : SBC sg_ay + 12 : BCC same  ; (no step: the level as it was)
+.step
+    STA sg_env_r+2 : STX sg_env_r+1
+    INC sg_env_q : BNE stepped
+    INC sg_env_q+1
+.stepped
+    SEC
+    LDA sg_env_r+1 : SBC sg_ay + 11 : TAX
+    LDA sg_env_r+2 : SBC sg_ay + 12 : BCS step
+.level
+    LDX sg_up                                   ; (the first cycle's way)
+    LDA sg_env_q+1 : BNE cycled
+    LDA sg_env_q : CMP #16 : BCC within         ; the first cycle
+.cycled
+    LDA sg_shape : LSR A : BCC cycles           ; (not held; alternate now bit 0)
+    DEC sg_env_held                             ; (from 0: it holds from here)
+    AND #1 : EOR sg_up                          ; held: up if it rose and didn't alternate, or fell and did
+    BEQ got
+    LDA #15
+    BRA got
+.cycles
+    AND #1 : BEQ within                         ; (alternate, shifted: not)
+    LDA sg_env_q : AND #16 : BEQ within         ; an odd cycle turns
+    TXA : EOR #1 : TAX
+.within
+    LDA sg_env_q : AND #15
+    CPX #0 : BNE got
+    EOR #15                                     ; falling
+.got
+    STA sg_env_level
+.same
+    RTS
+}
+
+\ channel: AY channel X's tone onto the SN's of its number: its level, the
+\ envelope's if register 8 + X's bit 4 says, through sg_volume, silent if
+\ the mixer turns its tone off; the noise's level, the loudest of the
+\ channels it's mixed into (sg_noise_level). With its period as it was,
+\ only the level, the way it went (a tone, or the bass). With a new one,
+\ its conversion: on the SN's period below 10 bits, the tone; past them,
+\ the bass if the channel has its timer (song_irq.6502), or octaves up.
+\ (A bass edge between a period's two bytes would take the second: they're
+\ written with interrupts off.)
+.channel
+{
+    LDA sg_ay + 8,X : BIT #&10 : BEQ level
+    LDA sg_env_level
+.level
+    AND #15 : TAY
+    LDA sg_ay + 7 : AND sg_noise_bit,X : BNE noiseless
+    CPY sg_noise_level : BCC noiseless
+    STY sg_noise_level
+.noiseless
+    LDA sg_ay + 7 : AND sg_tone_bit,X : BEQ toned
+    LDY #0                                      ; (sg_volume's silent)
+.toned
+    LDA sg_volume,Y : STA sg_a
+    \ the period: as it was, its way the same
+    TXA : ASL A : TAY
+    LDA sg_ay,Y : CMP sg_p_lo,X : BNE convert
+    LDA sg_ay + 1,Y : AND #15 : CMP sg_p_hi,X : BNE convert
+    LDA bass_half_hi,X : BEQ toned_level
+    JMP bass_level
+.toned_level
+    LDA sg_a : JMP volume_write
+.convert
+    \ a new one, at least 1, converted
+    LDA sg_ay,Y : STA sg_p_lo,X : STA sg_t
+    LDA sg_ay + 1,Y : AND #15 : STA sg_p_hi,X : STA sg_t+1
+    ORA sg_t : BNE some
+    INC sg_t
+.some
+    JSR times
+.rounded
+    \ the SN's period, (g + 1) >> 1: g is the product with a bit more
+    LDA sg_g : CLC : ADC #1 : STA sg_n
+    LDA sg_g+1 : ADC #0 : LSR A : STA sg_n+1 : ROR sg_n
+    CMP #HI(SN_PERIODS) : BCC tone
+    LDA bass_via,X : BMI up                     ; (B's: none)
+    BEQ bass                                    ; (C's, the System VIA's)
+    LDA sg_bands : BEQ bass                     ; (A's, the User VIA's, but while the bands have it)
+.up
+    LSR sg_g+1 : ROR sg_g
+    BRA rounded
+.bass
+    JMP channel_bass
+.tone
+    PHP : SEI
+    JSR bass_stop
+    PLP
+    JSR tone_write
+    LDA sg_a : JMP volume_write
+}
+
+\ channel_bass: channel X's bass (song_irq.6502), its half-cycle SONG_BASS_US
+\ microseconds a unit of the SN's period sg_n, as the edges take it. Begun,
+\ the channel's period is 1 (which the ear doesn't hear), its level heard
+\ first, and the first edge a half-cycle from the tick's moment (T1's
+\ count, which runs from its latch, says how long ago); going on, the next
+\ edge takes the half-cycle (bass_level the level).
+ASSERT SONG_BASS_US = 4
+.channel_bass
+{
+    ASL sg_n : ROL sg_n+1 : ASL sg_n : ROL sg_n+1
+    LDA bass_half_hi,X : BEQ begun
+    PHP : SEI
+    LDA sg_n : STA bass_half_lo,X
+    LDA sg_n+1 : STA bass_half_hi,X
+    BRA going
+.begun
+    LDA sg_n : STA sg_h : LDA sg_n+1 : STA sg_h+1
+    LDA #1 : STA sg_n : STZ sg_n+1
+    JSR tone_write
+    LDA sg_a : ORA sg_vol_latch,X : STA bass_lvl,X
+    LDA sg_a : JSR volume_write
+    STZ bass_phase,X
+    LDY bass_via,X
+    PHP : SEI                                   ; (its half-cycle and its timer's start together)
+    LDA sg_h : STA bass_half_lo,X
+    LDA sg_h+1 : STA bass_half_hi,X
+.read
+    LDA sysvia_t1ch : STA bass_t+1
+    LDA sysvia_t1cl : STA bass_t
+    LDA sysvia_t1ch : CMP bass_t+1
+    BNE read
+    \ the half-cycle less the time since the tick: T1's latch less its count
+    LDA bass_t : CLC : ADC bass_half_lo,X : STA bass_t
+    LDA bass_t+1 : ADC bass_half_hi,X : STA bass_t+1
+    LDA bass_t : SEC : SBC #LO(SONG_TICK_US - 2 + BASS_T2_FIRST) : STA sysvia_t2cl,Y
+    LDA bass_t+1 : SBC #HI(SONG_TICK_US - 2 + BASS_T2_FIRST) : STA sysvia_t2ch,Y
+    LDA #&A0 : STA sysvia_ier,Y                 ; T2's interrupt on
+.going
+    PLP
+    \ (on into bass_level)
+}
+\ bass_level: channel X's bass's level sg_a, written now if the half-cycle
+\ sounding is heard, else its next edge has it.
+.bass_level
+{
+    LDA sg_a : ORA sg_vol_latch,X
+    CMP bass_lvl,X : BEQ same
+    PHP : SEI
+    STA bass_lvl,X
+    LDY bass_phase,X : BNE silent
+    JSR sn_write
+.silent
+    PLP
+.same
+    RTS
+}
+
+\ noise: the noise channel, as loud as the loudest channel it's mixed into,
+\ at the SN's faster rate for an AY period up to SONG_NOISE_SLOW and its
+\ slower above; its control written only when it changes while heard (a
+\ write restarts the SN's shift register), as nm's decision 17 has it.
+.noise
+{
+    LDY sg_noise_level : BEQ volume
+    LDA #SN_NOISE OR SONG_NOISE_WHITE
+    LDX sg_ay + 6 : CPX #SONG_NOISE_SLOW + 1 : BCC fast
+    ORA #1
+.fast
+    CMP sg_noise : BEQ volume
+    STA sg_noise
+    JSR sg_write
+.volume
+    LDA sg_volume,Y
+    LDX #3
+    \ (on into volume_write)
+}
+\ volume_write: channel X's attenuation A, if the chip hasn't it; sg_write:
+\ A to the chip, with interrupts off meanwhile.
+.volume_write
+    CMP sg_att,X : BEQ written
+    STA sg_att,X
+    ORA sg_vol_latch,X
+.sg_write
+    PHP : SEI
+    JSR sn_write
+    PLP
+.written
+    RTS
+
+\ times: sg_g, the period sg_t (12 bits) times SONG_K, shifted right 13:
+\ the SN's period with a bit more, rounded off it as the octaves need. A
+\ bit of sg_t at a time from its top, SONG_K times 8 added for each set, so
+\ that the product's top two bytes are the answer.
+.times
+{
+    LDY #4
+.top
+    ASL sg_t : ROL sg_t+1
+    DEY : BNE top
+    STZ sg_m : STZ sg_m+1 : STZ sg_g : STZ sg_g+1
+    LDY #12
+.bit
+    ASL sg_m : ROL sg_m+1 : ROL sg_g : ROL sg_g+1
+    ASL sg_t : ROL sg_t+1 : BCC next
+    CLC
+    LDA sg_m : ADC #LO(SONG_K * 8) : STA sg_m
+    LDA sg_m+1 : ADC #HI(SONG_K * 8) : STA sg_m+1
+    LDA sg_g : ADC #(SONG_K * 8) >> 16 : STA sg_g
+    BCC next
+    INC sg_g+1
+.next
+    DEY : BNE bit
+    RTS
+}
+ASSERT (SONG_K * 8) DIV &10000 < 256 AND (4095 * SONG_K * 8) DIV &10000 < &10000
+
+\ tone_write: channel X's tone at period sg_n, if the chip hasn't it: the
+\ latch byte with its low 4 bits, the data byte with the other 6, with
+\ interrupts off between them.
+.tone_write
+{
+    LDA sg_n : CMP sg_tone_lo,X : BNE write
+    LDA sg_n+1 : CMP sg_tone_hi,X : BEQ done
+.write
+    LDA sg_n+1 : STA sg_tone_hi,X
+    LDA sg_n : STA sg_tone_lo,X
+    LSR sg_n+1 : ROR A : LSR sg_n+1 : ROR A
+    LSR A : LSR A : STA sg_t                    ; (the other 6, where the period was)
+    LDA sg_n : AND #15 : ORA sg_tone_latch,X
+    PHP : SEI
+    JSR sn_write
+    LDA sg_t : JSR sn_write
+    PLP
+.done
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ The tune's data (tools/mksongdata.py), and the player's tables.
+INCLUDE "../build/gen/song.6502"
+
+\ B's and C's lists' starts, where the player's place starts, a byte before
+\ each (&C007, &C009)
+.sg_start_lo
+    EQUB LO(sg_list_b - 1), LO(sg_list_c - 1)
+.sg_start_hi
+    EQUB HI(sg_list_b - 1), HI(sg_list_c - 1)
+\ B's and C's notes' period registers (by play_bc's X); by channel, its
+\ tone's and noise's bits in the mixer, and the chip's latch bytes
+.sg_note_reg
+    EQUB 2, 4
+.sg_tone_bit
+    EQUB 1, 2, 4
+.sg_noise_bit
+    EQUB 8, 16, 32
+.sg_tone_latch
+    EQUB SN_TONE0, SN_TONE0 OR &20, SN_TONE0 OR &40
+.sg_vol_latch
+    EQUB SN_TONE0 OR SN_VOL, SN_TONE0 OR SN_VOL OR &20, SN_TONE0 OR SN_VOL OR &40, SN_NOISE OR SN_VOL
+.sg_bands       SKIP 1      ; non-zero while the end screen's bands have User VIA T2 (song_bands)
+
+\ The player's state, which song_start clears: channel A's (the Z80's
+\ &C0DA-&C0E1), B's and C's by play_bc's X (&C172-&C17D, &C243-&C24E), the
+\ AY's registers, and the envelope's count.
+.sg_state
+.sg_a_on        SKIP 1      ; (&C0DA) non-zero while a pattern plays
+.sg_a_wait      SKIP 1      ; (&C0E1) the ticks the step waits still
+.sg_on          SKIP 2      ; (&C172) non-zero while a pattern plays
+.sg_wait        SKIP 2      ; (&C173) the ticks the note lasts still
+.sg_ay          SKIP 14     ; the AY's registers 0-13, as the player writes them
+.sg_restart     SKIP 1      ; non-zero: register 13 written this tick (the envelope starts again)
+.sg_env_q       SKIP 2      ; the envelope's steps since ...
+.sg_env_r       SKIP 3      ; ... and what's over, in E's units (SONG_ENV_BITS)
+.sg_env_held    SKIP 1      ; non-zero once a shape that holds has
+SG_STATE = P% - sg_state
+.sg_a_list      SKIP 2      ; (&C0DB) A's place in its list: the entry last read
+.sg_a_step      SKIP 2      ; (&C0DD) its place in its pattern: the last step's start
+.sg_list_lo     SKIP 2      ; (&C178) B's and C's places in their lists ...
+.sg_list_hi     SKIP 2
+.sg_pat_at_lo   SKIP 2      ; (&C174) ... in their patterns: the next note ...
+.sg_pat_at_hi   SKIP 2
+.sg_vols_lo     SKIP 2      ; (&C17A) ... their instruments' volumes ...
+.sg_vols_hi     SKIP 2
+.sg_vol_lo      SKIP 2      ; (&C17C) ... and the next of them
+.sg_vol_hi      SKIP 2
+\ the conversion's, by channel: the period last converted, and the chip as
+\ written (&FF: not known)
+.sg_p_lo        SKIP 3
+.sg_p_hi        SKIP 3
+.sg_tone_lo     SKIP 3
+.sg_tone_hi     SKIP 3
+.sg_att         SKIP 4      ; the four channels' attenuations
+.sg_noise       SKIP 1      ; the noise's control
+\ a tick's working
+.sg_env_level   SKIP 1      ; the envelope's level
+.sg_shape       SKIP 1
+.sg_up          SKIP 1
+.sg_noise_level SKIP 1
+.sg_a           SKIP 1      ; a channel's attenuation
+.sg_t           SKIP 2      ; its period
+.sg_m           SKIP 2      ; ... times SONG_K, the low bytes ...
+.sg_g           SKIP 2      ; ... the rest, shifted for the octaves
+.sg_n           SKIP 2      ; the SN's period
+.sg_h           SKIP 2      ; a bass's half-cycle, begun

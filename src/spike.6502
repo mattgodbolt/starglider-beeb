@@ -100,6 +100,8 @@ SPIKE_KEYS = 1024
 \ none)
 .irq_handler
     RTI
+\ (the title song's flag, which the effects read: it never plays here)
+.song_on    EQUB 0
 
 \ spike_erase: the last frame's lines and boxes erased (from its erase
 \ list) and its ground dots (from theirs), as the disc erases a screen

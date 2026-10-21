@@ -34,7 +34,9 @@ which must repeat the pass's first. It times each tick's work, from &C083
 to the call's return, and walks the data as the player reads it for the
 bytes a transcription of the player would carry. The JSON holds the
 clocks, each tick's T-state and its writes (T-state, register, value) for
-the pass, the work's mean and most, and the data's addresses.
+the pass, the work's mean and most, the data's addresses, and bank 6's
+bytes from &C000 to the data's end ("bank6"), the player's list starts
+with them, for tools/mksongdata.py.
 """
 import argparse
 import bisect
@@ -174,6 +176,7 @@ def main():
         "writes": [[list(w) for w in ws] for ws in by_tick[:length]],
         "code": [TUNE, CODE_END], "data": data,
         "work_mean": sum(work) / length, "work_max": max(work),
+        "bank6": [spec.mem[a] for a in range(TUNE, max(data) + 1)],
     }) + "\n")
     writes = sum(len(w) for w in by_tick[:length])
     print(f"zx_song: {length} ticks a pass, {seconds:.2f} s, a tick every {seconds / length * 1e3:.3f} ms "

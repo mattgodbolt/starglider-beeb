@@ -1,0 +1,97 @@
+\ ***************************************************************************
+\ STARGLIDER for the BBC Master - the title song (decision 5): what the
+\ interrupt runs
+\
+\ The song (song.6502) is SONG, which the front end loads into the lists'
+\ and objects' memory (decision 56). Its tick comes on System VIA T1, free
+\ out of play, as no effect starts while it plays (decision 57); its work
+\ runs from here with interrupts on and ACCCON's X clear, as its code and
+\ data lie past &3000. The bass's edges (decision 58) are here: a channel's
+\ volume switched between its level and silence at each half-cycle, by a
+\ timer each: channel C's System VIA T2, channel A's User VIA T2 but while
+\ the end screen's bands have it. This must lie below &3000, where ACCCON's
+\ X changes nothing: the interrupt runs it.
+\ ***************************************************************************
+
+\ A one-shot T2's half-cycle loses this many microseconds to the edge's
+\ instructions from reading its count to starting it again; the first
+\ (song.6502's channel_bass) is started this much early, for its read of
+\ the tick's T1 to starting T2 and the interrupt's way from T2's time-out
+\ to the chip, so that the edges land on the tick's line (measured on
+\ jsbeeb, docs/journal.md, 2026-10-21; tools/songcheck.mjs checks every
+\ edge's moment).
+BASS_T2_EXTRA = 37
+BASS_T2_FIRST = 128
+
+.song_on        SKIP 1      ; non-zero while the song plays (front.6502's song_start)
+\ the bass, by channel (A's and C's: B has no timer), which the tick sets
+\ and the edges read
+.bass_half_lo   SKIP 3      ; its half-cycle in microseconds, 0 while it has none ...
+.bass_half_hi   SKIP 3
+.bass_lvl       SKIP 3      ; ... its attenuation's byte for the chip while heard ...
+.bass_phase     SKIP 3      ; ... and 0 while heard, SN_OFF while silent
+.bass_t         SKIP 2      ; an edge's count
+\ each channel's timer, as an offset from the System VIA's, and none
+.bass_via
+    EQUB usrvia_t1cl - sysvia_t1cl, &FF, 0
+ASSERT HI(SONG_BASS_US * SN_PERIODS) <> 0   ; (bass_half_hi is never 0 while one plays)
+
+\ song_irq: from irq_handler (engine.6502) while the song plays: an edge
+\ of channel C's bass, then A's, then the tick; carry set if it took one,
+\ clear if none was there. A and X go; Y is kept.
+.song_irq
+{
+    PHY
+    LDY #0                                      ; (channel C: the System VIA)
+    LDX #2
+    LDA bass_half_hi + 2 : BEQ not_c
+    LDA sysvia_ifr : AND #&20 : BNE edge        ; (T2 is bit 5)
+.not_c
+    LDY #usrvia_t1cl - sysvia_t1cl              ; (channel A: the User VIA)
+    LDX #0
+    LDA bass_half_hi : BEQ not_a
+    LDA usrvia_ifr : AND #&20 : BNE edge
+.not_a
+    BIT sysvia_ifr : BVS tick                   ; (T1 is bit 6)
+    PLY
+    CLC
+    RTS
+\ an edge: the one-shot started again for the next half-cycle less the
+\ time since this one ended (it counts on past 0, so adding its count
+\ takes off however late the interrupt is), and the volume the other way
+.edge
+.read
+    LDA sysvia_t2ch,Y : STA bass_t+1
+    LDA sysvia_t2cl,Y : STA bass_t              ; (acknowledges it)
+    LDA sysvia_t2ch,Y : CMP bass_t+1
+    BNE read                                    ; (the low byte went past 0 meanwhile)
+    LDA bass_t : CLC : ADC bass_half_lo,X : STA bass_t
+    LDA bass_t+1 : ADC bass_half_hi,X : STA bass_t+1
+    LDA bass_t : SEC : SBC #BASS_T2_EXTRA : STA sysvia_t2cl,Y
+    LDA bass_t+1 : SBC #0 : STA sysvia_t2ch,Y   ; (starts it)
+    LDA bass_phase,X : EOR #SN_OFF : STA bass_phase,X
+    ORA bass_lvl,X
+.edge_write                                     ; (tools/songcheck.mjs)
+    JSR sn_write
+    PLY
+    SEC
+    RTS
+\ the tick: the song's work, with interrupts on so that the split, the
+\ edges and the end screen's bands aren't held up by it, and X clear while
+\ it runs (a nested interrupt's entry keeps its own A at &FC, so the
+\ interrupted one's is kept here)
+.tick
+    LDA sysvia_t1cl                             ; acknowledged (T1 runs on from its latch)
+    LDA &FC : PHA
+    LDA acccon : AND #ACCCON_X : PHA
+    LDA #ACCCON_X : TRB acccon
+    CLI
+    JSR song_work                               ; (song.6502)
+    SEI
+    PLA : TSB acccon                            ; (X back if it was set)
+    PLA : STA &FC
+    PLY
+    SEC
+    RTS
+}
+.song_irq_end                                   ; (tools/songcheck.mjs)

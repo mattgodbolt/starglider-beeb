@@ -182,17 +182,28 @@ class SN:
             self.noise = v
 
 
-def convert(cap, bass):
+def convert(cap, bass, ticks=None, records=None):
     """The tune's SN writes in time; and per tick, what a stream of it would
     carry: the SN's writes at the tick, but for a bass channel its period
     past 10 bits (two bytes, flagged by BASS_FLAG, which no SN write has)
     and its level (one) where they change, as its edges are the player's
     own: a half-cycle is BASS_US microseconds a unit of the SN's period, as
-    nm's bass.6502 times them."""
+    nm's bass.6502 times them.
+
+    bass is True or False for every channel, or one of each by channel (a
+    channel without it takes its low notes up octaves). ticks plays on past
+    the pass, its writes again, as the Spectrum loops it. records, a list,
+    gets each tick's state once it's done, for tools/songcheck.mjs (via
+    tools/songmodel.py): the AY's registers 0-13, whether register 13 was
+    written (the envelope restarted), the SN's periods and attenuations as
+    last written (a bass channel's attenuation is its edges'), the noise's
+    control and how often the tick wrote it, and each bass channel's
+    half-cycle in microseconds (0: none) and attenuation."""
     ay_hz = cap["ay_hz"]
     length = cap["length"]
     tick_s = (cap["ticks"][length] - cap["ticks"][0]) / cap["cpu_hz"] / length
     ratio = SN_HZ * 16 / ay_hz
+    timer = bass if isinstance(bass, (list, tuple)) else (bass,) * 3
     sn = SN()
     reg = [0] * 16
     env_at = 0                                  # the tick register 13 was last written
@@ -205,7 +216,7 @@ def convert(cap, bass):
     half = [None] * 3                           # bass: the half-cycle (s)
     for c in range(4):
         sn.volume(0, c, SILENT)
-    for k in range(length):
+    for k in range(ticks or length):
         t0 = k * tick_s
         while True:
             due = [(edge[c], c) for c in range(3) if edge[c] is not None and edge[c] < t0]
@@ -216,10 +227,12 @@ def convert(cap, bass):
             sn.volume(round(te * BBC_HZ), c, held[c] if on[c] else SILENT)
             edge[c] = te + half[c]
             edges += 1
-        for _, r, v in cap["writes"][k]:
+        restarted = False
+        for _, r, v in cap["writes"][k % length]:
             reg[r] = v
             if r == 13:
                 env_at = k
+                restarted = True
         t = round(t0 * BBC_HZ)
         before = len(sn.writes)
         items = []
@@ -239,7 +252,7 @@ def convert(cap, bass):
                 edge[c] = half[c] = held[c] = None
                 sn.tone(t, c, n)
                 sn.volume(t, c, att)
-            elif bass:
+            elif timer[c]:
                 h = BASS_US * n / VIA_HZ
                 mark = len(sn.writes)
                 if edge[c] is None:
@@ -263,7 +276,13 @@ def convert(cap, bass):
             sn.noise_control(t, NOISE_WHITE | (0 if reg[6] <= NOISE_SLOW else 1))
         sn.volume(t, 3, VOLUME[noise_level])
         stream.append(items + [w[1] for i, w in enumerate(sn.writes[before:], before) if i not in bass_made])
-    end = round(length * tick_s * BBC_HZ)
+        if records is not None:
+            records.append({
+                "ay": reg[:14], "env": restarted, "tone": sn.period[:], "att": sn.att[:], "noise": sn.noise,
+                "noise_w": sum(1 for w in sn.writes[before:] if w[1] & 0xF0 == 0xE0),
+                "half": [round(h * VIA_HZ) if h else 0 for h in half], "held": held[:],
+            })
+    end = round((ticks or length) * tick_s * BBC_HZ)
     for c in range(4):
         sn.volume(end, c, SILENT)
     sn.writes.sort(key=lambda w: w[0])

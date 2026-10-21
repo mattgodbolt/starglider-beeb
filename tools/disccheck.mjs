@@ -1,6 +1,7 @@
 // The game's own disc reader (src/disc.6502), on jsbeeb's Master with the
 // disc in the drive: SG loads the game's files with it at start (HAZEL's,
-// the banks, the cockpit, the front end in the loading area), and a game's
+// the banks, the cockpit, the front end in the loading area, and the front
+// end the title song over the lists and the objects), and a game's
 // start loads the loading area's WINDOW and SPEECH over the front end
 // (src/front_main.6502), each of which must come out the same as the file;
 // it says how long each took. Then, as the game plays, the harness has it
@@ -41,8 +42,11 @@ const t0 = tm.elapsedCycles;
 await tm.runUntilAddress(sym.start_loaded, 60);
 const loaded = (tm.elapsedCycles - t0) / 2e6;
 const snapshot = Buffer.from(ram);
-// the title, a key, and the game's start's loads, compared once they're in
+// the title (and the title song's SONG, read before it: its code and data,
+// up to the variables the song's playing writes), a key, and the game's
+// start's loads, compared once they're in
 await tm.runUntilAddress(sym["front_title.poll"], 60, { bank: sym.BANK_PIC });
+const titled = Buffer.from(ram);
 tm.keyDown("Space");
 await tm.runFor(0.1 * 2e6);
 tm.keyUp("Space");
@@ -94,16 +98,17 @@ const checks = [
     ["LOGIC", bank(sym.BANK_LOGIC), snapshot],
     ["COCKPIT", sym.SCREEN, snapshot],
     ["FRONT", bank(sym.BANK_PIC), snapshot],
+    ["SONG", sym.LISTS, titled, sym.sg_bands - sym.LISTS],
     ["WINDOW", bank(sym.BANK_PIC) + (sym.WIN_PIC - 0x8000), flight],
     ["SPEECH", bank(sym.BANK_PIC), flight],
     ["TABLES", area, ram],                              // the read in play
 ];
 let bad = 0;
 const report = [];
-for (const [name, at, mem] of checks) {
+for (const [name, at, mem, length] of checks) {
     const f = files[name];
     let n = 0;
-    for (let i = 0; i < f.length; i++) if (mem[at + i] !== f[i]) n++;
+    for (let i = 0; i < (length ?? f.length); i++) if (mem[at + i] !== f[i]) n++;
     bad += n;
     report.push(`${name} ${n}`);
 }

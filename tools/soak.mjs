@@ -251,8 +251,9 @@ async function child() {
         WindowPic: { file: "WINDOW", from: 0x9000, phys: bankAt(sym.BANK_PIC) },
         Docked: { file: "DOCKED", from: 0x9000, phys: bankAt(sym.BANK_PIC) },
         Front: { file: "FRONT", from: 0x8000, phys: bankAt(sym.BANK_PIC) },
+        Song: { file: "SONG", from: sym.LISTS, phys: (a) => a },
     };
-    const DF = ["SHAPES", "WORLD", "TABLES", "CODE2", "COCKPIT", "LOGIC", "WINDOW", "SPEECH", "FRONT", "DOCKED"];
+    const DF = ["SHAPES", "WORLD", "TABLES", "CODE2", "COCKPIT", "LOGIC", "WINDOW", "SPEECH", "FRONT", "DOCKED", "SONG"];
     DF.forEach((f, i) => {
         if (sym[`DF_${f}`] !== i) throw new Error(`DF_${f} isn't ${i}`);
     });
@@ -295,7 +296,7 @@ async function child() {
         "WORLD:(cam_valid|dot_made|dot_mv_was|dot_valid|rap_sm8_lo|rap_sm8_hi|rot_ke_lo|rot_ke_hi|rot_exactly|rot_identity|rot_shape|rot_was|rotate_setup\\.\\w+)",
         "WINDOW:(dv_some|dv_gen|dv_mv|gy_was)",
         "SG:(gm_n|gm_next|gm_pitch|gm_roll|om_n|om_next|key_defined)",
-        "FRONT:(fe_st_colour|fe_state)",
+        "FRONT:(fe_st_colour|fe_song_read|fe_state)",
     ].join("|") + ")$");
     const images = [];
     for (const sec of listing) {
@@ -690,6 +691,13 @@ async function child() {
     mark("fe_end_wait", "Front", markPhase("endscreen"));
     mark("fe_field", "Front", beat);
     mark("game_start", "Main", markPhase("loading"));
+    // the title song's SONG, over the lists and the objects, let go as the
+    // silo's records go back over it at a game's start (front.6502's
+    // fe_silo_back), and the game's from then on
+    mark("fe_silo_back", "Front", () => {
+        const song = imageNamed.Song;
+        owner.fill(0, song.phys0, song.phys0 + song.size);
+    });
     mark("game_end", "Main", markPhase("ending"));
     mark("to_title", "Main", markPhase("leaving"));
     mark("play", "Main", () => {
