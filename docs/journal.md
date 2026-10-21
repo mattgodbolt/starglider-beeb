@@ -1681,6 +1681,7 @@ With only `BITLEN` changed, 7d663a7 assembled the disc byte for byte as
 `ZA_AUTO` variable's address, as the line drawer's `LDX #line_scr` does
 to patch an `ORA (zp),Y`, read as an unchecked indexed access. Rich fixed
 that too (waitingforvsync/baron#33, 8d09f3c). On 8d09f3c the branch,
-`baron06`, passes `make check` and `make logic`. It waits for baron's
-release, which the README will then name: until then main builds with
-0.5.3, as nm and Chuckie Egg 2 do from the same `../baron`.
+`baron06`, passes `make check` and `make logic`. Baron released it all
+as v0.6.0 on 2026-10-21, which the README now names. nm and Chuckie Egg
+2, which build from the same `../baron`, assemble every disc byte for byte
+as they did on 0.5.3 but for !BOOT's stamp, so `../baron` moved to it.
