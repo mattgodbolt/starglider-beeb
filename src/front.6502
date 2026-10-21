@@ -84,11 +84,13 @@ TITLE_WAIT = &44C + 1
     LDA #LO(fe_colours) : LDX #HI(fe_colours)
     JMP fe_fade_in
 
-\ fe_start_game (L_01EFE): the song ended if it plays (sub_02A30), a fade
-\ out (sub_039B2's), and front_main.6502's game_start, which loads
-\ flight's files over this.
+\ fe_start_game (L_01EFE): the song ended if it plays (sub_02A30), the
+\ silo's records back from under SONG (fe_silo_back), a fade out
+\ (sub_039B2's), and front_main.6502's game_start, which loads flight's
+\ files over this.
 .fe_start_game
     JSR song_stop
+    JSR fe_silo_back
     JSR fe_fade_out
     JMP game_start
 
@@ -106,17 +108,165 @@ TITLE_WAIT = &44C + 1
     RTS
 }
 
-\ song_start (the ST's sub_02290): the title song from its start, and
-\ song_stop (sub_02A30): its end. Decision 5 is to choose it by ear: for
-\ now they're silent. song_if_quiet: song_start if no sample plays,
-\ where the ST tests for one.
+\ ---------------------------------------------------------------------------
+\ The title song (decision 5): David Lowe's tune from the Spectrum 128K,
+\ SONG's player (song.6502), whose tick is the interrupt's
+\ (song_irq.6502).
+
+\ song_if_quiet: song_start if no sample plays and the song doesn't, as the
+\ ST starts its sampled song again if no sample plays (L_01EAC): the song
+\ goes round (decision 59), so that's once it has stopped.
 .song_if_quiet
-    PHP : SEI
+{
+    PHP : SEI                                   ; (the player counts it down: read it whole)
     LDA sample_left : ORA sample_left+1 : ORA sample_left+2 : ORA sample_left+3
-    PLP : CMP #0 : BNE song_stop
-.song_start
-.song_stop
+    ORA song_on
+    PLP : CMP #0 : BEQ song_start
     RTS
+}
+
+\ song_start (the ST's sub_02290): the song from its start, unless the
+\ sound is off ($2CB), as the ST's sample_start has it; an effect playing
+\ stopped (SFX_QUIET), as the ST's sample takes Timer A from it (decision
+\ 57); the player as the Z80's &C019 starts it, the AY's registers 0 as
+\ the model has them, the chip silent; T1 free-running at the tick, the
+\ first a tick on.
+.song_start
+{
+    LDA sound_on : BEQ off
+    PHP : SEI
+    STZ song_on
+    JSR sfx_quiet
+    JSR song_silent
+    PLP                                         ; (the song off: its state is this's)
+    LDX #SG_STATE - 1
+.state
+    STZ sg_state,X
+    DEX : BPL state
+    LDA #LO(sg_list_a - 1) : STA sg_a_list
+    LDA #HI(sg_list_a - 1) : STA sg_a_list+1
+    LDX #1
+.lists
+    LDA sg_start_lo,X : STA sg_list_lo,X
+    LDA sg_start_hi,X : STA sg_list_hi,X
+    DEX : BPL lists
+    LDA #&FF                                    ; (none: a period is 12 bits, the noise's
+    STA sg_noise                                ; control 3, a tone 10)
+    LDX #2
+.unknown
+    STA sg_p_hi,X : STA sg_tone_hi,X
+    DEX : BPL unknown
+    \ T1 free-running, T2 one-shot (timing, not counting PB6's pulses)
+    PHP : SEI
+    LDA sysvia_acr : AND #&1F : ORA #&40 : STA sysvia_acr
+    LDA #LO(SONG_TICK_US - 2) : STA sysvia_t1cl
+    LDA #HI(SONG_TICK_US - 2) : STA sysvia_t1ch ; (starts it: a count of n is n + 2 microseconds)
+    LDA #&C0 : STA sysvia_ier                   ; T1's interrupt on
+    STA song_on
+    PLP
+.off
+    RTS
+}
+
+\ song_stop (the ST's sub_02A30): the song's end, its tick and its bass
+\ stopped, the chip silent.
+.song_stop
+    PHP : SEI
+    STZ song_on
+    JSR song_silent
+    PLP
+    RTS
+
+\ song_bands, song_bands_off: the end screen's bands take User VIA T2,
+\ channel A's bass's timer, while they show (end_on, end_off), and its
+\ low notes go up an octave meanwhile (decision 58): its period converted
+\ again at the next tick, the way it goes with it.
+.song_bands
+    PHP : SEI
+    LDA #&FF : STA sg_bands
+    LDX #0 : JSR bass_stop
+    PLP
+    BRA song_bands_a
+.song_bands_off
+    STZ sg_bands
+.song_bands_a
+    LDA #&FF : STA sg_p_hi                      ; (no period's)
+    RTS
+
+\ song_silent: T1's interrupt and the bass's off, and every channel silent,
+\ as SONG's copy of the chip has it. Interrupts off.
+.song_silent
+{
+    LDA #&40 : STA sysvia_ier                   ; T1's interrupt off
+    LDX #2
+.bass
+    JSR bass_stop
+    DEX : BPL bass
+    LDX #3
+.channel
+    LDA #SN_OFF : STA sg_att,X
+    ORA sg_vol_latch,X : JSR sn_write
+    DEX : BPL channel
+    RTS
+}
+
+\ fe_song_load: SONG, the title song (song.6502, decision 56), read into
+\ the lists' and the objects' memory beside FRONT (front_main.6502's, once
+\ FRONT's own read is done), and waited for; fe_song_begin: its read
+\ begun, if it hasn't been since FRONT was read. Nothing else there lasts
+\ out of play but the silo's two records, which the ST keeps from game to
+\ game (init_objects clears the others), so they're kept in ANDY first,
+\ and fe_silo_back puts them back at a game's start, once the song has
+\ stopped, with the lists empty (their first step makes them, before
+\ anything reads them).
+.fe_song_load
+    JSR fe_song_begin
+    JMP disc_wait
+.fe_song_begin
+{
+    LDA fe_song_read : BNE done
+    DEC fe_song_read
+    SEC : JSR fe_silo
+    LDA #LO(LISTS) : STA fe_dst : LDA #HI(LISTS) : STA fe_dst+1
+    LDX #DF_SONG : LDY #BANK_PIC
+    JMP disc_load
+.done
+    RTS
+}
+.fe_silo_back
+    STZ coarse_n : STZ near_n : STZ draw_n
+    CLC
+    \ (on into fe_silo)
+\ fe_silo: the silo's two records into ANDY's silo_kept (C set), or back
+\ (C clear): each of the objects' arrays in main RAM, the two from its
+\ SLOT_TUNNEL on.
+.fe_silo
+{
+    ZA_AUTO2 p
+    ZA_AUTO1 into
+    LDA #0 : ROR A : STA into                   ; (bit 7: into ANDY)
+    LDA #BANK_PIC OR ROMSEL_ANDY : STA bank_now : STA romsel
+    LDA #LO(OBJECTS + SLOT_TUNNEL) : STA p : LDA #HI(OBJECTS + SLOT_TUNNEL) : STA p+1
+    LDX #0
+.array
+    LDY #0
+.slot
+    BIT into : BPL back
+    LDA (p),Y : STA silo_kept,X
+    BRA next
+.back
+    LDA silo_kept,X : STA (p),Y
+.next
+    INX : INY : CPY #2 : BNE slot
+    LDA p : CLC : ADC #OB_SLOTS : STA p
+    BCC same
+    INC p+1
+.same
+    CPX #2 * OB_ARRAYS : BNE array
+    BANK BANK_PIC
+    RTS
+}
+ASSERT SLOT_MISSILE = SLOT_TUNNEL + 1 AND SLOT_MISSILE = OB_SLOTS - 1
 
 \ ---------------------------------------------------------------------------
 \ fe_keys (L_022BA): the K screen, on the screen as the title left its
@@ -576,6 +726,8 @@ ASSERT HS_BYTES <= 256 AND hs_names = hs_scores + 40
     STZ end_state,X
     DEX : BPL zero
     JSR end_bands
+    JSR song_bands                              ; (User VIA T2: the song's channel A lets it go)
+    LDA fields : DEC A : STA band_field         ; (not this sync's: the next restarts them)
     SEI
     LDA #LO(band_irq) : STA irq1v
     LDA #HI(band_irq) : STA irq1v+1
@@ -590,6 +742,7 @@ ASSERT HS_BYTES <= 256 AND hs_names = hs_scores + 40
     LDA #HI(irq_handler) : STA irq1v+1
     LDA #&20 : STA usrvia_ier                   ; T2's interrupt off
     CLI
+    JSR song_bands_off
     LDA #LO(fe_colours) : LDX #HI(fe_colours)
     JMP palette_set
 
@@ -666,7 +819,7 @@ BAND_T2 = BAND_LINES * SCAN_US
 .band_irq
 {
     ZA_INTERRUPT
-    LDA usrvia_ifr : AND #&20 : BEQ not_band
+    LDA usrvia_ifr : AND usrvia_ier : AND #&20 : BEQ not_band  ; (its flag stays past the last band)
     \ the band's colours first, to land in the line's blank, each only if
     \ it changes (eight writes overrun the blank; each table has a byte no
     \ colour is before it, for the first band's to be written)
@@ -692,6 +845,10 @@ BAND_T2 = BAND_LINES * SCAN_US
     RTI
 .not_band
     LDA sysvia_ifr : AND #2 : BEQ engine
+    \ once a sync: the engine may take an interrupt that came before it
+    \ (the title song's) and come back here with the sync still to take
+    LDA fields : CMP band_field : BEQ engine
+    STA band_field
     STZ band_i
     LDA #LO(BAND_FIRST) : STA usrvia_t2cl
     LDA #HI(BAND_FIRST) : STA usrvia_t2ch       ; starts the count
@@ -782,31 +939,39 @@ BAND_T2 = BAND_LINES * SCAN_US
 
 \ fe_scan: every key's state read, a key down that wasn't the last key
 \ made (fe_latch), as the ST's keyboard interrupt latches the last make.
-\ Interrupts off, as the interrupt reads the keys too (input.6502).
+\ FE_SCAN_KEYS keys at a time with interrupts off, as the interrupt reads
+\ the keys too (input.6502), and between them the port as the rest of the
+\ machine has it, the interrupts let in: the title song's ticks and bass
+\ edges aren't held up long by the scan (decision 60).
+FE_SCAN_KEYS = 4
 .fe_scan
 {
+    LDX #BBC_KEYS - 1
+.keys
+    LDY #FE_SCAN_KEYS
     PHP : SEI
     LDA #&7F : STA sysvia_ddra                  ; bits 0-6 the key, bit 7 its state
     LDA #3 : STA sysvia_orb                     ; auto-scan off
-    LDX #BBC_KEYS - 1
 .key
     LDA bbc_keys,X : STA sysvia_ora_nh
     LDA sysvia_ora_nh : BMI down
     STZ fe_down,X
-    DEX : BPL key
-    BRA scanned
+    BRA next
 .down
-    LDA fe_down,X : BNE held
+    LDA fe_down,X : BNE next
     INC fe_down,X
     LDA bbc_keys,X : STA fe_latch
-.held
-    DEX : BPL key
+.next
+    DEX : BMI scanned
+    DEY : BNE key
 .scanned
     LDA #&0B : STA sysvia_orb                   ; auto-scan back
     LDA #&FF : STA sysvia_ddra
     PLP
+    TXA : BPL keys
     RTS
 }
+ASSERT BBC_KEYS <= 128
 
 \ ---------------------------------------------------------------------------
 \ The colours: the ST's fades of 8 VBLs (&06ACC in, from black; &06B3C
@@ -1062,6 +1227,7 @@ ASSERT SCREEN + SCREEN_ROWS * SCREEN_ROW = &8000
 \ paged).
 .fe_state
 .fe_st_colour   EQUB &FF    ; the ST's colour fe_colour set last (&FF: none since FRONT was read)
+.fe_song_read   EQUB 0      ; non-zero once SONG's read has begun since FRONT's (fe_song_begin)
 .fe_elapsed     SKIP 2      ; fields counted from fe_wait_begin
 .fe_latch       SKIP 1      ; the last BBC key made (&FF: none)
 .title_count    SKIP 1      ; the title loop's passes ($29A)
@@ -1084,6 +1250,7 @@ ASSERT SCREEN + SCREEN_ROWS * SCREEN_ROW = &8000
 .end_rain4      SKIP 1      ; ... $2EF
 END_STATE = P% - end_state
 .band_i         SKIP 1      ; band_irq's next band
+.band_field     SKIP 1      ; the field count at the sync band_irq last started them at
                 SKIP 1      ; (end_bands's &FF)
 .band_1         SKIP BANDS  ; by band: logical 1's colour, its byte for the ULA ...
                 SKIP 1

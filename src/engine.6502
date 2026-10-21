@@ -82,7 +82,8 @@ ASSERT LO(SPLIT_LATCH) >= SPLIT_HOLD + 128
 \ ACCCON's D (TSB and TRB, which the line drawer's X changes can't
 \ split), with its colour 0 (decision 24: the ST writes its flash as its
 \ frame is shown), the controls read (input.6502) and the sound's field
-\ (sound.6502); between, the sound effect's ticks, on System VIA T1 while
+\ (sound.6502); between, the title song's bass and tick while it plays
+\ (song_irq.6502), and the sound effect's ticks, on System VIA T1 while
 \ one plays. While a clip of speech plays, the speech's interrupt comes
 \ first and passes the rest on here (speech.6502). It must lie below
 \ &3000, which X moves to shadow RAM.
@@ -100,6 +101,9 @@ ASSERT LO(SPLIT_LATCH) >= SPLIT_HOLD + 128
     NEXT
     JMP done
 .not_split
+    LDA song_on : BEQ not_song                  ; the title song's, out of play (song_irq.6502)
+    JSR song_irq : BCS done                     ; (another waiting comes in again by IRQ1V:
+.not_song                                       ; the end screen's band_irq takes the sync)
     LDA ta_kind : BEQ not_sound                 ; (the OS left T1 running)
     BIT sysvia_ifr : BVC not_sound
     JSR sound_tick

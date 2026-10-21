@@ -12,9 +12,10 @@
 #                 (tools/frontcheck.mjs), the cheat prompt, Interrogate
 #                 and G's model viewer (tools/modalcheck.mjs), the level
 #                 change's flash and fade (tools/flashcheck.mjs), its sound
-#                 effects (make sfx), its speech (make speech), the
-#                 raster on jsbeeb's CRTC and the palette split on it
-#                 (tools/fieldcheck.mjs), and a short soak (tools/soak.mjs)
+#                 effects (make sfx), its speech (make speech), its title
+#                 song (make tune), the raster on jsbeeb's CRTC and the
+#                 palette split on it (tools/fieldcheck.mjs), and a short
+#                 soak (tools/soak.mjs)
 #   make soak     the whole disc played by a random player for a long time,
 #                 a seed a process, watched for crashes, hangs, memory
 #                 written where it shouldn't be and state the ST can't
@@ -28,6 +29,10 @@
 #   make song     the title song's candidates as the SN76489 would play
 #                 them, as WAVs in build/song/wav (decision 5,
 #                 docs/research/song.md)
+#   make tune     the disc's title song against the Spectrum 128K's player
+#                 and the conversion's model, tick by tick, its bass's edges
+#                 timed, and its render against the model's
+#                 (tools/songcheck.mjs, tools/songcompare.py)
 #   make spike    the spike on every captured scene, checked against the
 #                 ST's renderer, with its cycles (tools/scenecheck.py)
 #   make logic    the port's game logic against the ST's, routine by
@@ -58,7 +63,7 @@ ST_STX   = original/st/Starglider (1987)(Rainbird).stx
 PRG      = build/st/STAR.PRG
 SCENES   = flight towers docked missile
 SOURCES  = $(wildcard src/*.6502 src/logic/*.6502)
-GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/anim.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/rotate_data.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/sight.6502 build/gen/ground.6502 build/gen/window.6502 build/gen/panel.6502 build/gen/sfx.6502 build/gen/speech.6502 build/gen/speech_clips.6502 build/gen/interrogate.6502
+GEN      = build/gen/shapes.6502 build/gen/types.6502 build/gen/anim.6502 build/gen/line.6502 build/gen/linemode.6502 build/gen/rotate.6502 build/gen/rotate_data.6502 build/gen/xform.6502 build/gen/objects.6502 build/gen/handlers.6502 build/gen/collide.6502 build/gen/levels.6502 build/gen/sight.6502 build/gen/ground.6502 build/gen/window.6502 build/gen/panel.6502 build/gen/sfx.6502 build/gen/speech.6502 build/gen/speech_clips.6502 build/gen/interrogate.6502 build/gen/song.6502
 
 # A failed step leaves no half-made target behind (asm.sh fails on a
 # warning after baron has written its output).
@@ -70,7 +75,7 @@ BUILD   := $(shell date -u '+%Y-%m-%d %H:%M UTC') $(shell git rev-parse --short 
 TARGET   = build/starglider.ssd
 DISC     = starglider.ssd
 
-.PHONY: all run disc check spike logic view panel rot sfx speech sfxcapture song steps memory fps scenes fetch venv clean soak
+.PHONY: all run disc check spike logic view panel rot sfx speech sfxcapture song tune steps memory fps scenes fetch venv clean soak
 
 all: $(TARGET) build/spike/SPIKE
 
@@ -146,6 +151,12 @@ build/gen/speech.6502 build/gen/speech_clips.6502 build/gen/speech_a.bin build/g
 build/gen/interrogate.6502 build/gen/interrogate.json &: $(PRG) tools/mkinterrogate.py tools/mkpanel.py tools/st_prg.py | build/gen
 	$(PYTHON) -I tools/mkinterrogate.py $(PRG) build/gen/interrogate.6502 build/gen/interrogate.json
 
+# David Lowe's title tune (decision 5): its player's data from the Spectrum
+# 128K's bank 6, as the capture has it (tools/zx_song.py), and the
+# conversion's constants, checked against tools/mksong.py's model.
+build/gen/song.6502: build/zx/song.json tools/mksongdata.py tools/mksong.py tools/zx_song.py | build/gen
+	$(PYTHON) -I tools/mksongdata.py build/zx/song.json $@
+
 # The level layouts (init_objects's), from the ST's STAR.PRG.
 build/gen/levels.6502: $(PRG) tools/mklevels.py tools/st_prg.py | build/gen
 	$(PYTHON) -I tools/mklevels.py $(PRG) build/gen
@@ -179,7 +190,7 @@ build/st build/gen build/spike:
 build/scenes/%/beeb.json: build/scenes/%/scenes.json $(PRG) tools/mkscene.py tools/st_render.py
 	$(PYTHON) -I tools/mkscene.py $(PRG) $< $@
 
-check: build/spike/SPIKE spike panel view rot sfx speech $(TARGET) build/gen/front.json build/starglider.lst
+check: build/spike/SPIKE spike panel view rot sfx speech tune $(TARGET) build/gen/front.json build/starglider.lst
 	$(PYTHON) -I tools/sinecheck.py $(PRG) build/spike
 	node tools/erasecheck.mjs
 	node tools/disccheck.mjs
@@ -233,6 +244,24 @@ song: build/zx/song.json $(PRG) tools/mksong.py tools/mkspeech.py tools/songwav.
 	$(PYTHON) -I tools/mksong.py $(PRG) build/zx/song.json build/song
 	$(PYTHON) -I tools/st_samples.py $(PRG) --wav build/song/st > /dev/null
 	node tools/songwav.mjs build/song
+
+# The title song on the disc (decision 5) against the Spectrum 128K's player
+# and mksong.py's zx_bass conversion of it, tick by tick and edge by edge
+# (tools/songcheck.mjs, on tools/songmodel.py's model of it), and rendered
+# as the chip plays it against the model's render (tools/songcompare.py).
+tune: $(TARGET) build/tune/model.json build/song/wav/zx_bass_chip.wav
+	node tools/songcheck.mjs
+	node tools/songwav.mjs build/tune disc
+	$(PYTHON) -I tools/songcompare.py build/tune/wav/disc_chip.wav build/song/wav/zx_bass_chip.wav --min 0.99
+
+build/tune/model.json: build/zx/song.json tools/songmodel.py tools/mksong.py
+	$(PYTHON) -I tools/songmodel.py build/zx/song.json $@
+
+build/song/zx_bass.json: build/zx/song.json $(PRG) tools/mksong.py tools/mkspeech.py
+	$(PYTHON) -I tools/mksong.py $(PRG) build/zx/song.json build/song
+
+build/song/wav/zx_bass_chip.wav: build/song/zx_bass.json tools/songwav.mjs
+	node tools/songwav.mjs build/song zx_bass
 
 # One pass of the tune's AY writes, from its own player (tools/zx_song.py),
 # on the 128K tape's snapshot (docs/research/zx.md, "Loading").

@@ -8,7 +8,11 @@
 \ what the harness reads back.
 \ ***************************************************************************
 
-ZP_FIXED = &20
+IF DEFINED(SPIKE)
+    ZP_FIXED = &20
+ELSE
+    ZP_FIXED = &22                  ; (and the title song's pointer, below)
+ENDIF
 SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
     \ the products' pointers (maths.6502): mul_init sets the high bytes
 .m_sqlo     SKIP 2
@@ -37,6 +41,11 @@ SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
     \ the speech player's (speech_tick.6502): the byte whose second sample
     \ the next tick writes
 .sp_byte    SKIP 1
+IF NOT(DEFINED(SPIKE))
+    \ the title song's place in its data (song.6502), which its tick reads
+    \ with interrupts on: nothing that interrupts it may share it
+.song_ptr   SKIP 2
+ENDIF
 ENDSECTION
 
 \ The pool stops short of &FC, where the MOS's IRQ entry keeps A.
@@ -173,7 +182,7 @@ ASSERT LO(edge_mark) = 0 AND LO(v_xlo) = 0
 .win_shown  SKIP 2          ; by screen: the m_iris its missile view's window is for (&FF: none)
     \ the disc (disc.6502): the reader's state, what's left of the file
     \ being read, and the game's files as the catalogue has them
-DISC_MAX = 10
+DISC_MAX = 11
 .fdc_state  SKIP 1          ; 0 idle, 1 seeking, 2 reading
 .fdc_cur    SKIP 1          ; the head's track (&FF: not known)
 .fdc_sect   SKIP 1          ; the sector being read, and its track

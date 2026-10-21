@@ -168,3 +168,13 @@ ENV_TWO       = 32
     JSR sfx_begin
     PLA : STA bank_now : STA romsel
     RTS
+
+\ sfx_quiet: an effect playing stopped, as a sample's start or the title
+\ song's stops it (SFX_QUIET's record, in the logic's bank, read with ANDY
+\ out). With interrupts off; A, X and Y go.
+.sfx_quiet
+    LDA bank_now : PHA
+    BANK BANK_LOGIC
+    LDY #SFX_QUIET : JSR sfx_record
+    PLA : STA bank_now : STA romsel
+    RTS
