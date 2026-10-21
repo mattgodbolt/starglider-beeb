@@ -23,7 +23,7 @@
 BASS_T2_EXTRA = 37
 BASS_T2_FIRST = 128
 
-.song_on        SKIP 1      ; non-zero while the song plays (song.6502's song_start)
+.song_on        SKIP 1      ; non-zero while the song plays (front.6502's song_start)
 \ the bass, by channel (A's and C's: B has no timer), which the tick sets
 \ and the edges read
 .bass_half_lo   SKIP 3      ; its half-cycle in microseconds, 0 while it has none ...
@@ -34,7 +34,7 @@ BASS_T2_FIRST = 128
 \ each channel's timer, as an offset from the System VIA's, and none
 .bass_via
     EQUB usrvia_t1cl - sysvia_t1cl, &FF, 0
-ASSERT HI(4 * 1024) <> 0                    ; (bass_half_hi is never 0 while one plays)
+ASSERT HI(SONG_BASS_US * SN_PERIODS) <> 0   ; (bass_half_hi is never 0 while one plays)
 
 \ song_irq: from irq_handler (engine.6502) while the song plays: an edge
 \ of channel C's bass, then A's, then the tick; carry set if it took one,

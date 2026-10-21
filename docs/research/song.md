@@ -5,7 +5,9 @@ song, or David Lowe's AY arrangement from the Spectrum 128K, converted to
 the SN76489. The front end has silent hooks where the ST plays it
 (`song_start`, `song_stop` and `song_if_quiet` in `src/front.6502`). This
 file renders both as the BBC would play them and gives what each would
-cost. It recommends neither: the call is Matt's.
+cost. It recommended neither: the call was Matt's, who on 2026-10-21
+chose David Lowe's tune with timer bass (`zx_bass_chip.wav`). The last
+section, "On the disc", is what was built and how it's checked.
 
 Tags as in the other research files: **[measured]** run or read from the
 bytes, with the tool named; **[source]** a link or another file;
@@ -276,10 +278,99 @@ envelope rate match test tones' to within the measurement's 1.25 Hz
 - **Bass from the periodic noise** clocked by tone 2: the noise channel
   and tone 2 are both in use most of the time here.
 
+## On the disc
+
+Built 2026-10-21 (decision 5, decisions 56-61), with the figures of that
+day [measured: the tools named, on jsbeeb's Master].
+
+**What it is.**
+
+- **SONG** (`src/song.6502`), a file of its own, read beside FRONT into
+  main RAM's lists' and objects' memory, which nothing uses out of play
+  but the silo's two records (decision 56). Its player is the Z80's,
+  routine for routine, each variable named after the Z80's address,
+  playing the tune's own data: `tools/mksongdata.py` takes bank 6's bytes
+  from the capture, walks them by the player's rules as `zx_song.py`
+  does, and writes them as 6502 source, each pointer a label, each other
+  byte the Spectrum's (`build/gen/song.6502`, 2,210 bytes). One catch:
+  list C's last two bytes, &1C and &FF, are the pattern table's entry 0,
+  which no list names.
+- The conversion is `mksong.py`'s `zx_bass`, at each tick from the
+  player's copy of the AY's registers (decision 61): the period scaled by
+  SONG_K, ym2sn.py's volumes, the envelope's steps counted a tick at a
+  time, the noise at the SN's two rates. The build makes the constants
+  and checks them exact against the model for every period the tune has
+  and every tick of two passes.
+- **The interrupt's part** (`src/song_irq.6502`, below &3000): the tick,
+  on System VIA T1 at 6,766 µs, its work with interrupts on and ACCCON's
+  X clear (decision 60); the bass's edges, channel C on System VIA T2 and
+  channel A on User VIA T2 (decision 58), each one-shot started again at
+  its edge for the next half-cycle less its lateness, the first a
+  half-cycle from its tick's moment. On the end screen, whose bands have
+  User VIA T2, A's low notes go up an octave.
+- **The hooks** are the ST's, in FRONT: `song_if_quiet` at each title
+  and credits pass and before the high scores' table, `song_start` after
+  the pilot rating, `song_stop` at a game's start. The tune goes round as
+  the Spectrum's does (decision 59). No effect starts while it plays, as
+  the ST's `sfx_start` doesn't while its song, a sample, plays (decision
+  57).
+
+**How it's checked** (`make tune`, in `make check`):
+
+- `tools/songcheck.mjs` boots the disc to its title and plays the song
+  for a pass and 2,000 ticks into the next. After every tick the
+  player's AY registers 0-13, and whether register 13 was written, are
+  the capture's, all 25,040 ticks. The chip as the disc wrote it is
+  `tools/songmodel.py`'s record of `mksong.py`'s conversion after every
+  tick: each channel's period and attenuation, a bass channel's period 1
+  and its half-cycle and level, the noise's control and attenuation and
+  how often the tick wrote the control; all 25,040.
+- The edges: 18,963 in the pass against the model's 18,962, and 228 more
+  between a run's last tick and the tick's work stopping it. Each from
+  its due moment (its tick's, then a half-cycle on from the last edge's):
+  -1.5 µs at the median, 150 µs late at the 99th percentile, 250 µs at
+  worst. The tick: 147.798 Hz, each tick within 2 µs (the count's read)
+  of 6,766 µs from the last.
+- With the bands taking A's timer, 6,000 ticks: A's low notes (1,232
+  ticks of them) are `convert`'s octaves.
+- The envelope's level for each of its sixteen shapes at 80 steps, most
+  of which the tune never reaches, is `mksong.py`'s `envelope`'s.
+- The pass as the chip took it is rendered through jsbeeb's SN as
+  `tools/songwav.mjs` renders the model (`build/tune/wav/disc_chip.wav`),
+  and compared with `zx_bass_chip.wav` by `tools/songcompare.py`: spectra
+  every 50 ms in 48 bands from 50 Hz to 8 kHz correlate 0.9975 on
+  average, 0.991 at the 1st percentile, 0.829 at worst; the loudness
+  -0.5 dB against the model's -0.4 (RMS against one tone channel at full
+  volume, songwav's).
+
+**What it costs.**
+
+- On the title: the tick's interrupts 3,026 cycles a field (1,025 a tick,
+  the work 915 on average), the bass's 609 (253 an edge, 2.40 a field):
+  9.1% of the CPU. Interrupts off at most 436 µs at a time, at the song's
+  start; the key scan's chunks 83 µs (the scan 4,065 cycles a field,
+  where the whole keyboard with interrupts off was about 2,600).
+- Its read: 14 sectors; 0.6 s more before the title at the start, 0.46 s
+  more after Esc, none at a game's end (`tools/frontcheck.mjs`). The
+  title's unpacking and fade take 41 fields, 37 before.
+- Memory: SONG 3,531 bytes of the lists' and objects' 3,550; the
+  interrupt's part and its state in main RAM, below &3000.
+- On the end screen, C's edges and the tick move 3.65% of the bands'
+  colour changes more than 12 µs into their lines, 0.54% by more than a
+  line, 162.5 µs at worst; without the song none moves more than 6.5 µs
+  (measured with a scratch harness, decision 58).
+
+**Not heard here.** Real hardware: the edges' timing and the chip's
+taking of each byte are jsbeeb's.
+
 ## The tools
 
 | Tool | What it does |
 |---|---|
-| `tools/zx_song.py` | Runs the 128K's attract screen on the contended simulator, stops at each of the tune's ticks and logs one pass of AY writes, checked to repeat; walks the tune's data as the player reads it (`build/zx/song.json`) |
-| `tools/mksong.py` | The ST's song resampled and quantised at 4,096 and 6,144 Hz, the tune converted to the SN both ways, as timed chip writes; the costs and the tune's register use (`build/song/*.json`, `costs.json`) |
+| `tools/zx_song.py` | Runs the 128K's attract screen on the contended simulator, stops at each of the tune's ticks and logs one pass of AY writes, checked to repeat; walks the tune's data as the player reads it, and keeps bank 6's bytes (`build/zx/song.json`) |
+| `tools/mksong.py` | The ST's song resampled and quantised at 4,096 and 6,144 Hz, the tune converted to the SN both ways, as timed chip writes; the costs and the tune's register use (`build/song/*.json`, `costs.json`); its `convert` also records each tick's state, plays on into the loop, and takes the bass channel by channel |
 | `tools/songwav.mjs` | Renders each through jsbeeb's SN76489, resampler and output stages, and the AY's writes through a model of the AY (`build/song/wav`) |
+| `tools/mksongdata.py` | The disc's tune: bank 6's data as the player reads it, as 6502 source, and the conversion's constants, checked against `mksong.py` (`build/gen/song.6502`) |
+| `tools/songmodel.py` | `mksong.py`'s conversion tick by tick, a pass and 2,000 ticks more, and with channel A's octaves, for the check (`build/tune/model.json`) |
+| `tools/songcheck.mjs` | The disc's song on jsbeeb against the capture and the model, tick by tick, its edges and its tick timed, and its cost (`build/tune/disc.json`) |
+| `tools/songcompare.py` | The disc's render against the model's: spectra and loudness |

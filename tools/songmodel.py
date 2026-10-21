@@ -13,7 +13,8 @@ attenuations as last written (a bass channel's attenuation is its edges');
 the noise's control and how many times the tick wrote it; each channel's
 bass half-cycle in microseconds (0 for none) and its attenuation. Then the
 pass's bass edges, from the conversion's own writes: for each bass
-channel, how many in the pass.
+channel, how many in the pass. And the envelope's level for every shape
+at each of ENV_STEPS steps, mksong.py's, of which the tune uses few.
 """
 import argparse
 import json
@@ -25,6 +26,7 @@ import mksong  # noqa: E402
 
 LOOP = 2000                             # ticks past the pass (zx_song.py's CHECK)
 BANDS = 6000                            # ticks with channel A's octaves
+ENV_STEPS = 80                          # the envelope's steps checked, each shape: five cycles
 
 
 def flat(r):
@@ -51,6 +53,8 @@ def main():
                                  "half0", "half1", "half2", "held0", "held1", "held2"],
         "records": [flat(r) for r in records],
         "bands": [flat(r) for r in bands],
+        # the envelope's level by shape (register 13) and steps, mksong.py's
+        "envelope": [[mksong.envelope(s, q) for q in range(ENV_STEPS)] for s in range(16)],
     }
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(out) + "\n")

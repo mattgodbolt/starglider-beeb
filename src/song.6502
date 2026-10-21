@@ -11,14 +11,15 @@
 \ of the AY's registers. Each tick then makes the SN's registers from them
 \ as tools/mksong.py's zx_bass models it, which is what Matt chose by ear
 \ (decision 5): each AY channel on the SN's tone channel of its number,
-\ its period scaled by the chips' clocks (SONG_K), its volume through ym2sn.py's table
-\ (sg_volume), the envelope's level counted at the tick, the noise as loud
-\ as the loudest channel the mixer gives it to; a note below the SN's
-\ lowest played at its pitch by a timer switching its volume
-\ (song_irq.6502), or with no timer taken up octaves. Only what changes is
-\ written. The tick is song_irq.6502's, at SONG_TICK_US, and its work runs
-\ with interrupts on and ACCCON's X clear. The front end's calls, which
-\ start it and stop it (song_start, song_stop), are FRONT's (front.6502).
+\ its period scaled by the chips' clocks (SONG_K), its volume through
+\ ym2sn.py's table (sg_volume), the envelope's level counted at the tick,
+\ the noise as loud as the loudest channel the mixer gives it to; a note
+\ below the SN's lowest played at its pitch by a timer switching its
+\ volume (song_irq.6502), or with no timer taken up octaves (decision 61).
+\ Only what changes is written. The tick is song_irq.6502's, at
+\ SONG_TICK_US, and its work runs with interrupts on and ACCCON's X clear
+\ (decision 60). The front end's calls, which start it and stop it
+\ (song_start, song_stop), are FRONT's (front.6502).
 \ ***************************************************************************
 
 ASSERT SONG_ENV_BITS = 8            ; (envelope: E's bytes one up are E in its units)
@@ -233,9 +234,9 @@ SN_PERIODS = 1024                   ; the SN's periods, 10 bits
     LDA sg_env_q+1 : BNE cycled
     LDA sg_env_q : CMP #16 : BCC within         ; the first cycle
 .cycled
-    LDA sg_shape : LSR A : BCC cycles           ; (not held)
+    LDA sg_shape : LSR A : BCC cycles           ; (not held; alternate now bit 0)
     DEC sg_env_held                             ; (from 0: it holds from here)
-    LSR A : AND #1 : EOR sg_up                  ; held: up if it rose and didn't alternate, or the other way
+    AND #1 : EOR sg_up                          ; held: up if it rose and didn't alternate, or fell and did
     BEQ got
     LDA #15
     BRA got

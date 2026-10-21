@@ -167,8 +167,10 @@ def check_periods(ratio, k, every):
             q /= 2
             n = round(q * ratio)
             octaves += 1
-        if octaves > OCTAVES or sn_period(p, k, octaves) != n or (octaves and sn_period(p, k, octaves - 1) < mksong.SN_PERIODS):
-            raise SystemExit(f"period {p} up {octaves} octaves: the SN's {sn_period(p, k, octaves)}, mksong.py's {n}")
+        early = octaves and sn_period(p, k, octaves - 1) < mksong.SN_PERIODS
+        if octaves > OCTAVES or sn_period(p, k, octaves) != n or early:
+            raise SystemExit(f"period {p} up {octaves} octaves: the SN's {sn_period(p, k, octaves)}, "
+                             f"mksong.py's {n}")
 
 
 def check_envelope(cap, tick_s, step):

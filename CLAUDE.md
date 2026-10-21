@@ -68,6 +68,11 @@ make sfx        # the sound effects on the disc against the ST's YM writes,
 make sfxcapture # capture the ST's effects in Hatari (slow; build/sfx/all)
 make song       # the title song's two candidates as the SN76489 would play
                 # them, WAVs in build/song (docs/research/song.md)
+make tune       # the disc's title song against the Spectrum 128K's AY
+                # registers and mksong.py's zx_bass model, every tick of a
+                # pass and into the loop, its bass's edges timed, and its
+                # render against the model's (in make check;
+                # tools/songcheck.mjs, tools/songcompare.py)
 make soak       # the whole disc played by a random player, a seed a process
                 # (tools/soak.mjs; SOAK_SEEDS, SOAK_SECS, SOAK_JOBS): the PC,
                 # every write, the stack, the interrupts, the logic's state,
@@ -99,7 +104,11 @@ clearing it is cheaper, erased by `src/box.6502` in bank 7: decision 20). Out of
 play the loading area (bank 7) holds the front end (FRONT, `src/front.6502`:
 the title, the credits, the K screen, the game's end; the start loads it,
 and `src/front_main.6502` loads it at a game's end and on Esc, and loads
-WINDOW and SPEECH back at a game's start). In play it holds WINDOW: the missile view's
+WINDOW and SPEECH back at a game's start), and the lists and objects hold
+the title song (SONG, `src/song.6502`: David Lowe's tune, the Spectrum
+128K's player transcribed, playing its own data from `tools/mksongdata.py`),
+read beside FRONT, the silo's two records kept in ANDY meanwhile; its tick
+and bass edges are `src/song_irq.6502`'s. In play it holds WINDOW: the missile view's
 window, its picture (`tools/mkcockpit.py --window`) and the draw phase's
 view code (`src/view_under.6502`: the gunsight, the ground dots,
 `src/mview.6502`), which runs there with ANDY paged; the bolt and the
@@ -160,7 +169,21 @@ the ST's mouse moves.
 - SG is two parts: the resident code (`Main`, its budget `MAIN_TOP`) and
   `start.6502`, run once after it, which may run on over the lists and
   objects since nothing uses them until `play` clears the objects. Code
-  run once at start goes there, not in the resident part.
+  run once at start goes there, not in the resident part. Out of play
+  SONG lies there instead: a harness hooking SONG's addresses must wait
+  for `song_start`, as the start's code runs at them first.
+- The title song's tick (`src/song_irq.6502`) works with interrupts on,
+  so what the other interrupts run nests in it: none of that may use a
+  `ZA_AUTO` variable (baron gives interrupt routines' variables shared
+  places), and the song's pointer is fixed (`song_ptr`). A song interrupt
+  ends at once: another waiting comes in again through IRQ1V, which the
+  end screen's `band_irq` must see first, for the sync.
+- The SN's latch byte and data byte go with interrupts off between them:
+  a bass edge's volume byte between would take the data byte.
+- FRONT must end below WINDOW's `near_outside`: G's viewer calls it in
+  bank 7, where it's left from the last game's WINDOW (`ASSERT`ed).
+- A FRONT (bank 7) variable, read by a harness, is at jsbeeb's
+  `romOffset + 7 * 16384 + (address - &8000)`, not at its address.
 `node tools/scenerun.mjs SCENES OUT --profile 37` samples where the cycles
 go. On the disc, `tools/listprof.mjs` splits world_lists into its parts and
 `tools/stepprof.mjs` times named routines a step, both holding keys. `tools/missilefps.mjs` times a missile view on the disc, its slide and

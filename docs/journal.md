@@ -1685,3 +1685,77 @@ that too (waitingforvsync/baron#33, 8d09f3c). On 8d09f3c the branch,
 as v0.6.0 on 2026-10-21, which the README now names. nm and Chuckie Egg
 2, which build from the same `../baron`, assemble every disc byte for byte
 as they did on 0.5.3 but for !BOOT's stamp, so `../baron` moved to it.
+
+## 2026-10-21
+
+### The title song
+
+Matt listened to the candidates and chose the third: David Lowe's tune
+from the Spectrum 128K with timer bass, `zx_bass_chip.wav` (decision 5).
+It's on the disc now, the front end's last silence filled
+(`docs/research/song.md`, "On the disc").
+
+- **Where it lives.** The player and the tune's data are 3,531 bytes,
+  and FRONT had room for half that, less below WINDOW's `near_outside`:
+  G's viewer calls it in bank 7, where FRONT's load leaves the last
+  game's WINDOW above FRONT's own end. That dependency was nowhere
+  written; it's `ASSERT`ed now. So the song is SONG, a file over the
+  lists and the objects, which nothing uses out of play but the silo's
+  two records, kept in ANDY while SONG lies over them (decision 56).
+- **The player** is the Z80's transcribed, its variables named by their
+  addresses, on data `tools/mksongdata.py` takes from the capture's bank
+  6. A first full pass matched the Spectrum's AY registers for 22,784
+  ticks and then went wrong: list C's last two bytes, &1C and &FF, are
+  the pattern table's unused entry 0, and the generator had left the
+  whole table's range out of the lists. With them, every tick of a pass
+  and 2,000 into the loop is the Spectrum's.
+- **The conversion** is `mksong.py`'s `zx_bass`, per tick, its constants
+  the build's (decision 61). The period's scale wants 14 bits:
+  nm's 1155/1024 puts two of the tune's periods one out. The envelope's
+  steps are counted a tick at a time in 8 fractional bits, which gives
+  the model's floor at every tick of two passes. The tune reaches few of
+  the envelope's shapes and steps, so the check also takes the level for
+  all sixteen shapes at 80 steps each against `mksong.py`'s: it found the
+  shapes that end held high (11 and 13) held at 0, the attack bit read
+  for the alternate one, which no tick of the tune shows.
+- **The timers** (decision 58): the tick on System VIA T1, free while the
+  song plays because no effect starts then, as the ST's `sfx_start`
+  doesn't while its song, a sample, plays (decision 57); channel C's
+  bass on System VIA T2, channel A's on User VIA T2, its notes an octave
+  up on the end screen, whose bands have that timer.
+- **Measured edges.** The first runs put every half-cycle 11 µs long and
+  each run's first edge 108 µs late: the one-shot's restart loses 37 µs,
+  not the 26 guessed, and an edge's write comes about 90 µs after its
+  time-out. With BASS_T2_EXTRA 37 and the first count started 128 µs
+  early, the edges sit on their line, -1.5 µs at the median; the latest
+  wait behind the other channel's edge at the same moment and the sync's
+  interrupt (150 µs at the 99th percentile, 250 at worst).
+- **The tick's cost.** First built, a tick took 1,595 cycles; the
+  channels' conversion was 40% of it, done in full every tick. A period
+  as it was now leaves only the level to write, and the envelope's level
+  is made only when it steps: 1,025 cycles a tick, 9.1% of the CPU on the
+  title with the bass. Its work runs with interrupts on and ACCCON's X
+  clear (decision 60).
+- **The key scan** held interrupts off for the whole keyboard; four keys
+  at a time it holds them 83 µs, and costs 4,065 cycles a field where it
+  was about 2,600.
+- **The end screen's bands.** With the song, some fields' bands came 4 ms
+  late or not at all. The engine looked for another interrupt after a
+  song's, and so could take the sync behind `band_irq`, which starts the
+  bands at each sync; and a sync come back to after a song's interrupt
+  started them a second time, later. A song interrupt now ends at once,
+  and `band_irq` starts them once a sync. It had also taken T2's flag,
+  left at each sync from the last band, as a band past its tables, which
+  moved a field's bands by 85 µs in some fields, song or none; it takes
+  T2 only while its interrupt is on. Without the song the bands now land
+  within 6.5 µs of their places; with it, C's edges and the tick move
+  3.65% of the colour changes more than 12 µs into their lines.
+- **The checks.** `make tune` (in `make check`): `tools/songcheck.mjs`
+  against the capture's AY registers and `tools/songmodel.py`'s record of
+  the model's SN, every tick; the edges and the tick timed; the bands'
+  octaves; and the disc's render against the model's, spectra correlating
+  0.9975 on average (`tools/songcompare.py`). The soak knows SONG's
+  image, which a game's start lets go; disccheck compares it; at a
+  second game's first step the soak found the lists' counts the last
+  game's over SONG's bytes, which nothing read, and the silo's return
+  now empties them.

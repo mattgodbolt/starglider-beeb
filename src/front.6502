@@ -800,13 +800,13 @@ END_BANDS_TOP = 104 DIV BAND_LINES              ; (the boxes of 3 and 5 above, 4
 }
 
 \ band_irq: IRQ1V while the end screen shows, as the ST's Timer B changes
-\ its colours every 4 lines (sub_0768A): User VIA T2, free out of play,
-\ comes every BAND_LINES lines from the screen's top (started at each
-\ vertical sync), and puts logical 1 and 2 in the band's colours (band_1
-\ and band_2, the ULA's bytes, end_bands's); anything else is the
-\ engine's (engine.6502). It can be here, in bank 7, as nothing pages
-\ another bank meanwhile but the interrupt itself (sound_vsync), which
-\ puts it back.
+\ its colours every 4 lines (sub_0768A): User VIA T2, which the title
+\ song's channel A lets go meanwhile (song_bands), comes every BAND_LINES
+\ lines from the screen's top (started at each vertical sync), and puts
+\ logical 1 and 2 in the band's colours (band_1 and band_2, the ULA's
+\ bytes, end_bands's); anything else is the engine's (engine.6502). It can
+\ be here, in bank 7, as nothing pages another bank meanwhile but the
+\ interrupt itself (sound_vsync), which puts it back.
 BAND_LINES = 4
 BANDS = SCREEN_ROWS * 8 DIV BAND_LINES
 \ BAND_ADJ: the palette split's adjustment when the vertical sync's
@@ -956,7 +956,9 @@ FE_SCAN_KEYS = 4
     LDA bbc_keys,X : STA sysvia_ora_nh
     LDA sysvia_ora_nh : BMI down
     STZ fe_down,X
-    BRA next
+    DEX : BMI scanned
+    DEY : BNE key
+    BRA scanned
 .down
     LDA fe_down,X : BNE next
     INC fe_down,X

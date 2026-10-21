@@ -7,8 +7,9 @@ the BBC Master 128, with Argonaut's blessing.
 (a Master 128), or write `starglider.ssd` to a disc and SHIFT-BREAK a
 Master.
 
-The disc is the whole game but for the title song, which is still to be
-chosen. It has the title and the credits (any key starts a game, K
+The disc is the whole game. It has the title and the credits, to David
+Lowe's title tune from the Spectrum 128K version, its own player and
+data on the SN76489, its bass at pitch (any key starts a game, K
 redefines the keys), the flight with its panel, sound effects and
 Clare Edgeley's speech, docking, Interrogate, the cheat, the level
 changes, and at the game's end the pilot rating, the high scores and the
@@ -63,8 +64,8 @@ port is checked against it in a headless
 You need [baron](https://github.com/waitingforvsync/baron) 0.6.0 (at
 `../baron/build/src/baron`, or on the PATH), Node.js, Python 3 and
 [uv](https://github.com/astral-sh/uv). The build reads the ST's program
-for its shapes, so `make fetch` must come first; nothing of the original
-is committed.
+for its shapes and the Spectrum 128K's tape for its title tune, so `make
+fetch` must come first; nothing of the original is committed.
 
 ```sh
 npm ci          # the jsbeeb harness

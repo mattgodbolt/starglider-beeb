@@ -21,6 +21,8 @@
 // 5. With the end screen's bands taking channel A's timer (song_bands),
 //    BANDS ticks from the song's start: channel A's low notes an octave up,
 //    as the model's bands record has them, the rest as before.
+// 6. The envelope's level, every shape at every step the model gives,
+//    which the tune itself reaches few of.
 //
 // It writes the pass as the chip took it, build/tune/disc.json (tools/
 // songwav.mjs's input: the Makefile's tune renders it and compares it
@@ -348,4 +350,42 @@ if (bandBad) fail(`with the bands, ${bandBad} of ${model.bands.length} ticks dif
 else console.log(`songcheck: with the end screen's bands, ${model.bands.length} ticks: channel A's low notes ` +
     `(${lowA} ticks of them) an octave up, as the model's`);
 if (!lowA) fail("the bands' ticks have none of channel A's low notes to check");
+
+// --- 6: the envelope's level, every shape at every step the model gives,
+// most of which the tune never reaches: from a stub, interrupts off, with
+// the front end waiting for a field ---
+{
+    const { tm, cpu, ram } = bandRun.m;
+    await tm.runUntilAddress(sym["fe_field.wait"], 5, { bank: sym.BANK_PIC });
+    const IDLE = 0x0140, STUB = 0x0143;
+    ram.set([0x4c, IDLE & 0xff, IDLE >> 8], IDLE);
+    const call = async (routine) => {
+        ram.set([0x20, routine & 0xff, routine >> 8, 0x4c, IDLE & 0xff, IDLE >> 8], STUB);
+        cpu.p.i = true;
+        cpu.pc = STUB;
+        await tm.runUntilAddress(IDLE, 1);
+    };
+    let envBad = 0, steps = 0;
+    for (let s = 0; s < 16; s++) {
+        const want = model.envelope[s];
+        ram[sym.sg_ay + 13] = s;
+        ram[sym.sg_restart] = 0xff;
+        await call(sym.envelope);
+        for (let q = 0; q < want.length; q++) {
+            if (q) {
+                ram[sym.sg_env_q] = q & 0xff;
+                ram[sym.sg_env_q + 1] = q >> 8;
+                ram[sym.sg_env_held] = 0;
+                await call(sym["envelope.level"]);
+            }
+            steps++;
+            if (ram[sym.sg_env_level] !== want[q]) {
+                if (!envBad) fail(`the envelope's shape ${s} at step ${q}: level ${ram[sym.sg_env_level]}, the model's ${want[q]}`);
+                envBad++;
+            }
+        }
+    }
+    if (envBad) fail(`the envelope's level differs at ${envBad} of ${steps} shapes and steps`);
+    else console.log(`songcheck: the envelope's level, ${steps} shapes and steps: the model's`);
+}
 process.exit(bad ? 1 : 0);
